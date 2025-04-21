@@ -1,0 +1,8 @@
+python-telegram-bot[webhooks]
+python-dotenv
+pillow
+imagehash
+openai
+requests
+gunicorn
+gevent
