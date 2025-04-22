@@ -291,7 +291,6 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
-    …
     # Fase inicio
     if est["fase"] == "inicio":
         …
