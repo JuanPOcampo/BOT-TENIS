@@ -291,16 +291,28 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             est["fase"] = "esperando_imagen"
             await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
             return
+    # dentro de responder(), en el nivel de la función (4 espacios)
+    if est["fase"] == "esperando_comando":
+        # … tus otras comprobaciones aquí (8 espacios) …
+        if "imagen" in txt or "foto" in txt:
+            est["fase"] = "esperando_imagen"
+            await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
+            return
 
-        # ——— Detección aproximada de marca (esta es la clave) ——————————————————
-        palabras_usuario = txt.split()
+        # detección de marca por tokens (8 espacios)
+    if est["fase"] == "esperando_comando":
+        # … tus otras comprobaciones …
+
+        #     Detección aproximada de marca con difflib ——————————————————
+        palabras_usuario = txt.split()  # tokens del mensaje del usuario
         for m in obtener_marcas_unicas(inv):
-            tokens_marca = normalize(m).split()
+            tokens_marca = normalize(m).split()  # tokens de la marca
             for tok in tokens_marca:
+                # busca coincidencias cercanas con cutoff=0.6
                 match = difflib.get_close_matches(tok, palabras_usuario, n=1, cutoff=0.6)
                 if match:
                     est["marca"] = m
-                    est["fase"] = "esperando_modelo"
+                    est["fase"]  = "esperando_modelo"
                     await update.message.reply_text(
                         f"¡Genial! Veo que buscas {m}. ¿Qué modelo de {m} te interesa?",
                         reply_markup=menu_botones(obtener_modelos_por_marca(inv, m))
