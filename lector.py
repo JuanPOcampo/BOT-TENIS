@@ -42,6 +42,8 @@ creds = service_account.Credentials.from_service_account_info(
 )
 drive_service = build("drive", "v3", credentials=creds)
 
+DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
+
 PHASH_THRESHOLD = 15
 AHASH_THRESHOLD = 12
 
