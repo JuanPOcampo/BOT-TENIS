@@ -34,16 +34,11 @@ from telegram.ext import (
     filters,
 )
 
-# ——— LOGGING —————————————————————————————————————————————
-logging.basicConfig(level=logging.INFO)
-
-# ——— GOOGLE DRIVE CONFIG —————————————————————————————————————————
-SERVICE_ACCOUNT_FILE = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
-DRIVE_FOLDER_ID      = os.environ["DRIVE_FOLDER_ID"]
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
-
-creds = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE, scopes=SCOPES
+# Carga la credencial desde el secret de Render
+creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
+creds = service_account.Credentials.from_service_account_info(
+    creds_info,
+    scopes=["https://www.googleapis.com/auth/drive.readonly"],
 )
 drive_service = build("drive", "v3", credentials=creds)
 
