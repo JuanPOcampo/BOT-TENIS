@@ -291,15 +291,23 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
-    # Fase inicio
+
+    # ← Añade este bloque:
+    if cid not in estado_usuario:
+        reset_estado(cid)
+    est = estado_usuario[cid]
+    inv = obtener_inventario()
+    txt_raw = update.message.text or ""
+    txt = normalize(txt_raw)
+    # ← hasta aquí
+
+    # Ahora sí puedes usar est, inv, txt, txt_raw:
     if est["fase"] == "inicio":
-     
+        await saludo_bienvenida(update, ctx)
+        est["fase"] = "esperando_comando"
         return
 
-    # dentro de async def responder(update, ctx):  ← 4 espacios
-    #     … después de manejar la fase "inicio"  ← 8 espacios
-        # ─── Fase: esperando_comando ──────────────────────────────────────────
-        if est["fase"] == "esperando_comando":
+    # …y el resto de tus fases…
             # 1) Comandos estáticos
             if txt in ("menu", "inicio"):
                 reset_estado(cid)
