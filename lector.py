@@ -305,6 +305,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     # ——— Fase esperando_comando —————————————————————————————
+    # ——— Fase esperando_comando —————————————————————————————
     if est["fase"] == "esperando_comando":
         # 1) Comandos estáticos
         if txt in ("menu", "inicio"):
@@ -343,40 +344,34 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # … aquí sigue detección de marca …
+        # 2) Detección de marca
+        marcas = obtener_marcas_unicas(inv)
+        elegido = None
+        palabras = txt.split()
 
-    # … resto de fases (esperando_modelo, etc.) …
+        for marca in marcas:
+            tokens = normalize(marca).split()  # ej. ["dolce","gabbana"]
+            # 2a) Si alguno de esos tokens aparece literalmente
+            if any(tok in palabras for tok in tokens):
+                elegido = marca
+                break
+            # 2b) Si difflib devuelve una coincidencia aproximada
+            if any(difflib.get_close_matches(tok, palabras, n=1, cutoff=0.6) for tok in tokens):
+                elegido = marca
+                break
 
+        # 3) Si detecta marca, pasamos a la fase intermedia
+        if elegido:
+            est["marca"] = elegido
+            est["fase"] = "confirmar_modelo_o_ver"
+            await update.message.reply_text(
+                f"Tengo estos modelos de {elegido} disponibles: básicos o performance.\n"
+                "¿Sabes cuál quieres o prefieres que te muestre imágenes?",
+                reply_markup=menu_botones(["Sé el modelo", "Ver imágenes"])
+            )
+            return
 
-            # 2) Detección de marca
-            marcas = obtener_marcas_unicas(inv)
-            logging.debug(f"[Chat {cid}] marcas={marcas}, txt={txt!r}")
-
-            # 2a) Por substring (pilla “ds”, “nike”…)
-            elegido = next((m for m in marcas if normalize(m) in txt), None)
-
-            # 2b) Si no, por difflib (tipeos)
-            if not elegido:
-                palabras = txt.split()
-                for m in marcas:
-                    for tok in normalize(m).split():
-                        if difflib.get_close_matches(tok, palabras, n=1, cutoff=0.6):
-                            elegido = m
-                            break
-                    if elegido:
-                        break
-
-            # 3) Si detectó marca, vamos a fase intermedia
-            if elegido:
-                logging.info(f"Marca detectada: {elegido}")
-                est["marca"] = elegido
-                est["fase"] = "confirmar_modelo_o_ver"
-                await update.message.reply_text(
-                    f"Tengo estos modelos de {elegido} disponibles: básicos o performance.\n"
-                    "¿Sabes cuál quieres o prefieres que te muestre imágenes?",
-                    reply_markup=menu_botones(["Sé el modelo","Ver imágenes"])
-                )
-                return
+        # ← Aquí vendría el fallback de marca si no hay coincidencias →
 
             # 4) Fallback
             await update.message.reply_text("No entendí tu elección. Usa /start para volver al menú.")
