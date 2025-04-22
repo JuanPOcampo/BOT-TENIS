@@ -3,7 +3,6 @@ import io
 import logging
 from dotenv import load_dotenv
 load_dotenv()
-
 import imagehash
 from PIL import Image
 from openai import AsyncOpenAI
@@ -269,6 +268,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if est["fase"] == "esperando_comando":
+        # 1) Comandos estáticos
         if txt in ("menu", "inicio"):
             reset_estado(cid)
             await saludo_bienvenida(update, ctx)
@@ -279,7 +279,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
         if any(k in txt for k in ("cambio", "reembol", "devolucion")):
             est["fase"] = "esperando_numero_devolucion"
-            await update.message.reply_text("Envíame el número de venta para realizar la devolución del pedido.", reply_markup=ReplyKeyboardRemove())
+            await update.message.reply_text(
+                "Envíame el número de venta para realizar la devolución del pedido.",
+                reply_markup=ReplyKeyboardRemove()
+            )
             return
         if re.search(r"\b(catálogo|catalogo)\b", txt):
             reset_estado(cid)
@@ -291,36 +294,40 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             est["fase"] = "esperando_imagen"
             await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
             return
-    # dentro de responder(), en el nivel de la función (4 espacios)
-    if est["fase"] == "esperando_comando":
-        # … tus otras comprobaciones aquí (8 espacios) …
-        if "imagen" in txt or "foto" in txt:
-            est["fase"] = "esperando_imagen"
-            await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
+
+        # 2) Detección de marca
+        marcas = obtener_marcas_unicas(inv)
+        logging.debug(f"[Chat {cid}] txt_norm={txt!r} | marcas={marcas}")
+
+        # 2a) Primero por substring (útil para siglas como “DS”)
+        elegido = next((m for m in marcas if normalize(m) in txt), None)
+
+        # 2b) Si no, por tokens + difflib
+        if not elegido:
+            palabras_usuario = txt.split()
+            for m in marcas:
+                for tok in normalize(m).split():
+                    if difflib.get_close_matches(tok, palabras_usuario, n=1, cutoff=0.6):
+                        elegido = m
+                        break
+                if elegido:
+                    break
+
+        if elegido:
+            logging.info(f"Marca detectada: {elegido}")
+            est["marca"] = elegido
+            est["fase"] = "esperando_modelo"
+            await update.message.reply_text(
+                f"¡Genial! Veo que buscas {elegido}. ¿Qué modelo de {elegido} te interesa?",
+                reply_markup=menu_botones(obtener_modelos_por_marca(inv, elegido))
+            )
             return
 
-        # detección de marca por tokens (8 espacios)
-    if est["fase"] == "esperando_comando":
-        # … tus otras comprobaciones …
-
-        #     Detección aproximada de marca con difflib ——————————————————
-        palabras_usuario = txt.split()  # tokens del mensaje del usuario
-        for m in obtener_marcas_unicas(inv):
-            tokens_marca = normalize(m).split()  # tokens de la marca
-            for tok in tokens_marca:
-                # busca coincidencias cercanas con cutoff=0.6
-                match = difflib.get_close_matches(tok, palabras_usuario, n=1, cutoff=0.6)
-                if match:
-                    est["marca"] = m
-                    est["fase"]  = "esperando_modelo"
-                    await update.message.reply_text(
-                        f"¡Genial! Veo que buscas {m}. ¿Qué modelo de {m} te interesa?",
-                        reply_markup=menu_botones(obtener_modelos_por_marca(inv, m))
-                    )
-                    return
-
-        # ——— Fallback si no detectó nada ————————————————————————————————
-        await update.message.reply_text("No entendí tu elección. Usa /start para volver al menú.")
+        # 3) Fallback
+        logging.debug("No detectó ninguna marca en esperando_comando")
+        await update.message.reply_text(
+            "No entendí tu elección. Usa /start para volver al menú."
+        )
         return
 
     # Rastrear pedido
