@@ -293,7 +293,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
     # Fase inicio
     if est["fase"] == "inicio":
-        …
+     
         return
 
     # dentro de async def responder(update, ctx):  ← 4 espacios
