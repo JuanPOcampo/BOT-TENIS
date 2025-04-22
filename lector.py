@@ -291,49 +291,62 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
-
-    # ← Añade este bloque:
     if cid not in estado_usuario:
         reset_estado(cid)
     est = estado_usuario[cid]
     inv = obtener_inventario()
     txt_raw = update.message.text or ""
     txt = normalize(txt_raw)
-    # ← hasta aquí
 
-    # Ahora sí puedes usar est, inv, txt, txt_raw:
+    # ——— Fase inicio ————————————————————————————————
     if est["fase"] == "inicio":
         await saludo_bienvenida(update, ctx)
         est["fase"] = "esperando_comando"
         return
 
-    # …y el resto de tus fases…
-            # 1) Comandos estáticos
-            if txt in ("menu", "inicio"):
-                reset_estado(cid)
-                await saludo_bienvenida(update, ctx)
-                return
-            if "rastrear" in txt:
-                est["fase"] = "esperando_numero_rastreo"
-                await update.message.reply_text("Perfecto, envíame el número de venta.", reply_markup=ReplyKeyboardRemove())
-                return
-            if any(k in txt for k in ("cambio", "reembol", "devolucion")):
-                est["fase"] = "esperando_numero_devolucion"
-                await update.message.reply_text("Envíame el número de venta para la devolución.", reply_markup=ReplyKeyboardRemove())
-                return
-            if re.search(r"\b(catálogo|catalogo)\b", txt):
-                reset_estado(cid)
-                await update.message.reply_text(CATALOG_MESSAGE,
-                    reply_markup=menu_botones([
-                        "Hacer pedido","Enviar imagen","Ver catálogo",
-                        "Rastrear pedido","Realizar cambio"
-                    ])
-                )
-                return
-            if "imagen" in txt or "foto" in txt:
-                est["fase"] = "esperando_imagen"
-                await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
-                return
+    # ——— Fase esperando_comando —————————————————————————————
+    if est["fase"] == "esperando_comando":
+        # 1) Comandos estáticos
+        if txt in ("menu", "inicio"):
+            reset_estado(cid)
+            await saludo_bienvenida(update, ctx)
+            return
+        if "rastrear" in txt:
+            est["fase"] = "esperando_numero_rastreo"
+            await update.message.reply_text(
+                "Perfecto, envíame el número de venta.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+        if any(k in txt for k in ("cambio", "reembol", "devolucion")):
+            est["fase"] = "esperando_numero_devolucion"
+            await update.message.reply_text(
+                "Envíame el número de venta para la devolución.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+        if re.search(r"\b(catálogo|catalogo)\b", txt):
+            reset_estado(cid)
+            await update.message.reply_text(
+                CATALOG_MESSAGE,
+                reply_markup=menu_botones([
+                    "Hacer pedido", "Enviar imagen", "Ver catálogo",
+                    "Rastrear pedido", "Realizar cambio"
+                ])
+            )
+            return
+        if "imagen" in txt or "foto" in txt:
+            est["fase"] = "esperando_imagen"
+            await update.message.reply_text(
+                CLIP_INSTRUCTIONS,
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+
+        # … aquí sigue detección de marca …
+
+    # … resto de fases (esperando_modelo, etc.) …
+
 
             # 2) Detección de marca
             marcas = obtener_marcas_unicas(inv)
