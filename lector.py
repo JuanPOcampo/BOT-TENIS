@@ -275,11 +275,11 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
         if "rastrear" in txt:
             est["fase"] = "esperando_numero_rastreo"
-            await update.message.reply_text("Envíame el número de venta.", reply_markup=ReplyKeyboardRemove())
+            await update.message.reply_text("Perfecto, envíame el número de venta.", reply_markup=ReplyKeyboardRemove())
             return
         if any(k in txt for k in ("cambio", "reembol", "devolucion")):
             est["fase"] = "esperando_numero_devolucion"
-            await update.message.reply_text("Envíame el número de venta para la devolución.", reply_markup=ReplyKeyboardRemove())
+            await update.message.reply_text("Envíame el número de venta para realizar la devolución del pedido.", reply_markup=ReplyKeyboardRemove())
             return
         if re.search(r"\b(catálogo|catalogo)\b", txt):
             reset_estado(cid)
@@ -292,19 +292,23 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
             return
 
-        # Detección aproximada de marca
+        # ——— Detección aproximada de marca (esta es la clave) ——————————————————
+        palabras_usuario = txt.split()
         for m in obtener_marcas_unicas(inv):
-            for tok in normalize(m).split():
-                if difflib.get_close_matches(tok, txt.split(), n=1, cutoff=0.6):
+            tokens_marca = normalize(m).split()
+            for tok in tokens_marca:
+                match = difflib.get_close_matches(tok, palabras_usuario, n=1, cutoff=0.6)
+                if match:
                     est["marca"] = m
                     est["fase"] = "esperando_modelo"
                     await update.message.reply_text(
-                        f"Veamos modelos de {m}:",
+                        f"¡Genial! Veo que buscas {m}. ¿Qué modelo de {m} te interesa?",
                         reply_markup=menu_botones(obtener_modelos_por_marca(inv, m))
                     )
                     return
 
-        await update.message.reply_text("No entendí. Usa /start para volver al menú.")
+        # ——— Fallback si no detectó nada ————————————————————————————————
+        await update.message.reply_text("No entendí tu elección. Usa /start para volver al menú.")
         return
 
     # Rastrear pedido
