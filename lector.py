@@ -235,16 +235,16 @@ async def transcribe_audio(file_path: str) -> str | None:
 
 # ——— Función para mostrar imágenes de modelo desde Drive ——————————————————
 async def mostrar_imagenes_modelo(cid, ctx, marca, tipo_modelo):
-    sku = f"{marca.replace(' ','_')}_{tipo_modelo}"
-    resp = drive_service.files().list(
-        q=(
-            f"'{DRIVE_FOLDER_ID}' in parents "
-            f"and name contains '{sku}' "
-            "and mimeType contains 'image/'"
-        ),
-        spaces="drive",
-        fields="files(id, name)"
-    ).execute()
+    sku = f"{marca.replace(' ', '_')}_{tipo_modelo}"
+    resp = (
+        drive_service.files()
+        .list(
+            q=f\"'{DRIVE_FOLDER_ID}' in parents and name contains '{sku}' and mimeType contains 'image/'\",
+            spaces="drive",
+            fields="files(id, name)",
+        )
+        .execute()
+    )
     files = resp.get("files", [])
     if not files:
         await ctx.bot.send_message(cid, "Lo siento, no encontré imágenes de ese modelo.")
@@ -253,7 +253,7 @@ async def mostrar_imagenes_modelo(cid, ctx, marca, tipo_modelo):
     media = []
     for f in files[:5]:
         url = f"https://drive.google.com/uc?id={f['id']}"
-        caption = f["name"].split("_",2)[-1]
+        caption = f["name"].split("_", 2)[-1]
         media.append(InputMediaPhoto(media=url, caption=caption))
 
     await ctx.bot.send_chat_action(cid, ChatAction.UPLOAD_PHOTO)
@@ -266,49 +266,28 @@ async def mostrar_imagenes_modelo(cid, ctx, marca, tipo_modelo):
         chat_id=cid,
         text="¿Qué color te gustaría?",
         reply_markup=menu_botones(
-            obtener_colores_por_modelo(obtener_inventario(), est["marca"], tipo_modelo)
-        )
+            obtener_colores_por_modelo(
+                obtener_inventario(), est["marca"], tipo_modelo
+            )
+        ),
     )
 
-def registrar_orden(data: dict):
-    payload = {
-        "numero_venta": data.get("Número Venta", ""),
-        "fecha_venta":  data.get("Fecha Venta", ""),
-        "cliente":      data.get("Cliente", ""),
-        "telefono":     data.get("Teléfono", ""),
-        "producto":     data.get("Producto", ""),
-        "color":        data.get("Color", ""),
-        "talla":        data.get("Talla", ""),
-        "correo":       data.get("Correo", ""),
-        "pago":         data.get("Pago", ""),
-        "estado":       data.get("Estado", "")
-    }
-    logging.info(f"[SHEETS] Payload JSON que envío:\n{payload}")
-    try:
-        resp = requests.post(URL_SHEETS_PEDIDOS, json=payload)
-        logging.info(f"[SHEETS] HTTP {resp.status_code} — Body: {resp.text}")
-    except Exception as e:
-        logging.error(f"[SHEETS] Error al hacer POST: {e}")
 
-def generate_sale_id() -> str:
-    ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    rnd = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
-    return f"VEN-{ts}-{rnd}"
-
-#  HOJA DE PEDIDOS
+# ───────────────────────────────────────────────────────────────
+# HOJA DE PEDIDOS
 # ───────────────────────────────────────────────────────────────
 def registrar_orden(data: dict):
     payload = {
         "numero_venta": data.get("Número Venta", ""),
-        "fecha_venta":  data.get("Fecha Venta", ""),
-        "cliente":      data.get("Cliente", ""),
-        "telefono":     data.get("Teléfono", ""),
-        "producto":     data.get("Producto", ""),
-        "color":        data.get("Color", ""),
-        "talla":        data.get("Talla", ""),
-        "correo":       data.get("Correo", ""),
-        "pago":         data.get("Pago", ""),
-        "estado":       data.get("Estado", "")
+        "fecha_venta": data.get("Fecha Venta", ""),
+        "cliente": data.get("Cliente", ""),
+        "telefono": data.get("Teléfono", ""),
+        "producto": data.get("Producto", ""),
+        "color": data.get("Color", ""),
+        "talla": data.get("Talla", ""),
+        "correo": data.get("Correo", ""),
+        "pago": data.get("Pago", ""),
+        "estado": data.get("Estado", ""),
     }
     logging.info(f"[SHEETS] Payload JSON que envío:\n{payload}")
     try:
@@ -317,26 +296,87 @@ def registrar_orden(data: dict):
     except Exception as e:
         logging.error(f"[SHEETS] Error al hacer POST: {e}")
 
-def generate_sale_id() -> str:
+
+def generate_sale_id():
     ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    rnd = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+    rnd = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
     return f"VEN-{ts}-{rnd}"
 
-# ——— HANDLERS —————————————————————————————————————————————————————
+
+# ───────────────────────────────────────────────────────────────
+# PARSER INTELIGENTE DE MENSAJES (marca, modelo, color, talla)
+# ───────────────────────────────────────────────────────────────
+_regex_talla = re.compile(r"\b([2-4]\d(?:\.5)?)\b")  # 20-49.5
+
+def extraer_info(texto: str, inv: list[dict]):
+    info = {"marca": None, "modelo": None, "color": None, "talla": None}
+
+    # Marca
+    for m in obtener_marcas_unicas(inv):
+        if normalize(m) in texto:
+            info["marca"] = m
+            break
+
+    # Modelo
+    if info["marca"]:
+        for mod in obtener_modelos_por_marca(inv, info["marca"]):
+            if normalize(mod) in texto:
+                info["modelo"] = mod
+                break
+
+    # Color
+    if info["marca"] and info["modelo"]:
+        for col in obtener_colores_por_modelo(inv, info["marca"], info["modelo"]):
+            if normalize(col) in texto:
+                info["color"] = col
+                break
+
+    # Talla
+    m = _regex_talla.search(texto)
+    if m:
+        info["talla"] = m.group(1)
+
+    return info
+# HANDLERS
+# ───────────────────────────────────────────────────────────────
+SALUDOS = [
+    "hola",
+    "buenas",
+    "buenas tardes",
+    "buenas noches",
+    "buenos dias",
+    "buen día",
+    "qué más",
+    "que más",
+    "que mas",
+    "qué mas",
+    "hey",
+    "hola parce",
+    "hola mano",
+    "hola ñero",
+]
 
 async def saludo_bienvenida(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         WELCOME_TEXT,
-        reply_markup=menu_botones([
-            "Hacer pedido", "Enviar imagen", "Ver catálogo", "Rastrear pedido", "Realizar cambio"
-        ])
+        reply_markup=menu_botones(
+            [
+                "Hacer pedido",
+                "Enviar imagen",
+                "Ver catálogo",
+                "Rastrear pedido",
+                "Realizar cambio",
+            ]
+        ),
     )
+
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
     reset_estado(cid)
     await saludo_bienvenida(update, ctx)
     estado_usuario[cid]["fase"] = "esperando_comando"
+
 
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
@@ -345,100 +385,131 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     est = estado_usuario[cid]
     inv = obtener_inventario()
 
-    # ── NUEVO: Detectar voz/audio y transcribir ─────────────────────
+    # ── 1) Transcribir audio si viene VOICE o AUDIO ───────────────
     txt_raw = ""
     if update.message.voice or update.message.audio:
         fobj = update.message.voice or update.message.audio
         tg_file = await fobj.get_file()
-        local_path = os.path.join(TEMP_AUDIO_DIR, f"{cid}_{tg_file.file_id}.ogg")
+        local_path = os.path.join(
+            TEMP_AUDIO_DIR, f"{cid}_{tg_file.file_id}.ogg"
+        )
         await tg_file.download_to_drive(local_path)
-
         txt_raw = await transcribe_audio(local_path)
-        os.remove(local_path)  # limpia temp
-
+        os.remove(local_path)
         if not txt_raw:
             await update.message.reply_text(
                 "Ese audio se escucha muy mal 😕. ¿Podrías enviarlo de nuevo o escribir tu mensaje?",
-                reply_markup=ReplyKeyboardRemove()
+                reply_markup=ReplyKeyboardRemove(),
             )
             return
     else:
-        # Mensaje de texto normal
         txt_raw = update.message.text or ""
 
-    txt = normalize(txt_raw)
-    # Esperando comando
+    txt_norm = normalize(txt_raw)
+
+    # ── 2) Detección universal de saludo ──────────────────────────
+    if any(normalize(sal) in txt_norm for sal in SALUDOS):
+        await update.message.reply_text(
+            "¡Hola! ¿En qué le puedo ayudar hoy?"
+        )
+        # no retorna: deja que el flujo siga por si incluye más info
+
+    # ── 3) Parser inteligente: marca+modelo+color+talla  ──────────
+    info = extraer_info(txt_norm, inv)
+    if info["marca"]:
+        est["marca"] = info["marca"]
+    if info["modelo"]:
+        est["modelo"] = info["modelo"]
+    if info["color"]:
+        est["color"] = info["color"]
+    if info["talla"]:
+        est["talla"] = info["talla"]
+
+    # Si ya tenemos todo, saltamos directamente a pedir datos del cliente
+    if (
+        est["marca"]
+        and est["modelo"]
+        and est["color"]
+        and est["talla"]
+        and est["fase"] in ("inicio", "esperando_comando")
+    ):
+        est["fase"] = "esperando_nombre"
+        await update.message.reply_text(
+            f"Confirmado: {est['marca']} {est['modelo']} color {est['color']} talla {est['talla']}.\n¿Tu nombre?"
+        )
+        return
+
+    # ── 4) Continúa tu flujo original (menús, etc.) ───────────────
+    # ----------------------------------------------------------------
     if est["fase"] == "inicio":
         await saludo_bienvenida(update, ctx)
         est["fase"] = "esperando_comando"
         return
 
     if est["fase"] == "esperando_comando":
-        # 1) Comandos estáticos
-        if txt in ("menu", "inicio"):
+        if txt_norm in ("menu", "inicio"):
             reset_estado(cid)
             await saludo_bienvenida(update, ctx)
             return
-        if "rastrear" in txt:
+        if "rastrear" in txt_norm:
             est["fase"] = "esperando_numero_rastreo"
-            await update.message.reply_text("Perfecto, envíame el número de venta.", reply_markup=ReplyKeyboardRemove())
+            await update.message.reply_text(
+                "Perfecto, envíame el número de venta.",
+                reply_markup=ReplyKeyboardRemove(),
+            )
             return
-        if any(k in txt for k in ("cambio", "reembol", "devolucion")):
+        if any(k in txt_norm for k in ("cambio", "reembol", "devolucion")):
             est["fase"] = "esperando_numero_devolucion"
             await update.message.reply_text(
                 "Envíame el número de venta para realizar la devolución del pedido.",
-                reply_markup=ReplyKeyboardRemove()
+                reply_markup=ReplyKeyboardRemove(),
             )
             return
-        if re.search(r"\b(catálogo|catalogo)\b", txt):
+        if re.search(r"\b(catálogo|catalogo)\b", txt_norm):
             reset_estado(cid)
-            await update.message.reply_text(CATALOG_MESSAGE, reply_markup=menu_botones([
-                "Hacer pedido", "Enviar imagen", "Ver catálogo", "Rastrear pedido", "Realizar cambio"
-            ]))
+            await update.message.reply_text(
+                CATALOG_MESSAGE,
+                reply_markup=menu_botones(
+                    [
+                        "Hacer pedido",
+                        "Enviar imagen",
+                        "Ver catálogo",
+                        "Rastrear pedido",
+                        "Realizar cambio",
+                    ]
+                ),
+            )
             return
-        if "imagen" in txt or "foto" in txt:
+        if "imagen" in txt_norm or "foto" in txt_norm:
             est["fase"] = "esperando_imagen"
-            await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
+            await update.message.reply_text(
+                CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove()
+            )
             return
 
-        # 2) Detección de marca
-        marcas = obtener_marcas_unicas(inv)
-        logging.debug(f"[Chat {cid}] txt_norm={txt!r} | marcas={marcas}")
-
-        # 2a) Primero por substring (útil para siglas como “DS”)
-        elegido = next((m for m in marcas if normalize(m) in txt), None)
-
-        # 2b) Si no, por tokens + difflib
-        if not elegido:
-            palabras_usuario = txt.split()
-            for m in marcas:
-                for tok in normalize(m).split():
-                    if difflib.get_close_matches(tok, palabras_usuario, n=1, cutoff=0.6):
-                        elegido = m
-                        break
-                if elegido:
-                    break
-
-        if elegido:
-            logging.info(f"Marca detectada: {elegido}")
-            est["marca"] = elegido
+        # Si el parser ya detectó marca pero falta modelo → pide modelo
+        if est["marca"] and not est["modelo"]:
             est["fase"] = "esperando_modelo"
             await update.message.reply_text(
-                f"¡Genial! Veo que buscas {elegido}. ¿Qué modelo de {elegido} te interesa?",
-                reply_markup=menu_botones(obtener_modelos_por_marca(inv, elegido))
+                f"¡Genial! Veo que buscas {est['marca']}. ¿Qué modelo de {est['marca']} te interesa?",
+                reply_markup=menu_botones(
+                    obtener_modelos_por_marca(inv, est["marca"])
+                ),
             )
             return
 
-        # 3) Fallback
-        logging.debug("No detectó ninguna marca en esperando_comando")
+        # Fallback
         await update.message.reply_text(
             "No entendí tu elección. Usa /start para volver al menú."
         )
         return
 
+    # ── (Tu flujo original continúa aquí sin cambios mayores) ─────
     # Rastrear pedido
     if est["fase"] == "esperando_numero_rastreo":
-        await update.message.reply_text("Guía para rastrear: https://www.instagram.com/juanp_ocampo/")
+        await update.message.reply_text(
+            "Guía para rastrear: https://www.instagram.com/juanp_ocampo/"
+        )
         reset_estado(cid)
         return
 
@@ -448,95 +519,130 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "esperando_motivo_devolucion"
         await update.message.reply_text("Motivo de devolución:")
         return
+
     if est["fase"] == "esperando_motivo_devolucion":
-        enviar_correo(EMAIL_DEVOLUCIONES, f"Devolución {NOMBRE_NEGOCIO}", f"Venta: {est['referencia']}\nMotivo: {txt_raw}")
+        enviar_correo(
+            EMAIL_DEVOLUCIONES,
+            f"Devolución {NOMBRE_NEGOCIO}",
+            f"Venta: {est['referencia']}\nMotivo: {txt_raw}",
+        )
         await update.message.reply_text("Solicitud enviada.")
         reset_estado(cid)
         return
 
     # Imagen enviada
-   
     if est["fase"] == "esperando_imagen" and update.message.photo:
-        # 1) Descarga la foto a disco
         f = await update.message.photo[-1].get_file()
         tmp = os.path.join("temp", f"{cid}.jpg")
         os.makedirs("temp", exist_ok=True)
         await f.download_to_drive(tmp)
-
-        # 2) Identifica modelo desde Drive
         ref = identify_model_from_stream(tmp)
         os.remove(tmp)
-
-        # 3) Desempaqueta directamente MARCA_MODELO_COLOR
         if ref:
-            # ref viene como "DS_277_TATATA"
-            marca, modelo, color = ref.split('_')
-            est.update({
-                "marca": marca,
-                "modelo": modelo,
-                "color": color,
-                "fase": "imagen_detectada"
-            })
+            marca, modelo, color = ref.split("_")
+            est.update(
+                {
+                    "marca": marca,
+                    "modelo": modelo,
+                    "color": color,
+                    "fase": "imagen_detectada",
+                }
+            )
             await update.message.reply_text(
                 f"La imagen coincide con {marca} {modelo} color {color}. ¿Continuamos? (SI/NO)",
-                reply_markup=menu_botones(["SI", "NO"])
+                reply_markup=menu_botones(["SI", "NO"]),
             )
         else:
             reset_estado(cid)
-            await update.message.reply_text("No reconocí el modelo. /start para reiniciar.")
+            await update.message.reply_text(
+                "No reconocí el modelo. /start para reiniciar."
+            )
         return
 
     # Confirmación imagen
     if est["fase"] == "imagen_detectada":
-        if txt in ("si", "s"):
+        if txt_norm in ("si", "s"):
             est["fase"] = "esperando_talla"
             await update.message.reply_text(
                 "¿Qué talla deseas?",
-                reply_markup=menu_botones(obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"]))
+                reply_markup=menu_botones(
+                    obtener_tallas_por_color(
+                        inv, est["marca"], est["modelo"], est["color"]
+                    )
+                ),
             )
         else:
-            await update.message.reply_text("Cancelado. /start para reiniciar.")
+            await update.message.reply_text(
+                "Cancelado. /start para reiniciar."
+            )
             reset_estado(cid)
         return
 
     # Selección manual de modelo/color/talla
     if est["fase"] == "esperando_modelo":
         modelos = obtener_modelos_por_marca(inv, est["marca"])
-        if txt in map(normalize, modelos):
-            est["modelo"] = next(m for m in modelos if normalize(m)==txt)
+        if txt_norm in map(normalize, modelos):
+            est["modelo"] = next(
+                m for m in modelos if normalize(m) == txt_norm
+            )
             est["fase"] = "esperando_color"
             await update.message.reply_text(
-                "¿Que color desea?",
-                reply_markup=menu_botones(obtener_colores_por_modelo(inv, est["marca"], est["modelo"]))
+                "¿Qué color desea?",
+                reply_markup=menu_botones(
+                    obtener_colores_por_modelo(
+                        inv, est["marca"], est["modelo"]
+                    )
+                ),
             )
         else:
-            await update.message.reply_text("Elige un modelo válido.", reply_markup=menu_botones(modelos))
+            await update.message.reply_text(
+                "Elige un modelo válido.",
+                reply_markup=menu_botones(modelos),
+            )
         return
 
     if est["fase"] == "esperando_color":
-        colores = obtener_colores_por_modelo(inv, est["marca"], est["modelo"])
-        if txt in map(normalize, colores):
-            est["color"] = next(c for c in colores if normalize(c)==txt)
+        colores = obtener_colores_por_modelo(
+            inv, est["marca"], est["modelo"]
+        )
+        if txt_norm in map(normalize, colores):
+            est["color"] = next(
+                c for c in colores if normalize(c) == txt_norm
+            )
             est["fase"] = "esperando_talla"
             await update.message.reply_text(
-                "¿Que talla desea?",
-                reply_markup=menu_botones(obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"]))
+                "¿Qué talla desea?",
+                reply_markup=menu_botones(
+                    obtener_tallas_por_color(
+                        inv, est["marca"], est["modelo"], est["color"]
+                    )
+                ),
             )
         else:
-            await update.message.reply_text("Mira que de momento no disponemos de ese color, solo hay disponibles los siguientes.", reply_markup=menu_botones(colores))
+            await update.message.reply_text(
+                "Mira que de momento no disponemos de ese color, solo hay disponibles los siguientes.",
+                reply_markup=menu_botones(colores),
+            )
         return
 
-    # Datos del usuario y pago
     if est["fase"] == "esperando_talla":
-        tallas = obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
-        if txt in map(normalize, tallas):
-            est["talla"] = next(t for t in tallas if normalize(t)==txt)
+        tallas = obtener_tallas_por_color(
+            inv, est["marca"], est["modelo"], est["color"]
+        )
+        if txt_norm in map(normalize, tallas):
+            est["talla"] = next(
+                t for t in tallas if normalize(t) == txt_norm
+            )
             est["fase"] = "esperando_nombre"
             await update.message.reply_text("¿Tu nombre?")
         else:
-            await update.message.reply_text("Elige una talla válida.", reply_markup=menu_botones(tallas))
+            await update.message.reply_text(
+                "Elige una talla válida.",
+                reply_markup=menu_botones(tallas),
+            )
         return
 
+    # Datos del usuario y pago
     if est["fase"] == "esperando_nombre":
         est["nombre"] = txt_raw
         est["fase"] = "esperando_correo"
@@ -575,10 +681,16 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if est["fase"] == "esperando_direccion":
         est["direccion"] = txt_raw
-        precio = next((i["precio"] for i in inv
-                       if normalize(i["marca"])==normalize(est["marca"])
-                       and normalize(i["modelo"])==normalize(est["modelo"])
-                       and normalize(i["color"])==normalize(est["color"])), "N/A")
+        precio = next(
+            (
+                i["precio"]
+                for i in inv
+                if normalize(i["marca"]) == normalize(est["marca"])
+                and normalize(i["modelo"]) == normalize(est["modelo"])
+                and normalize(i["color"]) == normalize(est["color"])
+            ),
+            "N/A",
+        )
         sale_id = generate_sale_id()
         est["sale_id"] = sale_id
         resumen = {
@@ -591,7 +703,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Talla": est["talla"],
             "Correo": est["correo"],
             "Pago": None,
-            "Estado": "PENDIENTE"
+            "Estado": "PENDIENTE",
         }
         est["resumen"] = resumen
         text_res = (
@@ -603,7 +715,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Elige método de pago: TRANSFERENCIA, QR o CONTRA ENTREGA"
         )
         est["fase"] = "esperando_pago"
-        await update.message.reply_text(text_res, reply_markup=menu_botones(["TRANSFERENCIA","QR","CONTRA ENTREGA"]))
+        await update.message.reply_text(
+            text_res,
+            reply_markup=menu_botones(
+                ["TRANSFERENCIA", "QR", "CONTRA ENTREGA"]
+            ),
+        )
         return
 
     if est["fase"] == "esperando_pago":
@@ -612,15 +729,21 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if opt == "transferencia":
             est["fase"] = "esperando_comprobante"
             resumen["Pago"] = "Transferencia"
-            await update.message.reply_text("Envía la foto de tu comprobante.")
+            await update.message.reply_text(
+                "Envía la foto de tu comprobante."
+            )
         elif opt == "qr":
             est["fase"] = "esperando_comprobante"
             resumen["Pago"] = "QR"
-            await update.message.reply_text("Escanea el QR y envía la foto.")
+            await update.message.reply_text(
+                "Escanea el QR y envía la foto."
+            )
         elif opt == "contraentrega":
             resumen["Pago"] = "Contra entrega"
             registrar_orden(resumen)
-            await update.message.reply_text("Pedido registrado para contra entrega. ¡Gracias!")
+            await update.message.reply_text(
+                "Pedido registrado para contra entrega. ¡Gracias!"
+            )
             reset_estado(cid)
         else:
             await update.message.reply_text("Método inválido.")
@@ -633,38 +756,61 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await f.download_to_drive(tmp)
         resumen = est["resumen"]
         registrar_orden(resumen)
-        enviar_correo(est["correo"], f"Pago recibido {resumen['Número Venta']}", json.dumps(resumen, indent=2))
-        enviar_correo_con_adjunto(EMAIL_JEFE, f"Comprobante {resumen['Número Venta']}", json.dumps(resumen, indent=2), tmp)
+        enviar_correo(
+            est["correo"],
+            f"Pago recibido {resumen['Número Venta']}",
+            json.dumps(resumen, indent=2),
+        )
+        enviar_correo_con_adjunto(
+            EMAIL_JEFE,
+            f"Comprobante {resumen['Número Venta']}",
+            json.dumps(resumen, indent=2),
+            tmp,
+        )
         os.remove(tmp)
-        await update.message.reply_text("✅ ¡Pago registrado! Tu pedido está en proceso.")
+        await update.message.reply_text(
+            "✅ ¡Pago registrado! Tu pedido está en proceso."
+        )
         reset_estado(cid)
         return
 
     # Fallback
     await update.message.reply_text("No entendí. Usa /start para reiniciar.")
 
+# APP MAIN
+# ───────────────────────────────────────────────────────────────
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    # Capturamos texto, fotos y voz/audio
-    app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO, responder))
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO,
+            responder,
+        )
+    )
 
-    async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def error_handler(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
         logging.error("❌ Excepción procesando update:", exc_info=context.error)
+
     app.add_error_handler(error_handler)
 
     port = int(os.environ.get("PORT", 8443))
     ngrok_host = os.environ.get("NGROK_HOSTNAME")
     if not ngrok_host:
-        logging.error("❌ Debes exportar NGROK_HOSTNAME antes de arrancar")
+        logging.error(
+            "❌ Debes exportar NGROK_HOSTNAME antes de arrancar (dominio Render)"
+        )
         return
 
     app.run_webhook(
         listen="0.0.0.0",
         port=port,
         url_path=TOKEN,
-        webhook_url=f"https://{ngrok_host}/{TOKEN}"
+        webhook_url=f"https://{ngrok_host}/{TOKEN}",
     )
+
 
 if __name__ == "__main__":
     main()
