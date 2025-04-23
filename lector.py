@@ -373,15 +373,18 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No entendí tu elección. Usa /start para volver al menú.")
         return
 
-        # ─── Fase intermedia: confirmar_modelo_o_ver ────────────────────────────
-    # ——— Fase confirmar_modelo_o_ver ——————————————————
+    # ——— Fase intermedia: confirmar_modelo_o_ver ——————————————————
     if est["fase"] == "confirmar_modelo_o_ver":
-        if txt in ("escribir modelo",):
+        # txt ya está normalizado (minusculas, sin tildes)
+        # Si menciona “modelo” pero no “imagen”, pasa a escribir modelo
+        if "modelo" in txt and "imagen" not in txt and "foto" not in txt:
             est["fase"] = "esperando_modelo"
-            await update.message.reply_text("Perfecto, escribe el nombre exacto del modelo:", 
-                                            reply_markup=ReplyKeyboardRemove())
-        elif txt in ("ver imágenes",):
-            # reutilizamos los mismos modelos para botones
+            await update.message.reply_text(
+                "Perfecto, dime el nombre exacto del modelo:",
+                reply_markup=ReplyKeyboardRemove()
+            )
+        # Si menciona “imagen” o “foto”, mostramos botones de modelos para ver imágenes
+        elif "imagen" in txt or "foto" in txt:
             modelos = obtener_modelos_por_marca(inv, est["marca"])
             est["fase"] = "esperando_tipo_modelo_vis"
             await update.message.reply_text(
@@ -390,21 +393,22 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         else:
             await update.message.reply_text(
-                "Elige “Escribir modelo” o “Ver imágenes”.",
+                "Elige si quieres escribir el modelo o ver imágenes.",
                 reply_markup=menu_botones(["Escribir modelo", "Ver imágenes"])
             )
         return
 
-        # ─── Fase: esperando_tipo_modelo_vis ───────────────────────────────────
-    # ——— Fase: esperando_tipo_modelo_vis ——————————————————
+    # ——— Fase: esperando_tipo_modelo_vis ———————————————————————————————
     if est["fase"] == "esperando_tipo_modelo_vis":
-        # txt_raw aquí es el modelo elegido
         modelo_elegido = txt_raw.strip()
-        if modelo_elegido not in obtener_modelos_por_marca(inv, est["marca"]):
-            await update.message.reply_text("Elige un modelo válido.", 
-                                            reply_markup=menu_botones(obtener_modelos_por_marca(inv, est["marca"])))
+        modelos_disponibles = obtener_modelos_por_marca(inv, est["marca"])
+        if modelo_elegido not in modelos_disponibles:
+            await update.message.reply_text(
+                "Elige un modelo válido.",
+                reply_markup=menu_botones(modelos_disponibles)
+            )
             return
-        # llamamos a tu función que envía las fotos desde Drive
+        # enviamos las imágenes del modelo seleccionado
         await mostrar_imagenes_modelo(cid, ctx, est["marca"], modelo_elegido)
         return
 
