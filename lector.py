@@ -1,8 +1,7 @@
 import os
 import io
 import logging
-from dotenv 
-import load_dotenv
+from dotenv import load_dotenv
 load_dotenv()
 import imagehash
 from PIL import Image
