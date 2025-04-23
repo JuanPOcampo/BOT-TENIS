@@ -374,16 +374,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     # ——— Fase intermedia: confirmar_modelo_o_ver ——————————————————
+    # ——— Fase intermedia: confirmar_modelo_o_ver ——————————————————
     if est["fase"] == "confirmar_modelo_o_ver":
-        # txt ya está normalizado (minusculas, sin tildes)
-        # Si menciona “modelo” pero no “imagen”, pasa a escribir modelo
+        # txt ya está normalizado (minúsculas, sin tildes)
         if "modelo" in txt and "imagen" not in txt and "foto" not in txt:
             est["fase"] = "esperando_modelo"
             await update.message.reply_text(
                 "Perfecto, dime el nombre exacto del modelo:",
                 reply_markup=ReplyKeyboardRemove()
             )
-        # Si menciona “imagen” o “foto”, mostramos botones de modelos para ver imágenes
         elif "imagen" in txt or "foto" in txt:
             modelos = obtener_modelos_por_marca(inv, est["marca"])
             est["fase"] = "esperando_tipo_modelo_vis"
@@ -400,15 +399,19 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # ——— Fase: esperando_tipo_modelo_vis ———————————————————————————————
     if est["fase"] == "esperando_tipo_modelo_vis":
-        modelo_elegido = txt_raw.strip()
         modelos_disponibles = obtener_modelos_por_marca(inv, est["marca"])
-        if modelo_elegido not in modelos_disponibles:
+        mapa_modelos = { normalize(m): m for m in modelos_disponibles }
+
+        clave = normalize(txt_raw)  # normaliza la entrada del usuario
+
+        if clave not in mapa_modelos:
             await update.message.reply_text(
-                "Elige un modelo válido.",
+                "Elige un modelo válido para ver imágenes:",
                 reply_markup=menu_botones(modelos_disponibles)
             )
             return
-        # enviamos las imágenes del modelo seleccionado
+
+        modelo_elegido = mapa_modelos[clave]
         await mostrar_imagenes_modelo(cid, ctx, est["marca"], modelo_elegido)
         return
 
