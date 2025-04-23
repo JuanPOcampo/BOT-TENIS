@@ -21,10 +21,12 @@ from googleapiclient.http import MediaIoBaseDownload
 
 from telegram import (
     Update,
+    InputMediaPhoto,
     ReplyKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardRemove,
 )
+from telegram.constants import ChatAction  # ✅ CORRECTO para evitar el error
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
