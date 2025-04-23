@@ -34,15 +34,13 @@ from telegram.ext import (
 )
 
 # Carga la credencial desde el secret de Render
-creds = Credentials.from_service_account_file(
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"],
-    scopes=["https://www.googleapis.com/auth/drive.readonly"]
+creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
+creds = service_account.Credentials.from_service_account_info(
+    creds_info,
+    scopes=["https://www.googleapis.com/auth/drive.readonly"],
 )
-drive_service = build(
-    "drive", "v3",
-    credentials=creds,
-    cache_discovery=False
-)
+drive_service = build("drive", "v3", credentials=creds)
+
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 
 PHASH_THRESHOLD = 15
