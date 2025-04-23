@@ -665,3 +665,6 @@ def main():
         url_path=TOKEN,
         webhook_url=f"https://{ngrok_host}/{TOKEN}"
     )
+
+if __name__ == "__main__":
+    main()
