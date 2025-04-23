@@ -1,7 +1,8 @@
 import os
 import io
 import logging
-from dotenv import load_dotenv
+from dotenv 
+import load_dotenv
 load_dotenv()
 import imagehash
 from PIL import Image
@@ -14,6 +15,7 @@ import string
 import datetime
 import unicodedata
 import difflib
+from telegram import InputMediaPhoto, ChatAction, ReplyKeyboardRemove
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -570,21 +572,51 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # Fallback
     await update.message.reply_text("No entendí. Usa /start para reiniciar.")
 
+async def handle_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cid = update.effective_chat.id
+    if cid not in estado_usuario:
+        reset_estado(cid)
+    est = estado_usuario[cid]
+
+    file = await update.message.photo[-1].get_file()
+    tmp = f"temp/{cid}.jpg"
+    os.makedirs("temp", exist_ok=True)
+    await file.download_to_drive(tmp)
+
+    ref = identify_model_from_stream(tmp)
+    os.remove(tmp)
+
+    if not ref:
+        await update.message.reply_text("No pude reconocer el modelo en la foto.")
+        return
+
+    marca, modelo, color = ref.split('_')
+    est.update({
+        "marca": marca,
+        "modelo": modelo,
+        "color": color,
+        "fase": "esperando_talla"
+    })
+    await update.message.reply_text(
+        f"La imagen coincide con {marca} {modelo} color {color}. ¿Qué talla deseas?",
+        reply_markup=menu_botones(
+            obtener_tallas_por_color(obtener_inventario(), marca, modelo, color)
+        )
+    )
+
 def main():
+    logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, responder))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.TEXT, responder))
 
     async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error("❌ Excepción procesando update:", exc_info=context.error)
     app.add_error_handler(error_handler)
 
     port = int(os.environ.get("PORT", 8443))
-    ngrok_host = os.environ.get("NGROK_HOSTNAME")
-    if not ngrok_host:
-        logging.error("❌ Debes exportar NGROK_HOSTNAME antes de arrancar")
-        return
-
+    ngrok_host = os.environ["NGROK_HOSTNAME"]
     app.run_webhook(
         listen="0.0.0.0",
         port=port,
