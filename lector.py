@@ -336,30 +336,37 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         # 2) Detección de marca
         marcas = obtener_marcas_unicas(inv)
-        elegido = None
-        palabras = txt.split()
+        logging.debug(f"[Chat {cid}] txt_norm={txt!r} | marcas={marcas}")
 
-        for marca in marcas:
-            if normalize(marca) in palabras or any(difflib.get_close_matches(tok, palabras, n=1, cutoff=0.6)
-                                                   for tok in normalize(marca).split()):
-                elegido = marca
-                break
+        # 2a) Primero por substring (útil para siglas como “DS”)
+        elegido = next((m for m in marcas if normalize(m) in txt), None)
+
+        # 2b) Si no, por tokens + difflib
+        if not elegido:
+            palabras_usuario = txt.split()
+            for m in marcas:
+                for tok in normalize(m).split():
+                    if difflib.get_close_matches(tok, palabras_usuario, n=1, cutoff=0.6):
+                        elegido = m
+                        break
+                if elegido:
+                    break
 
         if elegido:
+            logging.info(f"Marca detectada: {elegido}")
             est["marca"] = elegido
-            # obtenemos los modelos reales de Sheets
-            modelos = obtener_modelos_por_marca(inv, elegido)
-            est["fase"] = "confirmar_modelo_o_ver"
+            est["fase"] = "esperando_modelo"
             await update.message.reply_text(
-                f"Tengo estos modelos de {elegido} disponibles:\n" +
-                "\n".join(f"– {m}" for m in modelos) +
-                "\n\n¿Quieres escribir el modelo o prefieres que te muestre imágenes?",
-                reply_markup=menu_botones(["Escribir modelo", "Ver imágenes"])
+                f"¡Genial! Veo que buscas {elegido}. ¿Qué modelo de {elegido} te interesa?",
+                reply_markup=menu_botones(obtener_modelos_por_marca(inv, elegido))
             )
             return
 
-        # fallback
-        await update.message.reply_text("No entendí tu elección. Usa /start para volver al menú.")
+        # 3) Fallback
+        logging.debug("No detectó ninguna marca en esperando_comando")
+        await update.message.reply_text(
+            "No entendí tu elección. Usa /start para volver al menú."
+        )
         return
 
     # ——— Fase intermedia: confirmar_modelo_o_ver ——————————————————
