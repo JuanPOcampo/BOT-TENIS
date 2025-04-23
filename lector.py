@@ -298,196 +298,161 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     txt_raw = update.message.text or ""
     txt = normalize(txt_raw)
 
-    # Esperando comando
-    if est["fase"] == "inicio":
-        await saludo_bienvenida(update, ctx)
-        est["fase"] = "esperando_comando"
-        return
+    # ——— estáticos omitidos… ————————————————————————————————
 
+    # ——— 1) Detección de marca ————————————————————————————————
     if est["fase"] == "esperando_comando":
-        # 1) Comandos estáticos
-        if txt in ("menu", "inicio"):
-            reset_estado(cid)
-            await saludo_bienvenida(update, ctx)
-            return
-        if "rastrear" in txt:
-            est["fase"] = "esperando_numero_rastreo"
-            await update.message.reply_text("Perfecto, envíame el número de venta.", reply_markup=ReplyKeyboardRemove())
-            return
-        if any(k in txt for k in ("cambio", "reembol", "devolucion")):
-            est["fase"] = "esperando_numero_devolucion"
+        marcas = obtener_marcas_unicas(inv)
+        texto = normalize(txt_raw)
+        elegido = None
+        for m in marcas:
+            norm_m = normalize(m)
+            # a) Subcadena exacta
+            if re.search(rf"\b{re.escape(norm_m)}\b", texto):
+                elegido = m
+                break
+            # b) Fuzzy matching contra todo el texto
+            if difflib.SequenceMatcher(None, norm_m, texto).ratio() > 0.6:
+                elegido = m
+                break
+        if elegido:
+            est["marca"] = elegido
+            est["fase"] = "confirmar_modelo_o_ver"
+            modelos = obtener_modelos_por_marca(inv, elegido)
             await update.message.reply_text(
-                "Envíame el número de venta para realizar la devolución del pedido.",
-                reply_markup=ReplyKeyboardRemove()
+                f"Tengo estos modelos de {elegido.upper()} disponibles:\n"
+                + "\n".join(f"– {m}" for m in modelos)
+                + "\n\n¿Quieres escribir el modelo o prefieres que te muestre imágenes?",
+                reply_markup=menu_botones(["Escribir modelo", "Ver imágenes"])
             )
             return
-        if re.search(r"\b(catálogo|catalogo)\b", txt):
-            reset_estado(cid)
-            await update.message.reply_text(CATALOG_MESSAGE, reply_markup=menu_botones([
-                "Hacer pedido", "Enviar imagen", "Ver catálogo", "Rastrear pedido", "Realizar cambio"
-            ]))
-            return
+
+    # ——— 2) Fase intermedia: confirmar_modelo_o_ver ——————————————————
+    if est["fase"] == "confirmar_modelo_o_ver":
         if "imagen" in txt or "foto" in txt:
-            est["fase"] = "esperando_imagen"
-            await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
-            return
-
-# Asegúrate de tener estas importaciones al principio:
-# from telegram import InputMediaPhoto, ChatAction, ReplyKeyboardRemove
-# import re, difflib
-
-# ——— 1) Detección de marca ————————————————————————————————
-if est["fase"] == "esperando_comando":
-    marcas = obtener_marcas_unicas(inv)
-    texto = normalize(txt_raw)
-    elegido = None
-    for m in marcas:
-        norm_m = normalize(m)
-        # a) Subcadena exacta
-        if re.search(rf"\b{re.escape(norm_m)}\b", texto):
-            elegido = m
-            break
-        # b) Fuzzy matching contra todo el texto
-        if difflib.SequenceMatcher(None, norm_m, texto).ratio() > 0.6:
-            elegido = m
-            break
-    if elegido:
-        est["marca"] = elegido
-        est["fase"] = "confirmar_modelo_o_ver"
-        modelos = obtener_modelos_por_marca(inv, elegido)
-        await update.message.reply_text(
-            f"Tengo estos modelos de {elegido.upper()} disponibles:\n" +
-            "\n".join(f"– {m}" for m in modelos) +
-            "\n\n¿Quieres escribir el modelo o prefieres que te muestre imágenes?",
-            reply_markup=menu_botones(["Escribir modelo", "Ver imágenes"])
-        )
-        return
-
-# ——— 2) Fase intermedia: confirmar_modelo_o_ver ——————————————————
-if est["fase"] == "confirmar_modelo_o_ver":
-    if "imagen" in texto or "foto" in texto:
-        modelos = obtener_modelos_por_marca(inv, est["marca"])
-        est["fase"] = "esperando_tipo_modelo_vis"
-        await update.message.reply_text(
-            "¿Qué modelo quieres ver primero?",
-            reply_markup=menu_botones(modelos)
-        )
-    elif "modelo" in texto:
-        est["fase"] = "esperando_modelo"
-        await update.message.reply_text(
-            "Perfecto, dime el nombre exacto del modelo:",
-            reply_markup=ReplyKeyboardRemove()
-        )
-    else:
-        await update.message.reply_text(
-            "Elige si quieres escribir el modelo o ver imágenes.",
-            reply_markup=menu_botones(["Escribir modelo", "Ver imágenes"])
-        )
-    return
-
-# ——— 3) Fase: esperando_tipo_modelo_vis —————————————————————————
-if est["fase"] == "esperando_tipo_modelo_vis":
-    modelos = obtener_modelos_por_marca(inv, est["marca"])
-    mapa = { normalize(m): m for m in modelos }
-    clave = normalize(txt_raw)
-
-    if clave in mapa:
-        modelo = mapa[clave]
-    else:
-        match = difflib.get_close_matches(clave, mapa.keys(), n=1, cutoff=0.5)
-        if match:
-            modelo = mapa[match[0]]
-        else:
+            modelos = obtener_modelos_por_marca(inv, est["marca"])
+            est["fase"] = "esperando_tipo_modelo_vis"
             await update.message.reply_text(
-                "No reconozco ese modelo. Elige uno de estos:",
+                "¿Qué modelo quieres ver primero?",
                 reply_markup=menu_botones(modelos)
             )
-            return
+        elif "modelo" in txt:
+            est["fase"] = "esperando_modelo"
+            await update.message.reply_text(
+                "Perfecto, dime el nombre exacto del modelo:",
+                reply_markup=ReplyKeyboardRemove()
+            )
+        else:
+            await update.message.reply_text(
+                "Elige si quieres escribir el modelo o ver imágenes.",
+                reply_markup=menu_botones(["Escribir modelo", "Ver imágenes"])
+            )
+        return
 
-    # — Mostrar imágenes desde Drive, con fallback por marca si no hay para modelo —
-    sku = f"{est['marca'].replace(' ', '_')}_{modelo}"
-    q_modelo = (
-        f"'{DRIVE_FOLDER_ID}' in parents "
-        f"and name contains '{sku}' and mimeType contains 'image/'"
-    )
-    files = (
-        drive_service.files()
-        .list(q=q_modelo, spaces="drive", fields="files(id,name)")
-        .execute()
-        .get("files", [])
-    )
-    if not files:
-        # fallback: mostrar todas las imágenes de la marca
-        q_marca = (
+    # ——— 3) Fase: esperando_tipo_modelo_vis —————————————————————————
+    if est["fase"] == "esperando_tipo_modelo_vis":
+        modelos = obtener_modelos_por_marca(inv, est["marca"])
+        mapa = { normalize(m): m for m in modelos }
+        clave = normalize(txt_raw)
+
+        if clave in mapa:
+            modelo = mapa[clave]
+        else:
+            match = difflib.get_close_matches(clave, mapa.keys(), n=1, cutoff=0.5)
+            if match:
+                modelo = mapa[match[0]]
+            else:
+                await update.message.reply_text(
+                    "No reconozco ese modelo. Elige uno de estos:",
+                    reply_markup=menu_botones(modelos)
+                )
+                return
+
+        # Mostrar imágenes desde Drive, con fallback por marca
+        sku = f"{est['marca'].replace(' ', '_')}_{modelo}"
+        q_modelo = (
             f"'{DRIVE_FOLDER_ID}' in parents "
-            f"and name contains '{est['marca'].replace(' ', '_')}_' "
-            "and mimeType contains 'image/'"
+            f"and name contains '{sku}' and mimeType contains 'image/'"
         )
         files = (
             drive_service.files()
-            .list(q=q_marca, spaces="drive", fields="files(id,name)")
+            .list(q=q_modelo, spaces="drive", fields="files(id,name)")
             .execute()
             .get("files", [])
         )
+        if not files:
+            q_marca = (
+                f"'{DRIVE_FOLDER_ID}' in parents "
+                f"and name contains '{est['marca'].replace(' ', '_')}_' "
+                "and mimeType contains 'image/'"
+            )
+            files = (
+                drive_service.files()
+                .list(q=q_marca, spaces="drive", fields="files(id,name)")
+                .execute()
+                .get("files", [])
+            )
 
-    media = []
-    for f in files[:5]:
-        url = f"https://drive.google.com/uc?id={f['id']}"
-        caption = f["name"].split("_", 2)[-1]
-        media.append(InputMediaPhoto(media=url, caption=caption))
+        media = []
+        for f in files[:5]:
+            url = f"https://drive.google.com/uc?id={f['id']}"
+            caption = f["name"].split("_", 2)[-1]
+            media.append(InputMediaPhoto(media=url, caption=caption))
 
-    await ctx.bot.send_chat_action(cid, ChatAction.UPLOAD_PHOTO)
-    if media:
-        await ctx.bot.send_media_group(chat_id=cid, media=media)
-    else:
-        await ctx.bot.send_message(cid, "Lo siento, no encontré imágenes para mostrar.")
+        await ctx.bot.send_chat_action(cid, ChatAction.UPLOAD_PHOTO)
+        if media:
+            await ctx.bot.send_media_group(chat_id=cid, media=media)
+        else:
+            await ctx.bot.send_message(cid, "Lo siento, no encontré imágenes para mostrar.")
 
-    est["fase"] = "esperando_color"
-    est["modelo"] = modelo
-    await ctx.bot.send_message(
-        chat_id=cid,
-        text="¿Qué color te gustaría?",
-        reply_markup=menu_botones(
-            obtener_colores_por_modelo(inv, est["marca"], modelo)
-        )
-    )
-    return
-
-# ——— 4) Fase: esperando_color ————————————————————————————————
-if est["fase"] == "esperando_color":
-    colores = obtener_colores_por_modelo(inv, est["marca"], est["modelo"])
-    if txt in map(normalize, colores):
-        est["color"] = next(c for c in colores if normalize(c) == txt)
-        est["fase"] = "esperando_talla"
-        await update.message.reply_text(
-            "¿Qué talla deseas?",
+        est["fase"] = "esperando_color"
+        est["modelo"] = modelo
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="¿Qué color te gustaría?",
             reply_markup=menu_botones(
-                obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
+                obtener_colores_por_modelo(inv, est["marca"], modelo)
             )
         )
-    else:
-        await update.message.reply_text(
-            "Mira que de momento no disponemos de ese color, solo hay disponibles los siguientes.",
-            reply_markup=menu_botones(colores)
-        )
-    return
+        return
 
-# ——— 5) Fase: esperando_talla ————————————————————————————————
-if est["fase"] == "esperando_talla":
-    tallas = obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
-    if txt in map(normalize, tallas):
-        est["talla"] = next(t for t in tallas if normalize(t) == txt)
-        est["fase"] = "esperando_nombre"
-        await update.message.reply_text(
-            "¿Tu nombre?",
-            reply_markup=ReplyKeyboardRemove()
-        )
-    else:
-        await update.message.reply_text(
-            "Elige una talla válida.",
-            reply_markup=menu_botones(tallas)
-        )
-    return
+    # ——— 4) Fase: esperando_color ————————————————————————————————
+    if est["fase"] == "esperando_color":
+        colores = obtener_colores_por_modelo(inv, est["marca"], est["modelo"])
+        if txt in map(normalize, colores):
+            est["color"] = next(c for c in colores if normalize(c) == txt)
+            est["fase"] = "esperando_talla"
+            await update.message.reply_text(
+                "¿Qué talla deseas?",
+                reply_markup=menu_botones(
+                    obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
+                )
+            )
+        else:
+            await update.message.reply_text(
+                "Mira que de momento no disponemos de ese color, solo hay disponibles los siguientes.",
+                reply_markup=menu_botones(colores)
+            )
+        return
+
+    # ——— 5) Fase: esperando_talla ————————————————————————————————
+    if est["fase"] == "esperando_talla":
+        tallas = obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
+        if txt in map(normalize, tallas):
+            est["talla"] = next(t for t in tallas if normalize(t) == txt)
+            est["fase"] = "esperando_nombre"
+            await update.message.reply_text(
+                "¿Tu nombre?",
+                reply_markup=ReplyKeyboardRemove()
+            )
+        else:
+            await update.message.reply_text(
+                "Elige una talla válida.",
+                reply_markup=menu_botones(tallas)
+            )
+        return
+
+    # … resto de las fases …
     # Datos del usuario y pago
     if est["fase"] == "esperando_talla":
         tallas = obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
