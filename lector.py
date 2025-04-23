@@ -34,6 +34,7 @@ from telegram.ext import (
 )
 
 # Carga la credencial desde el secret de Render
+# Carga la credencial desde el secret de Render
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
 creds = service_account.Credentials.from_service_account_info(
     creds_info,
@@ -41,6 +42,15 @@ creds = service_account.Credentials.from_service_account_info(
 )
 drive_service = build("drive", "v3", credentials=creds)
 
+# ←––––––––––––– Aquí inserta el diagnóstico rápido ––––––––––––––→
+try:
+    test = drive_service.files().list(pageSize=1).execute()
+    logging.info("✔ Conexión a Drive OK, primer archivo: %s", test.get("files"))
+except Exception as e:
+    logging.error("❌ Error al listar en Drive:", exc_info=e)
+
+# Ahora ya puedes precargar hashes sin sorpresa de errores crípticos
+MODEL_HASHES = precargar_hashes_from_drive(DRIVE_FOLDER_ID)
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 
 PHASH_THRESHOLD = 15
