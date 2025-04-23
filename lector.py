@@ -26,8 +26,8 @@ from telegram import (
     KeyboardButton,
     ReplyKeyboardRemove,
     InputMediaPhoto,
-    ChatAction,
 )
+from telegram.constants import ChatAction  # ✅ Importación correcta en versiones 20+
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
