@@ -14,6 +14,7 @@ import string
 import datetime
 import unicodedata
 import difflib
+import asyncio
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -21,12 +22,12 @@ from googleapiclient.http import MediaIoBaseDownload
 
 from telegram import (
     Update,
-    InputMediaPhoto,
     ReplyKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardRemove,
+    InputMediaPhoto,
+    ChatAction,
 )
-from telegram.constants import ChatAction  # ✅ CORRECTO para evitar el error
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -34,8 +35,6 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-
-# Carga la credencial desde el secret de Render
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
 creds = service_account.Credentials.from_service_account_info(
     creds_info,
@@ -66,16 +65,14 @@ def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehas
 
         for f in resp.get("files", []):
             fid, name = f["id"], f["name"]
-            # 1) Construye el SKU usando las 3 primeras partes del nombre (sin extensión)
-            base = os.path.splitext(name)[0]       # ej: "DS_277_TATATA_1"
-            parts = base.split('_')                # ["DS","277","TATATA","1"]
+            base = os.path.splitext(name)[0]
+            parts = base.split('_')
             sku = parts[0]
             if len(parts) > 1:
-                sku += "_" + parts[1]              # e.g. "DS_277"
+                sku += "_" + parts[1]
             if len(parts) > 2:
-                sku += "_" + parts[2]              # e.g. "DS_277_TATATA"
+                sku += "_" + parts[2]
 
-            # 2) Descarga la imagen
             request = drive_service.files().get_media(fileId=fid)
             fh = io.BytesIO()
             downloader = MediaIoBaseDownload(fh, request)
@@ -84,7 +81,6 @@ def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehas
                 _, done = downloader.next_chunk()
             fh.seek(0)
 
-            # 3) Calcula hashes y agrúpalos bajo ese SKU
             try:
                 img = Image.open(fh)
                 ph = imagehash.phash(img)
@@ -154,14 +150,13 @@ def enviar_correo(dest, subj, body):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}")
 
 def enviar_correo_con_adjunto(dest, subj, body, adj):
-    logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}\n[Adj: {adj}]")
+    logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}\n[Adj: {adj}]"
 
 # ——— UTILIDADES DE INVENTARIO —————————————————————————————————————————
 estado_usuario: dict[int, dict] = {}
 inventario_cache = None
 
 def normalize(text) -> str:
-    # Asegura que text sea cadena y no None
     s = "" if text is None else str(text)
     t = unicodedata.normalize('NFKD', s.strip().lower())
     return "".join(ch for ch in t if not unicodedata.combining(ch))
@@ -212,6 +207,31 @@ def obtener_tallas_por_color(inv: list[dict], marca: str, modelo: str, color: st
                    and normalize(i.get("modelo"))==normalize(modelo)
                    and normalize(i.get("color"))==normalize(color)
                    and disponible(i)})
+
+#  TRANSCRIPCIÓN DE AUDIO (WHISPER)
+# ───────────────────────────────────────────────────────────────
+TEMP_AUDIO_DIR = "temp_audio"
+os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
+
+async def transcribe_audio(file_path: str) -> str | None:
+    """
+    Envía el .ogg a Whisper-1 (idioma ES) y devuelve la transcripción.
+    Si falla, devuelve None.
+    """
+    try:
+        with open(file_path, "rb") as f:
+            rsp = await client.audio.transcriptions.create(
+                model="whisper-1",
+                file=f,
+                language="es",               # fuerza español
+                response_format="text",      # devuelve str plano
+                prompt="Español Colombia, jerga: parce, mano, ñero, buenos días, buenas, hola"
+            )
+        if isinstance(rsp, str) and rsp.strip():
+            return rsp.strip()
+    except Exception as e:
+        logging.error(f"❌ Whisper error: {e}")
+    return None
 
 # ——— Función para mostrar imágenes de modelo desde Drive ——————————————————
 async def mostrar_imagenes_modelo(cid, ctx, marca, tipo_modelo):
@@ -275,6 +295,33 @@ def generate_sale_id() -> str:
     rnd = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
     return f"VEN-{ts}-{rnd}"
 
+#  HOJA DE PEDIDOS
+# ───────────────────────────────────────────────────────────────
+def registrar_orden(data: dict):
+    payload = {
+        "numero_venta": data.get("Número Venta", ""),
+        "fecha_venta":  data.get("Fecha Venta", ""),
+        "cliente":      data.get("Cliente", ""),
+        "telefono":     data.get("Teléfono", ""),
+        "producto":     data.get("Producto", ""),
+        "color":        data.get("Color", ""),
+        "talla":        data.get("Talla", ""),
+        "correo":       data.get("Correo", ""),
+        "pago":         data.get("Pago", ""),
+        "estado":       data.get("Estado", "")
+    }
+    logging.info(f"[SHEETS] Payload JSON que envío:\n{payload}")
+    try:
+        resp = requests.post(URL_SHEETS_PEDIDOS, json=payload)
+        logging.info(f"[SHEETS] HTTP {resp.status_code} — Body: {resp.text}")
+    except Exception as e:
+        logging.error(f"[SHEETS] Error al hacer POST: {e}")
+
+def generate_sale_id() -> str:
+    ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    rnd = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+    return f"VEN-{ts}-{rnd}"
+
 # ——— HANDLERS —————————————————————————————————————————————————————
 
 async def saludo_bienvenida(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -297,164 +344,188 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         reset_estado(cid)
     est = estado_usuario[cid]
     inv = obtener_inventario()
-    txt_raw = update.message.text or ""
-    txt = normalize(txt_raw)
 
-    # ——— estáticos omitidos… ————————————————————————————————
+    # ── NUEVO: Detectar voz/audio y transcribir ─────────────────────
+    txt_raw = ""
+    if update.message.voice or update.message.audio:
+        fobj = update.message.voice or update.message.audio
+        tg_file = await fobj.get_file()
+        local_path = os.path.join(TEMP_AUDIO_DIR, f"{cid}_{tg_file.file_id}.ogg")
+        await tg_file.download_to_drive(local_path)
 
-    # ——— 1) Detección de marca ————————————————————————————————
-    if est["fase"] == "esperando_comando":
-        marcas = obtener_marcas_unicas(inv)
-        texto = normalize(txt_raw)
-        elegido = None
-        for m in marcas:
-            norm_m = normalize(m)
-            # a) Subcadena exacta
-            if re.search(rf"\b{re.escape(norm_m)}\b", texto):
-                elegido = m
-                break
-            # b) Fuzzy matching contra todo el texto
-            if difflib.SequenceMatcher(None, norm_m, texto).ratio() > 0.6:
-                elegido = m
-                break
-        if elegido:
-            est["marca"] = elegido
-            est["fase"] = "confirmar_modelo_o_ver"
-            modelos = obtener_modelos_por_marca(inv, elegido)
+        txt_raw = await transcribe_audio(local_path)
+        os.remove(local_path)  # limpia temp
+
+        if not txt_raw:
             await update.message.reply_text(
-                f"Tengo estos modelos de {elegido.upper()} disponibles:\n"
-                + "\n".join(f"– {m}" for m in modelos)
-                + "\n\n¿Quieres escribir el modelo o prefieres que te muestre imágenes?",
-                reply_markup=menu_botones(["Escribir modelo", "Ver imágenes"])
+                "Ese audio se escucha muy mal 😕. ¿Podrías enviarlo de nuevo o escribir tu mensaje?",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+    else:
+        # Mensaje de texto normal
+        txt_raw = update.message.text or ""
+
+    txt = normalize(txt_raw)
+    # Esperando comando
+    if est["fase"] == "inicio":
+        await saludo_bienvenida(update, ctx)
+        est["fase"] = "esperando_comando"
+        return
+
+    if est["fase"] == "esperando_comando":
+        # 1) Comandos estáticos
+        if txt in ("menu", "inicio"):
+            reset_estado(cid)
+            await saludo_bienvenida(update, ctx)
+            return
+        if "rastrear" in txt:
+            est["fase"] = "esperando_numero_rastreo"
+            await update.message.reply_text("Perfecto, envíame el número de venta.", reply_markup=ReplyKeyboardRemove())
+            return
+        if any(k in txt for k in ("cambio", "reembol", "devolucion")):
+            est["fase"] = "esperando_numero_devolucion"
+            await update.message.reply_text(
+                "Envíame el número de venta para realizar la devolución del pedido.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+        if re.search(r"\b(catálogo|catalogo)\b", txt):
+            reset_estado(cid)
+            await update.message.reply_text(CATALOG_MESSAGE, reply_markup=menu_botones([
+                "Hacer pedido", "Enviar imagen", "Ver catálogo", "Rastrear pedido", "Realizar cambio"
+            ]))
+            return
+        if "imagen" in txt or "foto" in txt:
+            est["fase"] = "esperando_imagen"
+            await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
+            return
+
+        # 2) Detección de marca
+        marcas = obtener_marcas_unicas(inv)
+        logging.debug(f"[Chat {cid}] txt_norm={txt!r} | marcas={marcas}")
+
+        # 2a) Primero por substring (útil para siglas como “DS”)
+        elegido = next((m for m in marcas if normalize(m) in txt), None)
+
+        # 2b) Si no, por tokens + difflib
+        if not elegido:
+            palabras_usuario = txt.split()
+            for m in marcas:
+                for tok in normalize(m).split():
+                    if difflib.get_close_matches(tok, palabras_usuario, n=1, cutoff=0.6):
+                        elegido = m
+                        break
+                if elegido:
+                    break
+
+        if elegido:
+            logging.info(f"Marca detectada: {elegido}")
+            est["marca"] = elegido
+            est["fase"] = "esperando_modelo"
+            await update.message.reply_text(
+                f"¡Genial! Veo que buscas {elegido}. ¿Qué modelo de {elegido} te interesa?",
+                reply_markup=menu_botones(obtener_modelos_por_marca(inv, elegido))
             )
             return
 
-    # ——— 2) Fase intermedia: confirmar_modelo_o_ver ——————————————————
-    if est["fase"] == "confirmar_modelo_o_ver":
-        if "imagen" in txt or "foto" in txt:
-            modelos = obtener_modelos_por_marca(inv, est["marca"])
-            est["fase"] = "esperando_tipo_modelo_vis"
-            await update.message.reply_text(
-                "¿Qué modelo quieres ver primero?",
-                reply_markup=menu_botones(modelos)
-            )
-        elif "modelo" in txt:
-            est["fase"] = "esperando_modelo"
-            await update.message.reply_text(
-                "Perfecto, dime el nombre exacto del modelo:",
-                reply_markup=ReplyKeyboardRemove()
-            )
-        else:
-            await update.message.reply_text(
-                "Elige si quieres escribir el modelo o ver imágenes.",
-                reply_markup=menu_botones(["Escribir modelo", "Ver imágenes"])
-            )
-        return
-
-    # ——— 3) Fase: esperando_tipo_modelo_vis —————————————————————————
-    if est["fase"] == "esperando_tipo_modelo_vis":
-        modelos = obtener_modelos_por_marca(inv, est["marca"])
-        mapa = { normalize(m): m for m in modelos }
-        clave = normalize(txt_raw)
-
-        if clave in mapa:
-            modelo = mapa[clave]
-        else:
-            match = difflib.get_close_matches(clave, mapa.keys(), n=1, cutoff=0.5)
-            if match:
-                modelo = mapa[match[0]]
-            else:
-                await update.message.reply_text(
-                    "No reconozco ese modelo. Elige uno de estos:",
-                    reply_markup=menu_botones(modelos)
-                )
-                return
-
-        # Mostrar imágenes desde Drive, con fallback por marca
-        sku = f"{est['marca'].replace(' ', '_')}_{modelo}"
-        q_modelo = (
-            f"'{DRIVE_FOLDER_ID}' in parents "
-            f"and name contains '{sku}' and mimeType contains 'image/'"
-        )
-        files = (
-            drive_service.files()
-            .list(q=q_modelo, spaces="drive", fields="files(id,name)")
-            .execute()
-            .get("files", [])
-        )
-        if not files:
-            q_marca = (
-                f"'{DRIVE_FOLDER_ID}' in parents "
-                f"and name contains '{est['marca'].replace(' ', '_')}_' "
-                "and mimeType contains 'image/'"
-            )
-            files = (
-                drive_service.files()
-                .list(q=q_marca, spaces="drive", fields="files(id,name)")
-                .execute()
-                .get("files", [])
-            )
-
-        media = []
-        for f in files[:5]:
-            url = f"https://drive.google.com/uc?id={f['id']}"
-            caption = f["name"].split("_", 2)[-1]
-            media.append(InputMediaPhoto(media=url, caption=caption))
-
-        await ctx.bot.send_chat_action(cid, ChatAction.UPLOAD_PHOTO)
-        if media:
-            await ctx.bot.send_media_group(chat_id=cid, media=media)
-        else:
-            await ctx.bot.send_message(cid, "Lo siento, no encontré imágenes para mostrar.")
-
-        est["fase"] = "esperando_color"
-        est["modelo"] = modelo
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="¿Qué color te gustaría?",
-            reply_markup=menu_botones(
-                obtener_colores_por_modelo(inv, est["marca"], modelo)
-            )
+        # 3) Fallback
+        logging.debug("No detectó ninguna marca en esperando_comando")
+        await update.message.reply_text(
+            "No entendí tu elección. Usa /start para volver al menú."
         )
         return
 
-    # ——— 4) Fase: esperando_color ————————————————————————————————
-    if est["fase"] == "esperando_color":
-        colores = obtener_colores_por_modelo(inv, est["marca"], est["modelo"])
-        if txt in map(normalize, colores):
-            est["color"] = next(c for c in colores if normalize(c) == txt)
+    # Rastrear pedido
+    if est["fase"] == "esperando_numero_rastreo":
+        await update.message.reply_text("Guía para rastrear: https://www.instagram.com/juanp_ocampo/")
+        reset_estado(cid)
+        return
+
+    # Devolución
+    if est["fase"] == "esperando_numero_devolucion":
+        est["referencia"] = txt_raw.strip()
+        est["fase"] = "esperando_motivo_devolucion"
+        await update.message.reply_text("Motivo de devolución:")
+        return
+    if est["fase"] == "esperando_motivo_devolucion":
+        enviar_correo(EMAIL_DEVOLUCIONES, f"Devolución {NOMBRE_NEGOCIO}", f"Venta: {est['referencia']}\nMotivo: {txt_raw}")
+        await update.message.reply_text("Solicitud enviada.")
+        reset_estado(cid)
+        return
+
+    # Imagen enviada
+   
+    if est["fase"] == "esperando_imagen" and update.message.photo:
+        # 1) Descarga la foto a disco
+        f = await update.message.photo[-1].get_file()
+        tmp = os.path.join("temp", f"{cid}.jpg")
+        os.makedirs("temp", exist_ok=True)
+        await f.download_to_drive(tmp)
+
+        # 2) Identifica modelo desde Drive
+        ref = identify_model_from_stream(tmp)
+        os.remove(tmp)
+
+        # 3) Desempaqueta directamente MARCA_MODELO_COLOR
+        if ref:
+            # ref viene como "DS_277_TATATA"
+            marca, modelo, color = ref.split('_')
+            est.update({
+                "marca": marca,
+                "modelo": modelo,
+                "color": color,
+                "fase": "imagen_detectada"
+            })
+            await update.message.reply_text(
+                f"La imagen coincide con {marca} {modelo} color {color}. ¿Continuamos? (SI/NO)",
+                reply_markup=menu_botones(["SI", "NO"])
+            )
+        else:
+            reset_estado(cid)
+            await update.message.reply_text("No reconocí el modelo. /start para reiniciar.")
+        return
+
+    # Confirmación imagen
+    if est["fase"] == "imagen_detectada":
+        if txt in ("si", "s"):
             est["fase"] = "esperando_talla"
             await update.message.reply_text(
                 "¿Qué talla deseas?",
-                reply_markup=menu_botones(
-                    obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
-                )
+                reply_markup=menu_botones(obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"]))
             )
         else:
-            await update.message.reply_text(
-                "Mira que de momento no disponemos de ese color, solo hay disponibles los siguientes.",
-                reply_markup=menu_botones(colores)
-            )
+            await update.message.reply_text("Cancelado. /start para reiniciar.")
+            reset_estado(cid)
         return
 
-    # ——— 5) Fase: esperando_talla ————————————————————————————————
-    if est["fase"] == "esperando_talla":
-        tallas = obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
-        if txt in map(normalize, tallas):
-            est["talla"] = next(t for t in tallas if normalize(t) == txt)
-            est["fase"] = "esperando_nombre"
+    # Selección manual de modelo/color/talla
+    if est["fase"] == "esperando_modelo":
+        modelos = obtener_modelos_por_marca(inv, est["marca"])
+        if txt in map(normalize, modelos):
+            est["modelo"] = next(m for m in modelos if normalize(m)==txt)
+            est["fase"] = "esperando_color"
             await update.message.reply_text(
-                "¿Tu nombre?",
-                reply_markup=ReplyKeyboardRemove()
+                "¿Que color desea?",
+                reply_markup=menu_botones(obtener_colores_por_modelo(inv, est["marca"], est["modelo"]))
             )
         else:
-            await update.message.reply_text(
-                "Elige una talla válida.",
-                reply_markup=menu_botones(tallas)
-            )
+            await update.message.reply_text("Elige un modelo válido.", reply_markup=menu_botones(modelos))
         return
 
-    # … resto de las fases …
+    if est["fase"] == "esperando_color":
+        colores = obtener_colores_por_modelo(inv, est["marca"], est["modelo"])
+        if txt in map(normalize, colores):
+            est["color"] = next(c for c in colores if normalize(c)==txt)
+            est["fase"] = "esperando_talla"
+            await update.message.reply_text(
+                "¿Que talla desea?",
+                reply_markup=menu_botones(obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"]))
+            )
+        else:
+            await update.message.reply_text("Mira que de momento no disponemos de ese color, solo hay disponibles los siguientes.", reply_markup=menu_botones(colores))
+        return
+
     # Datos del usuario y pago
     if est["fase"] == "esperando_talla":
         tallas = obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
@@ -572,57 +643,25 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # Fallback
     await update.message.reply_text("No entendí. Usa /start para reiniciar.")
 
-async def handle_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    cid = update.effective_chat.id
-    if cid not in estado_usuario:
-        reset_estado(cid)
-    est = estado_usuario[cid]
-
-    file = await update.message.photo[-1].get_file()
-    tmp = f"temp/{cid}.jpg"
-    os.makedirs("temp", exist_ok=True)
-    await file.download_to_drive(tmp)
-
-    ref = identify_model_from_stream(tmp)
-    os.remove(tmp)
-
-    if not ref:
-        await update.message.reply_text("No pude reconocer el modelo en la foto.")
-        return
-
-    marca, modelo, color = ref.split('_')
-    est.update({
-        "marca": marca,
-        "modelo": modelo,
-        "color": color,
-        "fase": "esperando_talla"
-    })
-    await update.message.reply_text(
-        f"La imagen coincide con {marca} {modelo} color {color}. ¿Qué talla deseas?",
-        reply_markup=menu_botones(
-            obtener_tallas_por_color(obtener_inventario(), marca, modelo, color)
-        )
-    )
-
 def main():
-    logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.add_handler(MessageHandler(filters.TEXT, responder))
+    # Capturamos texto, fotos y voz/audio
+    app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO, responder))
 
     async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error("❌ Excepción procesando update:", exc_info=context.error)
     app.add_error_handler(error_handler)
 
     port = int(os.environ.get("PORT", 8443))
-    ngrok_host = os.environ["NGROK_HOSTNAME"]
+    ngrok_host = os.environ.get("NGROK_HOSTNAME")
+    if not ngrok_host:
+        logging.error("❌ Debes exportar NGROK_HOSTNAME antes de arrancar")
+        return
+
     app.run_webhook(
         listen="0.0.0.0",
         port=port,
         url_path=TOKEN,
         webhook_url=f"https://{ngrok_host}/{TOKEN}"
     )
-
-if __name__ == "__main__":
-    main()
