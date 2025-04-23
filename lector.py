@@ -305,7 +305,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     # ——— Fase esperando_comando —————————————————————————————
-    # ——— Fase esperando_comando —————————————————————————————
     if est["fase"] == "esperando_comando":
         # 1) Comandos estáticos
         if txt in ("menu", "inicio"):
@@ -345,7 +344,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
 
         # 2) Detección de marca
-        # 2) Detección de marca
         marcas = obtener_marcas_unicas(inv)
         elegido = None
         palabras = txt.split()
@@ -374,7 +372,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     # ——— Fase intermedia: confirmar_modelo_o_ver ——————————————————
-    # ——— Fase intermedia: confirmar_modelo_o_ver ——————————————————
     if est["fase"] == "confirmar_modelo_o_ver":
         # txt ya está normalizado (minúsculas, sin tildes)
         if "modelo" in txt and "imagen" not in txt and "foto" not in txt:
@@ -398,20 +395,30 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     # ——— Fase: esperando_tipo_modelo_vis ———————————————————————————————
+   
     if est["fase"] == "esperando_tipo_modelo_vis":
         modelos_disponibles = obtener_modelos_por_marca(inv, est["marca"])
+        # mapa de clave_normalizada → modelo real
         mapa_modelos = { normalize(m): m for m in modelos_disponibles }
 
-        clave = normalize(txt_raw)  # normaliza la entrada del usuario
+        clave = normalize(txt_raw)
 
-        if clave not in mapa_modelos:
-            await update.message.reply_text(
-                "Elige un modelo válido para ver imágenes:",
-                reply_markup=menu_botones(modelos_disponibles)
-            )
-            return
+        # 1) intento exacto
+        if clave in mapa_modelos:
+            modelo_elegido = mapa_modelos[clave]
+        else:
+            # 2) intento fuzzy sobre las claves normalizadas
+            posibles = difflib.get_close_matches(clave, mapa_modelos.keys(), n=1, cutoff=0.5)
+            if posibles:
+                modelo_elegido = mapa_modelos[posibles[0]]
+            else:
+                await update.message.reply_text(
+                    "No reconozco ese modelo. Elige uno de estos:",
+                    reply_markup=menu_botones(modelos_disponibles)
+                )
+                return
 
-        modelo_elegido = mapa_modelos[clave]
+        # con modelo_elegido válido, mostramos las imágenes
         await mostrar_imagenes_modelo(cid, ctx, est["marca"], modelo_elegido)
         return
 
