@@ -150,7 +150,7 @@ def enviar_correo(dest, subj, body):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}")
 
 def enviar_correo_con_adjunto(dest, subj, body, adj):
-    logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}\n[Adj: {adj}]"
+    logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}\n[Adj: {adj}]")
 
 # ——— UTILIDADES DE INVENTARIO —————————————————————————————————————————
 estado_usuario: dict[int, dict] = {}
