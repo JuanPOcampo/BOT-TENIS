@@ -14,7 +14,6 @@ import string
 import datetime
 import unicodedata
 import difflib
-from telegram import InputMediaPhoto, ChatAction, ReplyKeyboardRemove
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
