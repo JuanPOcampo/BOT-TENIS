@@ -345,62 +345,68 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
 
         # 2) Detección de marca
+        # 2) Detección de marca
         marcas = obtener_marcas_unicas(inv)
         elegido = None
         palabras = txt.split()
 
         for marca in marcas:
-            tokens = normalize(marca).split()  # ej. ["dolce","gabbana"]
-            # 2a) Si alguno de esos tokens aparece literalmente
-            if any(tok in palabras for tok in tokens):
-                elegido = marca
-                break
-            # 2b) Si difflib devuelve una coincidencia aproximada
-            if any(difflib.get_close_matches(tok, palabras, n=1, cutoff=0.6) for tok in tokens):
+            if normalize(marca) in palabras or any(difflib.get_close_matches(tok, palabras, n=1, cutoff=0.6)
+                                                   for tok in normalize(marca).split()):
                 elegido = marca
                 break
 
-        # 3) Si detecta marca, pasamos a la fase intermedia
         if elegido:
             est["marca"] = elegido
+            # obtenemos los modelos reales de Sheets
+            modelos = obtener_modelos_por_marca(inv, elegido)
             est["fase"] = "confirmar_modelo_o_ver"
             await update.message.reply_text(
-                f"Tengo estos modelos de {elegido} disponibles: básicos o performance.\n"
-                "¿Sabes cuál quieres o prefieres que te muestre imágenes?",
-                reply_markup=menu_botones(["Sé el modelo", "Ver imágenes"])
+                f"Tengo estos modelos de {elegido} disponibles:\n" +
+                "\n".join(f"– {m}" for m in modelos) +
+                "\n\n¿Quieres escribir el modelo o prefieres que te muestre imágenes?",
+                reply_markup=menu_botones(["Escribir modelo", "Ver imágenes"])
             )
             return
 
-        # ← Aquí vendría el fallback de marca si no hay coincidencias →
-
-            # 4) Fallback
-            await update.message.reply_text("No entendí tu elección. Usa /start para volver al menú.")
-            return
+        # fallback
+        await update.message.reply_text("No entendí tu elección. Usa /start para volver al menú.")
+        return
 
         # ─── Fase intermedia: confirmar_modelo_o_ver ────────────────────────────
-        if est["fase"] == "confirmar_modelo_o_ver":
-            low = txt
-            if low in ("sé el modelo","se el modelo"):
-                est["fase"] = "esperando_modelo"
-                await update.message.reply_text("Perfecto, dime el nombre exacto del modelo:")
-            elif low in ("ver imágenes","mostrar imágenes"):
-                est["fase"] = "esperando_tipo_modelo_vis"
-                await update.message.reply_text(
-                    "¿Qué modelo quieres ver primero? Básicos o Performance?",
-                    reply_markup=menu_botones(["Básicos","Performance"])
-                )
-            else:
-                await update.message.reply_text(
-                    "Elige “Sé el modelo” o “Ver imágenes”.",
-                    reply_markup=menu_botones(["Sé el modelo","Ver imágenes"])
-                )
-            return
+    # ——— Fase confirmar_modelo_o_ver ——————————————————
+    if est["fase"] == "confirmar_modelo_o_ver":
+        if txt in ("escribir modelo",):
+            est["fase"] = "esperando_modelo"
+            await update.message.reply_text("Perfecto, escribe el nombre exacto del modelo:", 
+                                            reply_markup=ReplyKeyboardRemove())
+        elif txt in ("ver imágenes",):
+            # reutilizamos los mismos modelos para botones
+            modelos = obtener_modelos_por_marca(inv, est["marca"])
+            est["fase"] = "esperando_tipo_modelo_vis"
+            await update.message.reply_text(
+                "¿Qué modelo quieres ver primero?",
+                reply_markup=menu_botones(modelos)
+            )
+        else:
+            await update.message.reply_text(
+                "Elige “Escribir modelo” o “Ver imágenes”.",
+                reply_markup=menu_botones(["Escribir modelo", "Ver imágenes"])
+            )
+        return
 
         # ─── Fase: esperando_tipo_modelo_vis ───────────────────────────────────
-        if est["fase"] == "esperando_tipo_modelo_vis":
-            tipo = "Basicos" if "basicos" in txt else "Performance"
-            await mostrar_imagenes_modelo(cid, ctx, est["marca"], tipo)
+    # ——— Fase: esperando_tipo_modelo_vis ——————————————————
+    if est["fase"] == "esperando_tipo_modelo_vis":
+        # txt_raw aquí es el modelo elegido
+        modelo_elegido = txt_raw.strip()
+        if modelo_elegido not in obtener_modelos_por_marca(inv, est["marca"]):
+            await update.message.reply_text("Elige un modelo válido.", 
+                                            reply_markup=menu_botones(obtener_modelos_por_marca(inv, est["marca"])))
             return
+        # llamamos a tu función que envía las fotos desde Drive
+        await mostrar_imagenes_modelo(cid, ctx, est["marca"], modelo_elegido)
+        return
 
         # … aquí continúa el bloque de esperando_modelo, esperando_color, etc. …
 
