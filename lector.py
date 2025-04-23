@@ -239,7 +239,7 @@ async def mostrar_imagenes_modelo(cid, ctx, marca, tipo_modelo):
     resp = (
         drive_service.files()
         .list(
-            q=f\"'{DRIVE_FOLDER_ID}' in parents and name contains '{sku}' and mimeType contains 'image/'\",
+            q=f\"'{DRIVE_FOLDER_ID}' in parents and name contains '{sku}' and mimeType contains 'image/'",
             spaces="drive",
             fields="files(id, name)",
         )
