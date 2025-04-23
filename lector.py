@@ -34,7 +34,6 @@ from telegram.ext import (
 )
 
 # Carga la credencial desde el secret de Render
-# Carga la credencial desde el secret de Render
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
 creds = service_account.Credentials.from_service_account_info(
     creds_info,
@@ -42,15 +41,6 @@ creds = service_account.Credentials.from_service_account_info(
 )
 drive_service = build("drive", "v3", credentials=creds)
 
-# ←––––––––––––– Aquí inserta el diagnóstico rápido ––––––––––––––→
-try:
-    test = drive_service.files().list(pageSize=1).execute()
-    logging.info("✔ Conexión a Drive OK, primer archivo: %s", test.get("files"))
-except Exception as e:
-    logging.error("❌ Error al listar en Drive:", exc_info=e)
-
-# Ahora ya puedes precargar hashes sin sorpresa de errores crípticos
-MODEL_HASHES = precargar_hashes_from_drive(DRIVE_FOLDER_ID)
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 
 PHASH_THRESHOLD = 15
@@ -308,13 +298,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     txt_raw = update.message.text or ""
     txt = normalize(txt_raw)
 
-    # ——— Fase inicio ————————————————————————————————
+    # ——— Fase esperando_comando —————————————————————————————
+    
     if est["fase"] == "inicio":
         await saludo_bienvenida(update, ctx)
         est["fase"] = "esperando_comando"
         return
 
-    # ——— Fase esperando_comando —————————————————————————————
     if est["fase"] == "esperando_comando":
         # 1) Comandos estáticos
         if txt in ("menu", "inicio"):
@@ -323,35 +313,26 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
         if "rastrear" in txt:
             est["fase"] = "esperando_numero_rastreo"
-            await update.message.reply_text(
-                "Perfecto, envíame el número de venta.",
-                reply_markup=ReplyKeyboardRemove()
-            )
+            await update.message.reply_text("Perfecto, envíame el número de venta.", reply_markup=ReplyKeyboardRemove())
             return
         if any(k in txt for k in ("cambio", "reembol", "devolucion")):
             est["fase"] = "esperando_numero_devolucion"
             await update.message.reply_text(
-                "Envíame el número de venta para la devolución.",
+                "Envíame el número de venta para realizar la devolución del pedido.",
                 reply_markup=ReplyKeyboardRemove()
             )
             return
         if re.search(r"\b(catálogo|catalogo)\b", txt):
             reset_estado(cid)
-            await update.message.reply_text(
-                CATALOG_MESSAGE,
-                reply_markup=menu_botones([
-                    "Hacer pedido", "Enviar imagen", "Ver catálogo",
-                    "Rastrear pedido", "Realizar cambio"
-                ])
-            )
+            await update.message.reply_text(CATALOG_MESSAGE, reply_markup=menu_botones([
+                "Hacer pedido", "Enviar imagen", "Ver catálogo", "Rastrear pedido", "Realizar cambio"
+            ]))
             return
         if "imagen" in txt or "foto" in txt:
             est["fase"] = "esperando_imagen"
-            await update.message.reply_text(
-                CLIP_INSTRUCTIONS,
-                reply_markup=ReplyKeyboardRemove()
-            )
+            await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
             return
+
 
         # 2) Detección de marca
         marcas = obtener_marcas_unicas(inv)
