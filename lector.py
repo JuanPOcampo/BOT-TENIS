@@ -39,13 +39,10 @@ creds = service_account.Credentials.from_service_account_info(
     creds_info,
     scopes=["https://www.googleapis.com/auth/drive.readonly"],
 )
-drive_service = build(
-    "drive", "v3",
-    credentials=creds,
-    cache_discovery=False
-)
+drive_service = build("drive", "v3", credentials=creds)
 
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
+
 PHASH_THRESHOLD = 15
 AHASH_THRESHOLD = 12
 
