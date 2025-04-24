@@ -11,3 +11,4 @@ google-auth-oauthlib
 pydub
 ffmpeg-python
 uvicorn
+fastapi
