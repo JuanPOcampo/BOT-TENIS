@@ -868,7 +868,6 @@ async def procesar_wa(cid: str, body: str) -> dict:
 #     – Maneja texto (body) y también imágenes (type == "image")
 # --------------------------------------------------------------------
 @api.post("/venom")
-@api.post("/venom")
 async def venom_webhook(req: Request):
     try:
         data = await req.json()
@@ -971,3 +970,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(api, host="0.0.0.0", port=port)
+
