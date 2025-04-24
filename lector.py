@@ -55,8 +55,8 @@ drive_service = build("drive", "v3", credentials=creds)
 
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 
-PHASH_THRESHOLD = 15
-AHASH_THRESHOLD = 12
+PHASH_THRESHOLD = 20
+AHASH_THRESHOLD = 18
 
 def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]]:
     """
@@ -875,31 +875,29 @@ async def venom_webhook(req: Request):
         body = data.get("body", "") or ""
         mtype = data.get("type", "")
 
-        logging.info(f"📩 Mensaje recibido de {cid} — Tipo: {mtype}")
+        logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype}")
 
-        # ─────── IMAGEN RECIBIDA ───────
         if mtype == "image" and "media" in data:
             img_url = data["media"]
             logging.info(f"🌐 URL de imagen: {img_url}")
 
             try:
                 r = requests.get(img_url, timeout=10)
+                logging.info(f"📥 Status descarga: {r.status_code}")
                 r.raise_for_status()
-                logging.info("✅ Imagen descargada correctamente")
             except Exception as e:
-                logging.error(f"❌ Error al descargar la imagen: {e}")
+                logging.error(f"❌ Fallo al descargar imagen: {e}")
                 return JSONResponse({
                     "type": "text",
                     "text": "No pude descargar la imagen 😕"
                 })
 
             os.makedirs("temp", exist_ok=True)
-            timestamp = int(datetime.datetime.now().timestamp())
-            local_path = f"temp/{cid}_{timestamp}.jpg"
+            local_path = f"temp/{cid}_{int(datetime.datetime.now().timestamp())}.jpg"
             try:
                 with open(local_path, "wb") as f:
                     f.write(r.content)
-                logging.info(f"💾 Imagen guardada en {local_path}")
+                logging.info(f"💾 Imagen guardada en: {local_path}")
             except Exception as e:
                 logging.error(f"❌ Error al guardar imagen: {e}")
                 return JSONResponse({
@@ -908,26 +906,26 @@ async def venom_webhook(req: Request):
                 })
 
             try:
+                logging.info(f"🧠 Enviando a identify_model_from_stream...")
                 ref = identify_model_from_stream(local_path)
-                logging.info(f"🔍 Resultado de hash: {ref}")
+                logging.info(f"🔍 Resultado del hash: {ref}")
             except Exception as e:
                 logging.error(f"❌ Error al procesar imagen: {e}")
                 return JSONResponse({
                     "type": "text",
-                    "text": "Error al analizar la imagen 😕"
+                    "text": "Error al procesar la imagen 😕"
                 })
             finally:
                 try:
                     os.remove(local_path)
-                    logging.info(f"🧹 Archivo temporal eliminado: {local_path}")
-                except Exception as e:
-                    logging.warning(f"⚠️ No se pudo eliminar {local_path}: {e}")
+                    logging.info(f"🧹 Eliminado {local_path}")
+                except:
+                    pass
 
             if ref:
                 try:
                     marca, modelo, color = ref.split('_', 2)
-                except Exception as e:
-                    logging.error(f"❌ Error al desempaquetar referencia: {e}")
+                except:
                     marca, modelo, color = "Marca", "Modelo", "Color"
 
                 estado_usuario.setdefault(cid, reset_estado(cid))
@@ -944,23 +942,21 @@ async def venom_webhook(req: Request):
                     "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
                 })
 
-            # No se detectó el modelo
             reset_estado(cid)
-            logging.info("🔎 No se reconoció el modelo desde la imagen.")
             return JSONResponse({
                 "type": "text",
                 "text": "No reconocí el modelo. Puedes intentar con otra imagen o escribir /start para reiniciar."
             })
 
-        # ─────── TEXTO NORMAL ───────
+        # Si no es imagen, procesa texto
         reply = await procesar_wa(cid, body)
         return JSONResponse(reply)
 
-    except Exception as e:
-        logging.exception("🔥 Error general en /venom")
+    except Exception:
+        logging.exception("🔥 Error en /venom")
         return JSONResponse({
             "type": "text",
-            "text": f"Error interno: {str(e)}"
+            "text": "Error interno en el bot. Intenta de nuevo."
         }, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # 5. Inicio del servidor en Render
