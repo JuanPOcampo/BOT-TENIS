@@ -582,21 +582,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             logging.info(f"Marca detectada: {elegido}")
             est["marca"] = elegido
             est["fase"] = "esperando_modelo"
-
-            modelos = obtener_modelos_por_marca(inv, elegido)
-
             await update.message.reply_text(
-                f"¡Genial! Veo que buscas {elegido.upper()}. ¿Qué modelo de {elegido.upper()} te interesa?"
-            )
-
-            await update.message.reply_text(
-                f"Los modelos disponibles de {elegido.upper()} son los siguientes:\n" +
-                "\n".join(f"- {m}" for m in modelos)
-            )
-
-            await update.message.reply_text(
-                "¿Cuál te interesa?",
-                reply_markup=menu_botones(modelos)
+                f"¡Genial! Veo que buscas {elegido}. ¿Qué modelo de {elegido} te interesa?",
+                reply_markup=menu_botones(obtener_modelos_por_marca(inv, elegido))
             )
             return
             
@@ -875,17 +863,71 @@ async def procesar_wa(cid: str, body: str) -> dict:
     return {"type": "text", "text": ctx.resp[-1] if ctx.resp else "No entendí 🥲"}
 
 # 4. Webhook para WhatsApp (usado por Venom)
+# --------------------------------------------------------------------
+# 4. Webhook para WhatsApp (usado por Venom)
+#     – Maneja texto (body) y también imágenes (type == "image")
+# --------------------------------------------------------------------
 @api.post("/venom")
 async def venom_webhook(req: Request):
     try:
         data = await req.json()
-        cid = wa_chat_id(data["from"])
-        body = data.get("body", "")
+        cid   = wa_chat_id(data["from"])        # 573001234567
+        body  = data.get("body", "")            # texto (puede venir vacío)
+        mtype = data.get("type", "")            # "text", "image", etc.
+
+        # ── Si el usuario envía una IMAGEN ──────────────────────────
+        if mtype == "image" and "media" in data:
+            img_url = data["media"]             # URL temporal que da Venom
+            resp    = requests.get(img_url)
+
+            if resp.status_code == 200:
+                os.makedirs("temp", exist_ok=True)
+                local_path = f"temp/{cid}.jpg"
+                with open(local_path, "wb") as f:
+                    f.write(resp.content)
+
+                ref = identify_model_from_stream(local_path)
+                os.remove(local_path)
+
+                if ref:
+                    marca, modelo, color = ref.split('_')
+                    estado_usuario.setdefault(cid, reset_estado(cid))
+                    est = estado_usuario[cid]
+                    est.update({
+                        "fase"  : "imagen_detectada",
+                        "marca" : marca,
+                        "modelo": modelo,
+                        "color" : color,
+                    })
+                    return JSONResponse({
+                        "type": "text",
+                        "text": f"La imagen coincide con {marca} {modelo} color {color}. "
+                                f"¿Continuamos? (SI/NO)"
+                    })
+
+                # No coincidió ningún modelo
+                reset_estado(cid)
+                return JSONResponse({
+                    "type": "text",
+                    "text": "No reconocí el modelo. Escribe /start para reiniciar."
+                })
+
+            # Fallo al descargar la imagen
+            return JSONResponse({
+                "type": "text",
+                "text": "No pude descargar la imagen 😕"
+            })
+
+        # ── Mensaje de TEXTO normal (o voz ya transcrito) ───────────
         reply = await procesar_wa(cid, body)
         return JSONResponse(reply)
+
     except Exception:
         logging.exception("Error en /venom")
-        return JSONResponse({"type": "text", "text": "Error interno"}, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return JSONResponse(
+            {"type": "text", "text": "Error interno"},
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 # 5. Inicio del servidor en Render
 if __name__ == "__main__":
