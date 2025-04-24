@@ -21,29 +21,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
-from telegram import (
-    Update,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    ReplyKeyboardRemove,
-    InputMediaPhoto,
-)
-from telegram.constants import ChatAction  # ✅ Importación correcta en versiones 20+
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
-from telegram.constants import ChatAction  # ✅ Importación correcta en versiones 20+
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
 creds = service_account.Credentials.from_service_account_info(
     creds_info,
@@ -124,7 +102,6 @@ def identify_model_from_stream(path: str) -> str | None:
     return None
 
 # ——— VARIABLES DE ENTORNO ——————————————————————————————————————————————
-TOKEN                 = os.environ["TOKEN_TELEGRAM"]
 OPENAI_API_KEY        = os.environ["OPENAI_API_KEY"]
 NOMBRE_NEGOCIO        = os.environ.get("NOMBRE_NEGOCIO", "Tienda Tenis")
 URL_SHEETS_INVENTARIO = os.environ["URL_SHEETS_INVENTARIO"]
@@ -169,6 +146,75 @@ def normalize(text) -> str:
     s = "" if text is None else str(text)
     t = unicodedata.normalize('NFKD', s.strip().lower())
     return "".join(ch for ch in t if not unicodedata.combining(ch))
+
+CONVERSION_TALLAS = {
+    "usa": {
+        "6": "38", "6.5": "38.5", "7": "39", "7.5": "39.5",
+        "8": "40", "8.5": "40.5", "9": "41", "9.5": "41.5",
+        "10": "42", "10.5": "43", "11": "44", "11.5": "44.5",
+        "12": "45", "12.5": "45.5", "13": "46"
+    },
+    "euro": {
+        "38": "38", "38.5": "38.5", "39": "39", "39.5": "39.5",
+        "40": "40", "40.5": "40.5", "41": "41", "41.5": "41.5",
+        "42": "42", "43": "43", "44": "44", "44.5": "44.5",
+        "45": "45", "45.5": "45.5", "46": "46"
+    },
+    "colombia": {
+        "38": "38", "38.5": "38.5", "39": "39", "39.5": "39.5",
+        "40": "40", "40.5": "40.5", "41": "41", "41.5": "41.5",
+        "42": "42", "43": "43", "44": "44", "44.5": "44.5",
+        "45": "45", "45.5": "45.5", "46": "46"
+    }
+}
+def detectar_talla(texto_usuario: str, tallas_disponibles: list[str]) -> str | None:
+    texto = normalize(texto_usuario)
+
+    # Reemplazos comunes para tallas con medio punto
+    reemplazos = {
+        "seis y medio": "6.5", "7 y medio": "7.5", "ocho y medio": "8.5", "nueve y medio": "9.5",
+        "diez y medio": "10.5", "once y medio": "11.5", "doce y medio": "12.5",
+
+        "6 y 1/2": "6.5", "7 y 1/2": "7.5", "8 y 1/2": "8.5", "9 y 1/2": "9.5",
+        "10 y 1/2": "10.5", "11 y 1/2": "11.5", "12 y 1/2": "12.5",
+
+        "seis punto cinco": "6.5", "siete punto cinco": "7.5", "ocho punto cinco": "8.5",
+        "nueve punto cinco": "9.5", "diez punto cinco": "10.5", "once punto cinco": "11.5", "doce punto cinco": "12.5",
+
+        "6.5": "6.5", "7.5": "7.5", "8.5": "8.5", "9.5": "9.5", "10.5": "10.5",
+        "11.5": "11.5", "12.5": "12.5", "13": "13"
+    }
+
+    for k, v in reemplazos.items():
+        if k in texto:
+            texto = texto.replace(k, v)
+
+    # Sistema
+    if "usa" in texto:
+        sistema = "usa"
+    elif "euro" in texto or "europea" in texto:
+        sistema = "euro"
+    elif "colomb" in texto:
+        sistema = "colombia"
+    else:
+        sistema = None
+
+    # Extrae números incluyendo decimales (6.5, 10.5, etc)
+    numeros = re.findall(r"\d+(?:\.\d+)?", texto)
+
+    if not numeros:
+        return None
+
+    for num in numeros:
+        if sistema:
+            talla_estandar = CONVERSION_TALLAS.get(sistema, {}).get(num)
+            if talla_estandar and talla_estandar in tallas_disponibles:
+                return talla_estandar
+        else:
+            if num in tallas_disponibles:
+                return num
+
+    return None
 
 def reset_estado(cid: int):
     estado_usuario[cid] = {
@@ -376,22 +422,26 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         txt_raw = update.message.text or ""
 
     txt = normalize(txt_raw)
-    # Esperando comando
+
+    # ——— Palabras clave para reiniciar en cualquier fase ———
+    if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
+        reset_estado(cid)
+        await saludo_bienvenida(update, ctx)
+        return
+
+    # ——— Fase inicial ———
     if est["fase"] == "inicio":
         await saludo_bienvenida(update, ctx)
         est["fase"] = "esperando_comando"
         return
 
+    # ——— Esperando comando principal ———
     if est["fase"] == "esperando_comando":
-        # 1) Comandos estáticos
-        if txt in ("menu", "inicio"):
-            reset_estado(cid)
-            await saludo_bienvenida(update, ctx)
-            return
         if "rastrear" in txt:
             est["fase"] = "esperando_numero_rastreo"
             await update.message.reply_text("Perfecto, envíame el número de venta.", reply_markup=ReplyKeyboardRemove())
             return
+
         if any(k in txt for k in ("cambio", "reembol", "devolucion")):
             est["fase"] = "esperando_numero_devolucion"
             await update.message.reply_text(
@@ -399,25 +449,24 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 reply_markup=ReplyKeyboardRemove()
             )
             return
+
         if re.search(r"\b(catálogo|catalogo)\b", txt):
             reset_estado(cid)
             await update.message.reply_text(CATALOG_MESSAGE, reply_markup=menu_botones([
                 "Hacer pedido", "Enviar imagen", "Ver catálogo", "Rastrear pedido", "Realizar cambio"
             ]))
             return
+
         if "imagen" in txt or "foto" in txt:
             est["fase"] = "esperando_imagen"
             await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
             return
 
-        # 2) Detección de marca
+        # ——— Detección de marca ———
         marcas = obtener_marcas_unicas(inv)
         logging.debug(f"[Chat {cid}] txt_norm={txt!r} | marcas={marcas}")
 
-        # 2a) Primero por substring (útil para siglas como “DS”)
         elegido = next((m for m in marcas if normalize(m) in txt), None)
-
-        # 2b) Si no, por tokens + difflib
         if not elegido:
             palabras_usuario = txt.split()
             for m in marcas:
@@ -432,31 +481,38 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             logging.info(f"Marca detectada: {elegido}")
             est["marca"] = elegido
             est["fase"] = "esperando_modelo"
-            await update.message.reply_text(
-                f"¡Genial! Veo que buscas {elegido}. ¿Qué modelo de {elegido} te interesa?",
-                reply_markup=menu_botones(obtener_modelos_por_marca(inv, elegido))
-            )
-            return
 
-        # 3) Fallback
+        modelos = obtener_modelos_por_marca(inv, elegido)
+
+        await update.message.reply_text(f"Los modelos disponibles de {elegido} son los siguientes:")
+        await update.message.reply_text("\n".join(f"- {m}" for m in modelos))
+        await update.message.reply_text(
+            "¿Cuál te interesa?",
+            reply_markup=menu_botones(modelos)
+         )
+        return
+            
+
+        # ——— Fallback ———
         logging.debug("No detectó ninguna marca en esperando_comando")
         await update.message.reply_text(
             "No entendí tu elección. Usa /start para volver al menú."
         )
         return
 
-    # Rastrear pedido
+    # ——— Rastrear pedido ———
     if est["fase"] == "esperando_numero_rastreo":
         await update.message.reply_text("Guía para rastrear: https://www.instagram.com/juanp_ocampo/")
         reset_estado(cid)
         return
 
-    # Devolución
+    # ——— Devolución ———
     if est["fase"] == "esperando_numero_devolucion":
         est["referencia"] = txt_raw.strip()
         est["fase"] = "esperando_motivo_devolucion"
         await update.message.reply_text("Motivo de devolución:")
         return
+
     if est["fase"] == "esperando_motivo_devolucion":
         enviar_correo(EMAIL_DEVOLUCIONES, f"Devolución {NOMBRE_NEGOCIO}", f"Venta: {est['referencia']}\nMotivo: {txt_raw}")
         await update.message.reply_text("Solicitud enviada.")
@@ -525,24 +581,40 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if est["fase"] == "esperando_color":
         colores = obtener_colores_por_modelo(inv, est["marca"], est["modelo"])
         if txt in map(normalize, colores):
-            est["color"] = next(c for c in colores if normalize(c)==txt)
+            est["color"] = next(c for c in colores if normalize(c) == txt)
             est["fase"] = "esperando_talla"
+            tallas = obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
             await update.message.reply_text(
-                "¿Que talla desea?",
-                reply_markup=menu_botones(obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"]))
+                f"Las tallas disponibles para {est['modelo']} color {est['color']} son: {', '.join(tallas)}"
+            )
+            await update.message.reply_text(
+                "¿Qué talla deseas?",
+                reply_markup=menu_botones(tallas)
             )
         else:
-            await update.message.reply_text("Mira que de momento no disponemos de ese color, solo hay disponibles los siguientes.", reply_markup=menu_botones(colores))
+            await update.message.reply_text(
+                f"Los colores disponibles para {est['modelo']} son:\n" +
+                "\n".join(f"- {c}" for c in colores)
+            )
+            await update.message.reply_text(
+                "¿Cuál color te interesa?",
+                reply_markup=menu_botones(colores)
+            )
         return
 
     # Datos del usuario y pago
     if est["fase"] == "esperando_talla":
         tallas = obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
-        if txt in map(normalize, tallas):
-            est["talla"] = next(t for t in tallas if normalize(t)==txt)
+        talla_detectada = detectar_talla(txt_raw, tallas)
+        
+        if talla_detectada:
+            est["talla"] = talla_detectada
             est["fase"] = "esperando_nombre"
             await update.message.reply_text("¿Tu nombre?")
         else:
+            await update.message.reply_text(
+                f"Las tallas disponibles para {est['modelo']} color {est['color']} son: {', '.join(tallas)}"
+            )
             await update.message.reply_text("Elige una talla válida.", reply_markup=menu_botones(tallas))
         return
 
@@ -656,74 +728,59 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # --------------------------------------------------------------------
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 import nest_asyncio
+import asyncio
+import logging
+import os
+import re
+from types import SimpleNamespace
+
 nest_asyncio.apply()
 
-# 1.  Construimos la app Telegram (reusa tus handlers)
-# 1.  Construimos la app Telegram (reusa tus handlers)
-def build_telegram_app():
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO, responder))
-    return app
+# 1. Instancia FastAPI
+api = FastAPI(title="AYA Bot – WhatsApp")
 
-tg_app = build_telegram_app()
-
-# 2.  FastAPI — un solo servidor para ambos canales
-api = FastAPI(title="AYA Bot – Telegram + Venom")
-
-@api.post(f"/telegram/{TOKEN}")
-async def telegram_webhook(req: Request):
-    data = await req.json()
-    update = Update.de_json(data, tg_app.bot)
-    await tg_app.process_update(update)
-    return {"ok": True}
-
-# ---------- Puente WhatsApp ----------------------------------------
+# 2. Conversión de número WhatsApp (ej. 573001234567@c.us → 573001234567)
 def wa_chat_id(wa_from: str) -> str:
-    return re.sub(r"\D", "", wa_from)   # '573001234567@c.us' → '573001234567'
+    return re.sub(r"\D", "", wa_from)
 
+# 3. Simula un mensaje de WhatsApp dentro del flujo `responder`
 async def procesar_wa(cid: str, body: str) -> dict:
-    """
-    Llama a tu misma lógica de `responder` pero con un mensaje 'falso'.
-    """
-    # 1.  Mensaje dummy con método reply_text que almacena las respuestas
     class DummyMsg(SimpleNamespace):
         async def reply_text(self, text, **kw): self._ctx.resp.append(text)
 
     dummy_msg = DummyMsg(text=body, photo=None, voice=None, audio=None)
-    dummy_update = SimpleNamespace(message=dummy_msg,
-                                   effective_chat=SimpleNamespace(id=cid))
-    # 2.  Ctx falso que recoge send_message (por si lo usas en otros sitios)
+    dummy_update = SimpleNamespace(
+        message=dummy_msg,
+        effective_chat=SimpleNamespace(id=cid)
+    )
+
     class DummyCtx(SimpleNamespace):
         async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
+
     ctx = DummyCtx(resp=[], bot=SimpleNamespace(
-        send_message=lambda chat_id, text, **kw: asyncio.create_task(ctx.bot_send(chat_id, text))))
-    dummy_msg._ctx = ctx   # para que reply_text lo vea
-    # 3.  Ejecuta tu state-machine
+        send_message=lambda chat_id, text, **kw: asyncio.create_task(ctx.bot_send(chat_id, text))
+    ))
+    dummy_msg._ctx = ctx
+
     await responder(dummy_update, ctx)
     return {"type": "text", "text": ctx.resp[-1] if ctx.resp else "No entendí 🥲"}
 
+# 4. Webhook para WhatsApp (usado por Venom)
 @api.post("/venom")
 async def venom_webhook(req: Request):
     try:
-        data  = await req.json()
-        cid   = wa_chat_id(data["from"])
-        body  = data.get("body", "")
+        data = await req.json()
+        cid = wa_chat_id(data["from"])
+        body = data.get("body", "")
         reply = await procesar_wa(cid, body)
         return JSONResponse(reply)
     except Exception:
         logging.exception("Error en /venom")
-        return JSONResponse({"type":"text","text":"Error interno"}, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return JSONResponse({"type": "text", "text": "Error interno"}, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+# 5. Inicio del servidor en Render
 if __name__ == "__main__":
     import uvicorn
-    import nest_asyncio
-    import os
-
-    nest_asyncio.apply()
-
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(api, host="0.0.0.0", port=port)  # ✅ AQUÍ USAMOS `api`, que sí existe
+    uvicorn.run(api, host="0.0.0.0", port=port)
