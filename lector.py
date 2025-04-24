@@ -724,10 +724,9 @@ if __name__ == "__main__":
 
     nest_asyncio.apply()
 
-    # Inicia el bot Telegram dentro del loop de FastAPI
     loop = asyncio.get_event_loop()
     loop.create_task(tg_app.initialize())
     loop.create_task(tg_app.start())
 
-    port = int(os.environ.get("PORT", 8000))  # Render usa 8000 por defecto
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(api, host="0.0.0.0", port=port)  # ✅ AQUÍ USAMOS `api`, que sí existe
