@@ -1,5 +1,4 @@
 python-telegram-bot[webhooks]
-python-dotenv==1.0.1
 pillow
 imagehash
 openai
@@ -13,4 +12,4 @@ ffmpeg-python
 uvicorn
 fastapi
 nest_asyncio
-from dotenv import load_dotenv
+python-dotenv==1.0.1
