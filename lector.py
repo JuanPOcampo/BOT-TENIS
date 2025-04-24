@@ -35,6 +35,14 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+from telegram.constants import ChatAction  # ✅ Importación correcta en versiones 20+
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
 creds = service_account.Credentials.from_service_account_info(
     creds_info,
