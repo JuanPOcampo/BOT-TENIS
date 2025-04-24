@@ -717,11 +717,11 @@ async def venom_webhook(req: Request):
         logging.exception("Error en /venom")
         return JSONResponse({"type":"text","text":"Error interno"}, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-# 3.  Arranque único
-# ——— Arranque único para Render —————————————————————
 if __name__ == "__main__":
     import uvicorn
     import nest_asyncio
+    import os
+
     nest_asyncio.apply()
 
     # Inicia el bot Telegram dentro del loop de FastAPI
@@ -729,9 +729,5 @@ if __name__ == "__main__":
     loop.create_task(tg_app.initialize())
     loop.create_task(tg_app.start())
 
-    # Muestra la URL del webhook por consola (útil si usas NGROK_HOSTNAME como alias)
-    print("🔗 Webhook Telegram:", f"https://{os.getenv('NGROK_HOSTNAME')}/telegram/{TOKEN}")
-
-    # Lanza FastAPI (Render ya setea el puerto vía $PORT)
-    port = int(os.environ.get("PORT", "8000"))
-    uvicorn.run(api, host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 8000))  # Render usa 8000 por defecto
+    uvicorn.run(app, host="0.0.0.0", port=port)
