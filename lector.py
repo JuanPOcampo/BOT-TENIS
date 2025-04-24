@@ -875,48 +875,60 @@ async def venom_webhook(req: Request):
         body = data.get("body", "") or ""
         mtype = data.get("type", "")
 
-        # ────────────────────── IMAGEN RECIBIDA ────────────────────────
+        logging.info(f"📩 Mensaje recibido de {cid} — Tipo: {mtype}")
+
+        # ─────── IMAGEN RECIBIDA ───────
         if mtype == "image" and "media" in data:
             img_url = data["media"]
+            logging.info(f"🌐 URL de imagen: {img_url}")
+
             try:
                 r = requests.get(img_url, timeout=10)
                 r.raise_for_status()
+                logging.info("✅ Imagen descargada correctamente")
             except Exception as e:
-                logging.error(f"[IMG ERROR] Fallo al descargar imagen: {e}")
+                logging.error(f"❌ Error al descargar la imagen: {e}")
                 return JSONResponse({
                     "type": "text",
-                    "text": "No pude descargar la imagen 😕. Intenta nuevamente."
+                    "text": "No pude descargar la imagen 😕"
                 })
 
             os.makedirs("temp", exist_ok=True)
-            filename = f"{cid}_{int(datetime.datetime.now().timestamp())}.jpg"
-            local_path = os.path.join("temp", filename)
+            timestamp = int(datetime.datetime.now().timestamp())
+            local_path = f"temp/{cid}_{timestamp}.jpg"
             try:
                 with open(local_path, "wb") as f:
                     f.write(r.content)
-                logging.info(f"[IMG OK] Imagen guardada en {local_path}")
-
-                ref = identify_model_from_stream(local_path)
-                logging.info(f"[HASH] Resultado: {ref}")
-
+                logging.info(f"💾 Imagen guardada en {local_path}")
             except Exception as e:
-                logging.error(f"[HASH ERROR] Al analizar imagen: {e}")
+                logging.error(f"❌ Error al guardar imagen: {e}")
                 return JSONResponse({
                     "type": "text",
-                    "text": "No pude procesar la imagen 😕"
+                    "text": "No pude guardar la imagen 😕"
+                })
+
+            try:
+                ref = identify_model_from_stream(local_path)
+                logging.info(f"🔍 Resultado de hash: {ref}")
+            except Exception as e:
+                logging.error(f"❌ Error al procesar imagen: {e}")
+                return JSONResponse({
+                    "type": "text",
+                    "text": "Error al analizar la imagen 😕"
                 })
             finally:
                 try:
                     os.remove(local_path)
-                    logging.info(f"[CLEANUP] Eliminado {local_path}")
-                except:
-                    pass
+                    logging.info(f"🧹 Archivo temporal eliminado: {local_path}")
+                except Exception as e:
+                    logging.warning(f"⚠️ No se pudo eliminar {local_path}: {e}")
 
             if ref:
                 try:
                     marca, modelo, color = ref.split('_', 2)
-                except:
-                    marca, modelo, color = ("Marca", "Modelo", "Color")
+                except Exception as e:
+                    logging.error(f"❌ Error al desempaquetar referencia: {e}")
+                    marca, modelo, color = "Marca", "Modelo", "Color"
 
                 estado_usuario.setdefault(cid, reset_estado(cid))
                 est = estado_usuario[cid]
@@ -932,21 +944,23 @@ async def venom_webhook(req: Request):
                     "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
                 })
 
+            # No se detectó el modelo
             reset_estado(cid)
+            logging.info("🔎 No se reconoció el modelo desde la imagen.")
             return JSONResponse({
                 "type": "text",
-                "text": "No reconocí el modelo. Puedes enviarme otra imagen o escribir /start para reiniciar."
+                "text": "No reconocí el modelo. Puedes intentar con otra imagen o escribir /start para reiniciar."
             })
 
-        # ────────────────────── TEXTO NORMAL ────────────────────────
+        # ─────── TEXTO NORMAL ───────
         reply = await procesar_wa(cid, body)
         return JSONResponse(reply)
 
     except Exception as e:
-        logging.exception("❌ Error en /venom")
+        logging.exception("🔥 Error general en /venom")
         return JSONResponse({
             "type": "text",
-            "text": "Ocurrió un error procesando el mensaje. Intenta nuevamente."
+            "text": f"Error interno: {str(e)}"
         }, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # 5. Inicio del servidor en Render
