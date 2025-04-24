@@ -13,3 +13,4 @@ ffmpeg-python
 uvicorn
 fastapi
 nest_asyncio
+python-dotenv
