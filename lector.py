@@ -868,12 +868,16 @@ async def procesar_wa(cid: str, body: str) -> dict:
 #     – Maneja texto (body) y también imágenes (type == "image")
 # --------------------------------------------------------------------
 @api.post("/venom")
+@api.post("/venom")
 async def venom_webhook(req: Request):
     try:
         data = await req.json()
+
+        # Mostrar el JSON crudo recibido para depuración
         import pprint
-	pp = pprint.PrettyPrinter(indent=2)
-	pp.pprint(data)
+        pp = pprint.PrettyPrinter(indent=2)
+        pp.pprint(data)
+
         cid = wa_chat_id(data.get("from", ""))
         body = data.get("body", "") or ""
         mtype = data.get("type", "")
@@ -962,7 +966,7 @@ async def venom_webhook(req: Request):
             "text": "Error interno en el bot. Intenta de nuevo."
         }, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-# 5. Inicio del servidor en Render
+# 5. Inicio del servidor en Render o local
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
