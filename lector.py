@@ -870,6 +870,9 @@ async def procesar_wa(cid: str, body: str) -> dict:
 # ---------------------------------------------------------------------
 #  webhook /venom  – recibe mensajes de Venom (WhatsApp)
 # ---------------------------------------------------------------------
+# ---------------------------------------------------------------------
+#  webhook /venom  – recibe mensajes de Venom (WhatsApp)
+# ---------------------------------------------------------------------
 @api.post("/venom")
 async def venom_webhook(req: Request):
     try:
@@ -878,22 +881,21 @@ async def venom_webhook(req: Request):
         # -----------------------------------------------------------------
         data = await req.json()
 
-        # (DEBUG opcional) imprime el JSON completo en consola
         import pprint, base64, datetime, os, logging
         pp = pprint.PrettyPrinter(indent=2)
-        pp.pprint(data)
+        pp.pprint(data)             # ← DEBUG opcional
 
-        # Datos básicos del mensaje
-        cid   = wa_chat_id(data.get("from", ""))
-        body  = data.get("body", "") or ""
-        mtype = data.get("type", "")
+        cid      = wa_chat_id(data.get("from", ""))
+        body     = data.get("body", "") or ""
+        mtype    = data.get("type", "")
+        mimetype = (data.get("mimetype") or "").lower()   # 🔧 asegura str
 
         logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype}")
 
         # -----------------------------------------------------------------
-        # 2. Si es IMAGEN (base64) -> procesar con imagehash
+        # 2. Si es IMAGEN en base64
         # -----------------------------------------------------------------
-        if mtype == "image" or data.get("mimetype", "").startswith("image"):
+        if mtype == "image" or mimetype.startswith("image"):     # 🔧 usa mimetype
             try:
                 img_data = base64.b64decode(body)
                 logging.info("📥 Imagen decodificada correctamente desde base64.")
@@ -919,14 +921,13 @@ async def venom_webhook(req: Request):
                 return JSONResponse({"type": "text",
                                      "text": "Error al procesar la imagen 😕"})
             finally:
-                # Borrar archivo temporal
                 try:
                     os.remove(local_path)
                     logging.info(f"🧹 Eliminado {local_path}")
                 except:
                     pass
 
-            # Si hubo coincidencia → actualizar estado y responder
+            # Coincidencia
             if ref:
                 try:
                     marca, modelo, color = ref.split('_', 2)
@@ -951,7 +952,7 @@ async def venom_webhook(req: Request):
                                          "Puedes intentar con otra imagen o escribir /start para reiniciar."})
 
         # -----------------------------------------------------------------
-        # 3. Si NO es imagen → procesar el mensaje de texto normal
+        # 3. Si NO es imagen → procesar texto
         # -----------------------------------------------------------------
         reply = await procesar_wa(cid, body)
         return JSONResponse(reply)
@@ -967,10 +968,11 @@ async def venom_webhook(req: Request):
 
 
 # -------------------------------------------------------------------------
-# 5. Arranque del servidor (local o Render)
+# 5. Arranque del servidor
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn, os
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(api, host="0.0.0.0", port=port)
+
 
