@@ -166,6 +166,16 @@ def enviar_correo_con_adjunto(dest, subj, body, adj):
 estado_usuario: dict[int, dict] = {}
 inventario_cache = None
 
+def menciona_imagen(texto: str) -> bool:
+    texto = normalize(texto)
+    claves = [
+        "foto", "imagen", "pantallazo", "screenshot", "captura",
+        "tengo una foto", "te paso la imagen", "imagen del modelo",
+        "screen", "de instagram", "vi en insta", "historia de insta",
+        "la tengo guardada", "foto del tenis", "foto del zapato"
+    ]
+    return any(palabra in texto for palabra in claves)
+
 def normalize(text) -> str:
     s = "" if text is None else str(text)
     t = unicodedata.normalize('NFKD', s.strip().lower())
@@ -446,6 +456,11 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         txt_raw = update.message.text or ""
 
     txt = normalize(txt_raw)
+#   👉 Si el usuario menciona que tiene imagen, sin importar la fase
+    if menciona_imagen(txt):
+        est["fase"] = "esperando_imagen"
+        await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
+        return
 
     # ——— Palabras clave para reiniciar en cualquier fase ———
     if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
@@ -506,15 +521,22 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             est["marca"] = elegido
             est["fase"] = "esperando_modelo"
 
-        modelos = obtener_modelos_por_marca(inv, elegido)
+            modelos = obtener_modelos_por_marca(inv, elegido)
 
-        await update.message.reply_text(f"Los modelos disponibles de {elegido} son los siguientes:")
-        await update.message.reply_text("\n".join(f"- {m}" for m in modelos))
-        await update.message.reply_text(
-            "¿Cuál te interesa?",
-            reply_markup=menu_botones(modelos)
-         )
-        return
+            await update.message.reply_text(
+                f"¡Genial! Veo que buscas {elegido.upper()}. ¿Qué modelo de {elegido.upper()} te interesa?"
+            )
+
+            await update.message.reply_text(
+                f"Los modelos disponibles de {elegido.upper()} son los siguientes:\n" +
+                "\n".join(f"- {m}" for m in modelos)
+            )
+
+            await update.message.reply_text(
+                "¿Cuál te interesa?",
+                reply_markup=menu_botones(modelos)
+            )
+            return
             
 
         # ——— Fallback ———
