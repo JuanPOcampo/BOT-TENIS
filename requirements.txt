@@ -12,3 +12,4 @@ pydub
 ffmpeg-python
 uvicorn
 fastapi
+nest_asyncio
