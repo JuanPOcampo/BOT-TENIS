@@ -869,80 +869,85 @@ async def procesar_wa(cid: str, body: str) -> dict:
 # --------------------------------------------------------------------
 @api.post("/venom")
 async def venom_webhook(req: Request):
-    """
-    Webhook que recibe mensajes desde Venom.
-    Maneja texto común y procesamiento de imágenes con imagehash.
-    """
     try:
-        data  = await req.json()
-        cid   = wa_chat_id(data.get("from", ""))     # 573001234567
-        body  = data.get("body", "") or ""           # Texto puede venir vacío
-        mtype = data.get("type", "")                 # "text", "image", etc.
+        data = await req.json()
+        cid = wa_chat_id(data.get("from", ""))
+        body = data.get("body", "") or ""
+        mtype = data.get("type", "")
 
-        # ────────────────────── IMAGEN ────────────────────────────
-        if mtype == "image" and data.get("media"):
-            img_url = data["media"]                  # URL temporal de Venom
-
+        # ────────────────────── IMAGEN RECIBIDA ────────────────────────
+        if mtype == "image" and "media" in data:
+            img_url = data["media"]
             try:
                 r = requests.get(img_url, timeout=10)
                 r.raise_for_status()
             except Exception as e:
-                logging.error(f"[IMG] Descarga fallida: {e}")
+                logging.error(f"[IMG ERROR] Fallo al descargar imagen: {e}")
                 return JSONResponse({
                     "type": "text",
-                    "text": "No pude descargar la imagen 😕"
+                    "text": "No pude descargar la imagen 😕. Intenta nuevamente."
                 })
 
             os.makedirs("temp", exist_ok=True)
-            local_path = os.path.join("temp", f"{cid}_{int(datetime.datetime.now().timestamp())}.jpg")
-            with open(local_path, "wb") as fh:
-                fh.write(r.content)
-
+            filename = f"{cid}_{int(datetime.datetime.now().timestamp())}.jpg"
+            local_path = os.path.join("temp", filename)
             try:
+                with open(local_path, "wb") as f:
+                    f.write(r.content)
+                logging.info(f"[IMG OK] Imagen guardada en {local_path}")
+
                 ref = identify_model_from_stream(local_path)
+                logging.info(f"[HASH] Resultado: {ref}")
+
+            except Exception as e:
+                logging.error(f"[HASH ERROR] Al analizar imagen: {e}")
+                return JSONResponse({
+                    "type": "text",
+                    "text": "No pude procesar la imagen 😕"
+                })
             finally:
                 try:
                     os.remove(local_path)
-                except Exception:
-                    pass  # No es crítico si falla la limpieza
+                    logging.info(f"[CLEANUP] Eliminado {local_path}")
+                except:
+                    pass
 
             if ref:
-                # ref esperado: MARCA_MODELO_COLOR
                 try:
                     marca, modelo, color = ref.split('_', 2)
-                except ValueError:
+                except:
                     marca, modelo, color = ("Marca", "Modelo", "Color")
 
-                est = estado_usuario.setdefault(cid, reset_estado(cid))
+                estado_usuario.setdefault(cid, reset_estado(cid))
+                est = estado_usuario[cid]
                 est.update({
-                    "fase":   "imagen_detectada",
-                    "marca":  marca,
+                    "fase": "imagen_detectada",
+                    "marca": marca,
                     "modelo": modelo,
-                    "color":  color
+                    "color": color
                 })
 
                 return JSONResponse({
                     "type": "text",
-                    "text": f"La imagen coincide con {marca} {modelo} color {color}. "
-                            "¿Deseas continuar tu compra? (SI/NO)"
+                    "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
                 })
 
             reset_estado(cid)
             return JSONResponse({
                 "type": "text",
-                "text": "No reconocí el modelo. Envía otra imagen o escribe /start para reiniciar."
+                "text": "No reconocí el modelo. Puedes enviarme otra imagen o escribir /start para reiniciar."
             })
 
-        # ────────────────────── TEXTO / AUDIO ─────────────────────
+        # ────────────────────── TEXTO NORMAL ────────────────────────
         reply = await procesar_wa(cid, body)
         return JSONResponse(reply)
 
-    except Exception:
-        logging.exception("Error en /venom")
-        return JSONResponse(
-            {"type": "text", "text": "Error interno, intenta de nuevo."},
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+    except Exception as e:
+        logging.exception("❌ Error en /venom")
+        return JSONResponse({
+            "type": "text",
+            "text": "Ocurrió un error procesando el mensaje. Intenta nuevamente."
+        }, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # 5. Inicio del servidor en Render
 if __name__ == "__main__":
