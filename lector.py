@@ -428,11 +428,61 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     estado_usuario[cid]["fase"] = "esperando_comando"
 
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    cid = update.effective_chat.id
+    cid = update.effective_chat.id            # ← se define de primeras
+
+    # 1) Primer contacto: saludo y se queda en esperando_comando
     if cid not in estado_usuario:
         reset_estado(cid)
-    est = estado_usuario[cid]
-    inv = obtener_inventario()
+        await update.message.reply_text(
+            WELCOME_TEXT,
+            reply_markup=menu_botones([
+                "Hacer pedido", "Enviar imagen", "Ver catálogo",
+                "Rastrear pedido", "Realizar cambio"
+            ])
+        )
+        return                                 # ← esperamos el siguiente mensaje
+
+    est = estado_usuario[cid]                 # ← ya existe
+    inv = obtener_inventario()                # ← cache de inventario
+
+    # 2) Procesamos audio o texto plano ───────────────────────────
+    txt_raw = ""
+    if update.message.voice or update.message.audio:
+        fobj = update.message.voice or update.message.audio
+        tg_file = await fobj.get_file()
+        local_path = os.path.join(TEMP_AUDIO_DIR, f"{cid}_{tg_file.file_id}.ogg")
+        await tg_file.download_to_drive(local_path)
+        txt_raw = await transcribe_audio(local_path)
+        os.remove(local_path)
+        if not txt_raw:
+            await update.message.reply_text(
+                "Ese audio se escucha muy mal 😕. ¿Podrías enviarlo de nuevo o escribir tu mensaje?",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+    else:
+        txt_raw = update.message.text or ""
+
+    txt = normalize(txt_raw)
+
+    # 3) Reinicio explícito (/start, inicio, etc.) ────────────────
+    if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
+        reset_estado(cid)
+        await update.message.reply_text(
+            WELCOME_TEXT,
+            reply_markup=menu_botones([
+                "Hacer pedido", "Enviar imagen", "Ver catálogo",
+                "Rastrear pedido", "Realizar cambio"
+            ])
+        )
+        return
+
+    # 4) Intención global de enviar imagen (en cualquier fase) ────
+    if menciona_imagen(txt):
+        if est["fase"] != "esperando_imagen":
+            est["fase"] = "esperando_imagen"
+            await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
+        return
 
     # ── NUEVO: Detectar voz/audio y transcribir ─────────────────────
     txt_raw = ""
@@ -517,7 +567,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         marcas = obtener_marcas_unicas(inv)
         logging.debug(f"[Chat {cid}] txt_norm={txt!r} | marcas={marcas}")
 
-        elegido = next((m for m in marcas if normalize(m) in txt), None)
+        elegido = next((m for m in marcas if any(tok in txt for tok in normalize(m).split())), None)
         if not elegido:
             palabras_usuario = txt.split()
             for m in marcas:
