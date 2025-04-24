@@ -35,6 +35,14 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+from telegram.constants import ChatAction  # ✅ Importación correcta en versiones 20+
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
 creds = service_account.Credentials.from_service_account_info(
     creds_info,
@@ -643,28 +651,87 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # Fallback
     await update.message.reply_text("No entendí. Usa /start para reiniciar.")
 
-def main():
+   
+# --------------------------------------------------------------------
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+import nest_asyncio
+nest_asyncio.apply()
+
+# 1.  Construimos la app Telegram (reusa tus handlers)
+# 1.  Construimos la app Telegram (reusa tus handlers)
+def build_telegram_app():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    # Capturamos texto, fotos y voz/audio
     app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO, responder))
+    return app
 
-    async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        logging.error("❌ Excepción procesando update:", exc_info=context.error)
-    app.add_error_handler(error_handler)
+tg_app = build_telegram_app()
 
-    port = int(os.environ.get("PORT", 8443))
-    ngrok_host = os.environ.get("NGROK_HOSTNAME")
-    if not ngrok_host:
-        logging.error("❌ Debes exportar NGROK_HOSTNAME antes de arrancar")
-        return
+# 2.  FastAPI — un solo servidor para ambos canales
+api = FastAPI(title="AYA Bot – Telegram + Venom")
 
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        url_path=TOKEN,
-        webhook_url=f"https://{ngrok_host}/{TOKEN}"
-    )
+@api.post(f"/telegram/{TOKEN}")
+async def telegram_webhook(req: Request):
+    data = await req.json()
+    update = Update.de_json(data, tg_app.bot)
+    await tg_app.process_update(update)
+    return {"ok": True}
 
+# ---------- Puente WhatsApp ----------------------------------------
+def wa_chat_id(wa_from: str) -> str:
+    return re.sub(r"\D", "", wa_from)   # '573001234567@c.us' → '573001234567'
+
+async def procesar_wa(cid: str, body: str) -> dict:
+    """
+    Llama a tu misma lógica de `responder` pero con un mensaje 'falso'.
+    """
+    # 1.  Mensaje dummy con método reply_text que almacena las respuestas
+    class DummyMsg(SimpleNamespace):
+        async def reply_text(self, text, **kw): self._ctx.resp.append(text)
+
+    dummy_msg = DummyMsg(text=body, photo=None, voice=None, audio=None)
+    dummy_update = SimpleNamespace(message=dummy_msg,
+                                   effective_chat=SimpleNamespace(id=cid))
+    # 2.  Ctx falso que recoge send_message (por si lo usas en otros sitios)
+    class DummyCtx(SimpleNamespace):
+        async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
+    ctx = DummyCtx(resp=[], bot=SimpleNamespace(
+        send_message=lambda chat_id, text, **kw: asyncio.create_task(ctx.bot_send(chat_id, text))))
+    dummy_msg._ctx = ctx   # para que reply_text lo vea
+    # 3.  Ejecuta tu state-machine
+    await responder(dummy_update, ctx)
+    return {"type": "text", "text": ctx.resp[-1] if ctx.resp else "No entendí 🥲"}
+
+@api.post("/venom")
+async def venom_webhook(req: Request):
+    try:
+        data  = await req.json()
+        cid   = wa_chat_id(data["from"])
+        body  = data.get("body", "")
+        reply = await procesar_wa(cid, body)
+        return JSONResponse(reply)
+    except Exception:
+        logging.exception("Error en /venom")
+        return JSONResponse({"type":"text","text":"Error interno"}, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# 3.  Arranque único
+# ——— Arranque único para Render —————————————————————
 if __name__ == "__main__":
-    main()
+    import uvicorn
+    import nest_asyncio
+    nest_asyncio.apply()
+
+    # Inicia el bot Telegram dentro del loop de FastAPI
+    loop = asyncio.get_event_loop()
+    loop.create_task(tg_app.initialize())
+    loop.create_task(tg_app.start())
+
+    # Muestra la URL del webhook por consola (útil si usas NGROK_HOSTNAME como alias)
+    print("🔗 Webhook Telegram:", f"https://{os.getenv('NGROK_HOSTNAME')}/telegram/{TOKEN}")
+
+    # Lanza FastAPI (Render ya setea el puerto vía $PORT)
+    port = int(os.environ.get("PORT", "8000"))
+    uvicorn.run(api, host="0.0.0.0", port=port)
