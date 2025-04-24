@@ -457,28 +457,40 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     txt = normalize(txt_raw)
 #   👉 Si el usuario menciona que tiene imagen, sin importar la fase
+    # ── Detección global de intención de imagen ───────────────
     if menciona_imagen(txt):
-        est["fase"] = "esperando_imagen"
-        await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
+        # Solo cambia de fase si aún no estaba esperando la foto
+        if est["fase"] != "esperando_imagen":
+            est["fase"] = "esperando_imagen"
+            await update.message.reply_text(
+                CLIP_INSTRUCTIONS,
+                reply_markup=ReplyKeyboardRemove()
+            )
         return
 
     # ——— Palabras clave para reiniciar en cualquier fase ———
     if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
         reset_estado(cid)
         await saludo_bienvenida(update, ctx)
-        return
+        # ⬇️ dejamos al usuario ya en “esperando_comando” ⬇️
+        estado_usuario[cid]["fase"] = "esperando_comando"
+        # ⚠️ NO hacemos return: el mismo mensaje seguirá fluyendo
 
-    # ——— Fase inicial ———
+    # ——— Fase inicial (solo ocurre si algo cambió la fase a "inicio") ———
     if est["fase"] == "inicio":
         await saludo_bienvenida(update, ctx)
         est["fase"] = "esperando_comando"
-        return
+        # ⚠️ NO hacemos return: procesamos el mensaje que llegó
+        # (así “quiero unos gabbana” se analiza inmediatamente)
 
     # ——— Esperando comando principal ———
     if est["fase"] == "esperando_comando":
         if "rastrear" in txt:
             est["fase"] = "esperando_numero_rastreo"
-            await update.message.reply_text("Perfecto, envíame el número de venta.", reply_markup=ReplyKeyboardRemove())
+            await update.message.reply_text(
+                "Perfecto, envíame el número de venta.",
+                reply_markup=ReplyKeyboardRemove()
+            )
             return
 
         if any(k in txt for k in ("cambio", "reembol", "devolucion")):
@@ -491,15 +503,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         if re.search(r"\b(catálogo|catalogo)\b", txt):
             reset_estado(cid)
-            await update.message.reply_text(CATALOG_MESSAGE, reply_markup=menu_botones([
-                "Hacer pedido", "Enviar imagen", "Ver catálogo", "Rastrear pedido", "Realizar cambio"
-            ]))
+            await update.message.reply_text(
+                CATALOG_MESSAGE,
+                reply_markup=menu_botones([
+                    "Hacer pedido", "Enviar imagen", "Ver catálogo",
+                    "Rastrear pedido", "Realizar cambio"
+                ])
+            )
             return
 
-        if "imagen" in txt or "foto" in txt:
-            est["fase"] = "esperando_imagen"
-            await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
-            return
 
         # ——— Detección de marca ———
         marcas = obtener_marcas_unicas(inv)
