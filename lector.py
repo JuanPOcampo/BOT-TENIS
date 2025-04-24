@@ -4,6 +4,7 @@ import logging
 from dotenv import load_dotenv
 load_dotenv()
 import imagehash
+from types import SimpleNamespace
 from PIL import Image
 from openai import AsyncOpenAI
 import json
@@ -723,10 +724,6 @@ if __name__ == "__main__":
     import os
 
     nest_asyncio.apply()
-
-    loop = asyncio.get_event_loop()
-    loop.create_task(tg_app.initialize())
-    loop.create_task(tg_app.start())
 
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(api, host="0.0.0.0", port=port)  # ✅ AQUÍ USAMOS `api`, que sí existe
