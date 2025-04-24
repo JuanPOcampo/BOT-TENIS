@@ -1,5 +1,5 @@
 python-telegram-bot[webhooks]
-python-dotenv
+python-dotenv==1.0.1
 pillow
 imagehash
 openai
