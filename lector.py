@@ -871,13 +871,16 @@ async def procesar_wa(cid: str, body: str) -> dict:
 async def venom_webhook(req: Request):
     try:
         data = await req.json()
+        import pprint
+	pp = pprint.PrettyPrinter(indent=2)
+	pp.pprint(data)
         cid = wa_chat_id(data.get("from", ""))
         body = data.get("body", "") or ""
         mtype = data.get("type", "")
 
         logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype}")
 
-        if mtype == "image" and "media" in data:
+        if "media" in data and ("image" in data.get("mimetype", "") or "photo" in data.get("body", "").lower()):
             img_url = data["media"]
             logging.info(f"🌐 URL de imagen: {img_url}")
 
