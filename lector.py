@@ -867,107 +867,110 @@ async def procesar_wa(cid: str, body: str) -> dict:
 # 4. Webhook para WhatsApp (usado por Venom)
 #     – Maneja texto (body) y también imágenes (type == "image")
 # --------------------------------------------------------------------
+# ---------------------------------------------------------------------
+#  webhook /venom  – recibe mensajes de Venom (WhatsApp)
+# ---------------------------------------------------------------------
 @api.post("/venom")
 async def venom_webhook(req: Request):
     try:
+        # -----------------------------------------------------------------
+        # 1. Leer JSON entrante
+        # -----------------------------------------------------------------
         data = await req.json()
 
-        # Mostrar el JSON crudo recibido para depuración
-        import pprint
+        # (DEBUG opcional) imprime el JSON completo en consola
+        import pprint, base64, datetime, os, logging
         pp = pprint.PrettyPrinter(indent=2)
         pp.pprint(data)
 
-        cid = wa_chat_id(data.get("from", ""))
-        body = data.get("body", "") or ""
+        # Datos básicos del mensaje
+        cid   = wa_chat_id(data.get("from", ""))
+        body  = data.get("body", "") or ""
         mtype = data.get("type", "")
 
         logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype}")
 
-        if "media" in data and ("image" in data.get("mimetype", "") or "photo" in data.get("body", "").lower()):
-            img_url = data["media"]
-            logging.info(f"🌐 URL de imagen: {img_url}")
-
+        # -----------------------------------------------------------------
+        # 2. Si es IMAGEN (base64) -> procesar con imagehash
+        # -----------------------------------------------------------------
+        if mtype == "image" or data.get("mimetype", "").startswith("image"):
             try:
-                r = requests.get(img_url, timeout=10)
-                logging.info(f"📥 Status descarga: {r.status_code}")
-                r.raise_for_status()
+                img_data = base64.b64decode(body)
+                logging.info("📥 Imagen decodificada correctamente desde base64.")
             except Exception as e:
-                logging.error(f"❌ Fallo al descargar imagen: {e}")
-                return JSONResponse({
-                    "type": "text",
-                    "text": "No pude descargar la imagen 😕"
-                })
+                logging.error(f"❌ No se pudo decodificar la imagen: {e}")
+                return JSONResponse({"type": "text",
+                                     "text": "No pude procesar la imagen 😕"})
 
+            # Guardar archivo temporal
             os.makedirs("temp", exist_ok=True)
             local_path = f"temp/{cid}_{int(datetime.datetime.now().timestamp())}.jpg"
-            try:
-                with open(local_path, "wb") as f:
-                    f.write(r.content)
-                logging.info(f"💾 Imagen guardada en: {local_path}")
-            except Exception as e:
-                logging.error(f"❌ Error al guardar imagen: {e}")
-                return JSONResponse({
-                    "type": "text",
-                    "text": "No pude guardar la imagen 😕"
-                })
+            with open(local_path, "wb") as f:
+                f.write(img_data)
+            logging.info(f"💾 Imagen guardada en: {local_path}")
 
+            # Calcular hash y buscar coincidencia
             try:
-                logging.info(f"🧠 Enviando a identify_model_from_stream...")
+                logging.info("🧠 Enviando a identify_model_from_stream…")
                 ref = identify_model_from_stream(local_path)
                 logging.info(f"🔍 Resultado del hash: {ref}")
             except Exception as e:
-                logging.error(f"❌ Error al procesar imagen: {e}")
-                return JSONResponse({
-                    "type": "text",
-                    "text": "Error al procesar la imagen 😕"
-                })
+                logging.error(f"❌ Error al procesar la imagen: {e}")
+                return JSONResponse({"type": "text",
+                                     "text": "Error al procesar la imagen 😕"})
             finally:
+                # Borrar archivo temporal
                 try:
                     os.remove(local_path)
                     logging.info(f"🧹 Eliminado {local_path}")
                 except:
                     pass
 
+            # Si hubo coincidencia → actualizar estado y responder
             if ref:
                 try:
                     marca, modelo, color = ref.split('_', 2)
-                except:
+                except ValueError:
                     marca, modelo, color = "Marca", "Modelo", "Color"
 
                 estado_usuario.setdefault(cid, reset_estado(cid))
                 est = estado_usuario[cid]
-                est.update({
-                    "fase": "imagen_detectada",
-                    "marca": marca,
-                    "modelo": modelo,
-                    "color": color
-                })
+                est.update({"fase":   "imagen_detectada",
+                            "marca":  marca,
+                            "modelo": modelo,
+                            "color":  color})
 
-                return JSONResponse({
-                    "type": "text",
-                    "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
-                })
+                return JSONResponse({"type": "text",
+                                     "text": f"La imagen coincide con {marca} {modelo} color {color}. "
+                                             "¿Deseas continuar tu compra? (SI/NO)"})
 
+            # Sin coincidencia
             reset_estado(cid)
-            return JSONResponse({
-                "type": "text",
-                "text": "No reconocí el modelo. Puedes intentar con otra imagen o escribir /start para reiniciar."
-            })
+            return JSONResponse({"type": "text",
+                                 "text": "No reconocí el modelo. "
+                                         "Puedes intentar con otra imagen o escribir /start para reiniciar."})
 
-        # Si no es imagen, procesa texto
+        # -----------------------------------------------------------------
+        # 3. Si NO es imagen → procesar el mensaje de texto normal
+        # -----------------------------------------------------------------
         reply = await procesar_wa(cid, body)
         return JSONResponse(reply)
 
+    # ---------------------------------------------------------------------
+    # 4. Error global del webhook
+    # ---------------------------------------------------------------------
     except Exception:
         logging.exception("🔥 Error en /venom")
-        return JSONResponse({
-            "type": "text",
-            "text": "Error interno en el bot. Intenta de nuevo."
-        }, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return JSONResponse({"type": "text",
+                             "text": "Error interno en el bot. Intenta de nuevo."},
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-# 5. Inicio del servidor en Render o local
+
+# -------------------------------------------------------------------------
+# 5. Arranque del servidor (local o Render)
+# -------------------------------------------------------------------------
 if __name__ == "__main__":
-    import uvicorn
+    import uvicorn, os
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(api, host="0.0.0.0", port=port)
 
