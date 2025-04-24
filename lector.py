@@ -20,6 +20,8 @@ import asyncio
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+from types import SimpleNamespace
+from telegram import Update
 
 
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
