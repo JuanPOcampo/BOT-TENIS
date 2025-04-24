@@ -886,11 +886,16 @@ async def venom_webhook(req: Request):
                 with open(local_path, "wb") as f:
                     f.write(resp.content)
 
+                # Analiza la imagen
                 ref = identify_model_from_stream(local_path)
                 os.remove(local_path)
 
                 if ref:
-                    marca, modelo, color = ref.split('_')
+                    try:
+                        marca, modelo, color = ref.split('_')
+                    except ValueError:
+                        marca, modelo, color = "Marca", "Modelo", "Color"
+
                     estado_usuario.setdefault(cid, reset_estado(cid))
                     est = estado_usuario[cid]
                     est.update({
@@ -899,24 +904,36 @@ async def venom_webhook(req: Request):
                         "modelo": modelo,
                         "color" : color,
                     })
+
                     return JSONResponse({
                         "type": "text",
-                        "text": f"La imagen coincide con {marca} {modelo} color {color}. "
-                                f"¿Continuamos? (SI/NO)"
+                        "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
                     })
 
                 # No coincidió ningún modelo
                 reset_estado(cid)
                 return JSONResponse({
                     "type": "text",
-                    "text": "No reconocí el modelo. Escribe /start para reiniciar."
+                    "text": "No reconocí el modelo. Puedes intentar con otra imagen o escribir /start para comenzar de nuevo."
                 })
 
             # Fallo al descargar la imagen
             return JSONResponse({
                 "type": "text",
-                "text": "No pude descargar la imagen 😕"
+                "text": "No pude descargar la imagen 😕. Intenta nuevamente por favor."
             })
+
+        # Si no es imagen, no responde
+        return JSONResponse({
+            "type": "text",
+            "text": "Por favor envíame una imagen del modelo que deseas."
+        })
+
+    except Exception as e:
+        return JSONResponse({
+            "type": "text",
+            "text": f"Ocurrió un error al procesar la imagen: {str(e)}"
+        })
 
         # ── Mensaje de TEXTO normal (o voz ya transcrito) ───────────
         reply = await procesar_wa(cid, body)
