@@ -725,4 +725,5 @@ if __name__ == "__main__":
     print("🔗 Webhook Telegram:", f"https://{os.getenv('NGROK_HOSTNAME')}/telegram/{TOKEN}")
 
     # Lanza FastAPI (Render ya setea el puerto vía $PORT)
-    uvicorn.run(api, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+    port = int(os.environ.get("PORT", "8000"))
+    uvicorn.run(api, host="0.0.0.0", port=port)
