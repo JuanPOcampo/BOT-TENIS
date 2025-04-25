@@ -4,7 +4,6 @@ import base64
 import logging
 import json
 import re
-from PIL import Image, ImageChops
 import requests
 import random
 import string
@@ -92,8 +91,6 @@ def precargar_imagenes_drive(service, root_id):
             res = requests.get(url)
             res.raise_for_status()
             img = Image.open(io.BytesIO(res.content))
-            img.load()
-            img = recortar_bordes_negros(img)
             h = str(imagehash.phash(img))
             marca, modelo, color = (ruta + ["", "", ""])[:3]
             cache[h] = (marca, modelo, color)
@@ -104,8 +101,8 @@ def precargar_imagenes_drive(service, root_id):
     return cache
 
 
-PHASH_THRESHOLD = 26
-AHASH_THRESHOLD = 26
+PHASH_THRESHOLD = 25
+AHASH_THRESHOLD = 25
 
 def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]]:
     """
@@ -936,11 +933,11 @@ async def venom_webhook(req: Request):
         # 2️⃣ Si es imagen en base64
         if mtype == "image" or mimetype.startswith("image"):
             try:
-                b64_str   = body.split(",", 1)[1] if "," in body else body
+                b64_str = body.split(",", 1)[1] if "," in body else body
                 img_bytes = base64.b64decode(b64_str + "===")
-                img       = Image.open(io.BytesIO(img_bytes))
-                img.load()
-                logging.info("✅ Imagen decodificada y recortada")
+                img = Image.open(io.BytesIO(img_bytes))
+                img.load()  # ← fuerza carga completa
+                logging.info("✅ Imagen decodificada y cargada")
             except Exception as e:
                 logging.error(f"❌ No pude leer la imagen: {e}")
                 return JSONResponse(
