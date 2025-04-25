@@ -952,7 +952,7 @@ async def procesar_wa(cid: str, body: str) -> dict:
 async def venom_webhook(req: Request):
     try:
         # 1️⃣ Leer JSON
-        data = await req.json()
+        data     = await req.json()
         cid      = wa_chat_id(data.get("from", ""))
         body     = data.get("body", "") or ""
         mtype    = (data.get("type") or "").lower()
@@ -976,41 +976,49 @@ async def venom_webhook(req: Request):
             )
 
         # 2️⃣ Si es imagen en base64
-        if mtype == "image" or mimetype.startswith("image"):            
+        if mtype == "image" or mimetype.startswith("image"):
             try:
                 b64_str   = body.split(",", 1)[1] if "," in body else body
-                                          img_bytes = base64.b64decode(b64_str + "===")
-                                          img       = Image.open(io.BytesIO(img_bytes))
-                                          img.load()                          # fuerza carga completa
-                                          img = recortar_bordes_negros(img)   # ← recorte automático de bordes negros
-                                           logging.info("✅ Imagen decodificada y recortada")            except Exception as e:
+                img_bytes = base64.b64decode(b64_str + "===")
+                img       = Image.open(io.BytesIO(img_bytes))
+                img.load()                          # fuerza carga completa
+                img = recortar_bordes_negros(img)   # ← recorte automático de bordes negros
+                logging.info("✅ Imagen decodificada y recortada")
+            except Exception as e:
                 logging.error(f"❌ No pude leer la imagen: {e}")
                 return JSONResponse(
                     {"type": "text", "text": "No pude leer la imagen 😕"},
                     status_code=status.HTTP_400_BAD_REQUEST
                 )
-
+aaaaaaaaaaaaaaaaaaaaaaaaaaaa
             # 3️⃣ Calcular hash
             h_in = str(imagehash.phash(img))
-            ref = MODEL_HASHES.get(h_in)
+            ref  = MODEL_HASHES.get(h_in)
             logging.info(f"🔍 Hash {h_in} → {ref}")
 
             if ref:
                 marca, modelo, color = ref
                 estado_usuario.setdefault(cid, reset_estado(cid))
                 estado_usuario[cid].update(
-                    fase="imagen_detectada", marca=marca, modelo=modelo, color=color
+                    fase="imagen_detectada",
+                    marca=marca,
+                    modelo=modelo,
+                    color=color
                 )
-                return JSONResponse({
-                    "type": "text",
-                    "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
-                })
+                return JSONResponse(
+                    {
+                        "type": "text",
+                        "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
+                    }
+                )
             else:
                 reset_estado(cid)
-                return JSONResponse({
-                    "type": "text",
-                    "text": "No reconocí el modelo. Puedes intentar con otra imagen o escribir /start."
-                })
+                return JSONResponse(
+                    {
+                        "type": "text",
+                        "text": "No reconocí el modelo. Puedes intentar con otra imagen o escribir /start."
+                    }
+                )
 
         # 4️⃣ Si NO es imagen, procesa como texto normal
         reply = await procesar_wa(cid, body)
