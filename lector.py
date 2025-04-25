@@ -49,48 +49,43 @@ api = FastAPI()
 
 def recortar_bordes_negros(imagen: Image.Image, tolerancia: int = 10) -> Image.Image:
     """
-    Recorta solo barras negras arriba y abajo (estilo móvil) entre 60 y 100px máximo.
-    Si no cumple o queda muy pequeña, devuelve la imagen original.
+    Recorta solo barras negras arriba/abajo si superan cierto umbral y no recorta más del 20% de la altura.
+    Si no hay bordes claros o el recorte es excesivo, devuelve la imagen original.
     """
     try:
         if imagen.mode != "RGB":
             imagen = imagen.convert("RGB")
 
-        fondo = Image.new("RGB", imagen.size, (0, 0, 0))  # fondo negro
+        fondo = Image.new("RGB", imagen.size, (0, 0, 0))  # fondo negro puro
         diff = ImageChops.difference(imagen, fondo)
         diff = ImageChops.add(diff, diff, 2.0, -tolerancia)
         bbox = diff.getbbox()
 
         if not bbox:
-            return imagen
+            return imagen  # No hay diferencia visible
 
-        left, upper, right, lower = bbox
+        # Limitar solo vertical (superior/inferior)
+        _, upper, _, lower = bbox
 
-        # 🔒 Limitar el recorte SOLO a arriba/abajo con máximo 100 y mínimo 60 px
-        max_limite = 100
-        min_limite = 60
+        altura_original = imagen.height
+        max_recorte_total = int(altura_original * 0.2)  # máximo 20% de altura
 
-        # Recorte superior
-        if upper > min_limite:
-            upper = min(upper, max_limite)
-        else:
-            upper = 0
+        recorte_sup = upper
+        recorte_inf = altura_original - lower
 
-        # Recorte inferior
-        if imagen.height - lower > min_limite:
-            lower = max(lower, imagen.height - max_limite)
-        else:
-            lower = imagen.height
+        if recorte_sup + recorte_inf > max_recorte_total:
+            return imagen  # recortaría demasiado → cancelamos
 
-        img_crop = imagen.crop((0, upper, imagen.width, lower))
+        # Aplica recorte vertical seguro
+        img_crop = imagen.crop((0, recorte_sup, imagen.width, lower))
 
         if img_crop.height < 200:
-            return imagen
+            return imagen  # imagen resultante muy pequeña
 
         return img_crop
 
     except Exception as e:
-        logging.warning(f"⚠️ Recorte móvil falló: {e}")
+        logging.warning(f"⚠️ Recorte falló: {e}")
         return imagen
 
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
