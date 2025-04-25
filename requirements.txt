@@ -15,9 +15,9 @@ google-auth-oauthlib
 pydub
 ffmpeg-python
 
-torch               # motor de PyTorch
-clip-by-openai      # modelo CLIP
-pillow              # procesamiento de imágenes (PIL)
-numpy               # operaciones numéricas
+torch
+open_clip_torch        # 👈 NUEVO (mejor que clip-by-openai)
+pillow
+numpy
 
-openai              # si sigues usando la API para otras cosas
+openai
