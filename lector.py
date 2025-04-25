@@ -929,7 +929,7 @@ async def venom_webhook(req: Request):
     # ───────── Procesamos SOLO imágenes ─────────
     if mtype == "image" or mimetype.startswith("image"):
         try:
-            # 1️⃣  Base64 → bytes → PIL.Image  --------------
+            # 1️⃣  Base64 → bytes → PIL.Image
             b64_str  = body.split(",", 1)[1] if "," in body else body
             img      = Image.open(io.BytesIO(base64.b64decode(b64_str)))
             logging.info("✅ Imagen decodificada")
@@ -940,21 +940,34 @@ async def venom_webhook(req: Request):
                 status_code=status.HTTP_400_BAD_REQUEST
             )
 
-        # 2️⃣  Identificar por hash  -----------------------
+        # 2️⃣  Identificar por hash con tolerancia
         try:
-            h_in   = str(imagehash.phash(img))
-            ref    = MODEL_HASHES.get(h_in)          # (marca,modelo,color) o None
-            logging.info(f"🔍 Hash {h_in} → {ref}")
+            h_in = imagehash.phash(img)
+            ref = None
+            min_diff = 10  # Umbral ajustable (más bajo = más estricto)
+
+            for modelo, hashes in MODEL_HASHES.items():
+                for h_guardado in hashes:
+                    diff = h_in - imagehash.hex_to_hash(h_guardado)
+                    if diff < min_diff:
+                        min_diff = diff
+                        ref = modelo
+
+            logging.info(f"🔍 Hash calculado: {str(h_in)} — Coincidencia: {ref}")
         except Exception as e:
             logging.error(f"❌ Error hashing: {e}")
             ref = None
 
-        # 3️⃣  Responder al usuario  -----------------------
+        # 3️⃣  Responder al usuario
         if ref:
-            marca, modelo, color = ref              # ← ref ya es tupla de 3
+            try:
+                marca, modelo, color = ref.split('_', 2)
+            except ValueError:
+                marca, modelo, color = "Marca", "Modelo", "Color"
+
             text = (f"La imagen coincide con {marca} {modelo} color {color}. "
                     "¿Deseas continuar tu compra? (SI/NO)")
-            # Actualiza estado (si usas FSM)
+
             estado_usuario.setdefault(cid, reset_estado(cid))
             estado_usuario[cid].update(
                 fase="imagen_detectada", marca=marca, modelo=modelo, color=color
@@ -970,7 +983,6 @@ async def venom_webhook(req: Request):
     # ───────── Si NO es imagen, cae aquí ─────────
     reply = await procesar_wa(cid, body)
     return JSONResponse(reply)
-
 
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
