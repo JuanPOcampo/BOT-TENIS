@@ -16,6 +16,8 @@ import datetime
 import unicodedata
 import difflib
 import asyncio
+from fastapi import FastAPI, Request
+api = FastAPI()
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -914,7 +916,7 @@ async def procesar_wa(cid: str, body: str) -> dict:
 
 # 4. Webhook para WhatsApp (usado por Venom)
 # ---------- VENOM WEBHOOK ----------
-@app.post("/venom")
+@api.post("/venom")
 async def venom_webhook(req: Request):
     logging.info("🚀 /venom invocado")
     data = await req.json()
