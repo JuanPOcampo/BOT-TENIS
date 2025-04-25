@@ -919,55 +919,58 @@ async def procesar_wa(cid: str, body: str) -> dict:
 # ---------- VENOM WEBHOOK ----------
 @api.post("/venom")
 async def venom_webhook(req: Request):
-    logging.info("🚀 /venom invocado")
-    data = await req.json()
+    try:
+        logging.info("🚀 /venom invocado")
+        data = await req.json()
 
-    cid      = wa_chat_id(data.get("from", ""))
-    body     = data.get("body", "") or ""
-    mtype    = (data.get("type") or "").lower()
-    mimetype = (data.get("mimetype") or "").lower()
+        cid      = wa_chat_id(data.get("from", ""))
+        body     = data.get("body", "") or ""
+        mtype    = (data.get("type") or "").lower()
+        mimetype = (data.get("mimetype") or "").lower()
 
-    # ───────── Solo procesamos imágenes ─────────
-    if mtype == "image" or mimetype.startswith("image"):
-        # 1) Decodificar base64 ------------------------------------------
-        try:
-            b64_str = body.split(",", 1)[1] if "," in body else body
-            img_bytes = base64.b64decode(b64_str + "===")
-            img = Image.open(io.BytesIO(img_bytes))
-            img.load()                                       # ← ¡carga completa!
-            logging.info("✅ Imagen decodificada y cargada")
-        except Exception as e:
-            logging.error(f"❌ No pude leer la imagen: {e}")
-            return JSONResponse(
-                {"type": "text", "text": "No pude leer la imagen 😕"},
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
+        if mtype == "image" or mimetype.startswith("image"):
+            try:
+                b64_str = body.split(",", 1)[1] if "," in body else body
+                img_bytes = base64.b64decode(b64_str + "===")
+                img = Image.open(io.BytesIO(img_bytes))
+                img.load()
+                logging.info("✅ Imagen decodificada y cargada")
+            except Exception as e:
+                logging.error(f"❌ No pude leer la imagen: {e}")
+                return JSONResponse(
+                    {"type": "text", "text": "No pude leer la imagen 😕"},
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
 
-        # 2) Calcular hash y buscar -------------------------------------
-        h_in = str(imagehash.phash(img))
-        ref  = MODEL_HASHES.get(h_in)        # dict[hash] ⇒ (marca, modelo, color)
-        logging.info(f"🔍 Hash {h_in} → {ref}")
+            h_in = str(imagehash.phash(img))
+            ref  = MODEL_HASHES.get(h_in)
+            logging.info(f"🔍 Hash {h_in} → {ref}")
 
-        # 3) Responder ---------------------------------------------------
-        if ref:
-            marca, modelo, color = ref
-            text = (f"La imagen coincide con {marca} {modelo} color {color}. "
-                    "¿Deseas continuar tu compra? (SI/NO)")
-            estado_usuario.setdefault(cid, reset_estado(cid))
-            estado_usuario[cid].update(
-                fase="imagen_detectada", marca=marca, modelo=modelo, color=color
-            )
-        else:
-            text = ("No reconocí el modelo. "
-                    "Puedes intentar con otra imagen o escribir /start.")
-            reset_estado(cid)
+            if ref:
+                marca, modelo, color = ref
+                text = (f"La imagen coincide con {marca} {modelo} color {color}. "
+                        "¿Deseas continuar tu compra? (SI/NO)")
+                estado_usuario.setdefault(cid, reset_estado(cid))
+                estado_usuario[cid].update(
+                    fase="imagen_detectada", marca=marca, modelo=modelo, color=color
+                )
+            else:
+                text = ("No reconocí el modelo. "
+                        "Puedes intentar con otra imagen o escribir /start.")
+                reset_estado(cid)
 
-        # devolvemos JSON (no usamos venom_client)
-        return JSONResponse({"type": "text", "text": text})
+            return JSONResponse({"type": "text", "text": text})
 
-    # ───────── No es imagen → flujo normal ─────────
-    reply = await procesar_wa(cid, body)
-    return JSONResponse(reply)
+        # No es imagen → texto plano
+        reply = await procesar_wa(cid, body)
+        return JSONResponse(reply)
+
+    except Exception as e:
+        logging.exception("🔥 Error inesperado en /venom")
+        return JSONResponse(
+            {"type": "text", "text": "Ocurrió un error interno procesando la imagen 😵"},
+            status_code=500
+        )
 
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
