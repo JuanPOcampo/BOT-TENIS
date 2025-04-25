@@ -954,12 +954,12 @@ async def venom_webhook(req: Request):
         # 2️⃣ Si es imagen en base64
         if mtype == "image" or mimetype.startswith("image"):
             try:
-                b64_str = body.split(",", 1)[1] if "," in body else body
+                b64_str   = body.split(",", 1)[1] if "," in body else body
                 img_bytes = base64.b64decode(b64_str + "===")
-                img = Image.open(io.BytesIO(img_bytes))
+                img       = Image.open(io.BytesIO(img_bytes))
                 img.load()
-        img = recortar_bordes_negros(img)  # ← fuerza carga completa
-                logging.info("✅ Imagen decodificada y cargada")
+                img       = recortar_bordes_negros(img)  # ← recorte de bordes negros aquí
+                logging.info("✅ Imagen decodificada y recortada")
             except Exception as e:
                 logging.error(f"❌ No pude leer la imagen: {e}")
                 return JSONResponse(
