@@ -154,24 +154,6 @@ def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehas
 
 MODEL_HASHES = precargar_imagenes_drive(drive_service, DRIVE_FOLDER_ID)
 
-def identify_model_from_stream(path: str) -> str | None:
-    """
-    Abre la imagen subida, calcula su hash y busca directamente
-    en MODEL_HASHES cuál es el modelo (marca_modelo_color).
-    """
-    try:
-        img_up = Image.open(path)
-    except Exception as e:
-        logging.error(f"No pude leer la imagen subida: {e}")
-        return None
-
-    # ─── Aquí calculas y buscas el hash ───
-    img_hash = str(imagehash.phash(img_up))
-    modelo = next(
-        (m for m, hashes in MODEL_HASHES.items() if img_hash in hashes),
-        None
-    )
-   
 def identify_model_from_stream(path: str) -> tuple[str, str, str] | None:
     """
     Abre la imagen subida, calcula su hash y devuelve
@@ -185,6 +167,9 @@ def identify_model_from_stream(path: str) -> tuple[str, str, str] | None:
 
     # Calcula el hash perceptual
     img_hash = str(imagehash.phash(img_up))
+
+    # DEBUG: ver qué hash llegó y qué devuelve la caché
+    logging.info(f"🔍 Hash entrante: {img_hash} → ref en cache: {MODEL_HASHES.get(img_hash)}")
 
     # Busca directamente la tupla (marca, modelo, color) por clave
     ref = MODEL_HASHES.get(img_hash)
