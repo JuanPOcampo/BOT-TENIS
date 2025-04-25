@@ -2,6 +2,7 @@ import os
 import io
 import base64
 import logging
+from PIL import ImageChops, ImageStat
 import json
 import re
 import requests
@@ -99,7 +100,34 @@ def precargar_imagenes_drive(service, root_id):
 
     print(f"✅ Hashes precargados: {len(cache)} imágenes")
     return cache
+def identify_model_from_stream(path: str) -> str | None:
+    try:
+        img_up = Image.open(path)
+        img_up = recortar_bordes(img_up)  # ← nuevo paso
+    except Exception as e:
+        logging.error(f"❌ No pude leer la imagen subida: {e}")
+        return None
 
+    # Calcula ambos hashes
+    ph = imagehash.phash(img_up)
+    ah = imagehash.average_hash(img_up)
+
+    mejor_match = None
+    mejor_puntaje = 999  # mientras más bajo, mejor
+
+    for modelo, lista_hashes in MODEL_HASHES.items():
+        for ref_ph, ref_ah in lista_hashes:
+            puntaje = (ph - ref_ph) + (ah - ref_ah)
+            if puntaje < mejor_puntaje:
+                mejor_puntaje = puntaje
+                mejor_match = modelo
+
+    logging.info(f"🎯 Hash combinado → Puntaje: {mejor_puntaje} | Match: {mejor_match}")
+
+    if mejor_puntaje <= 25:  # Puedes ajustar el umbral
+        return mejor_match
+    else:
+        return None
 
 PHASH_THRESHOLD = 20
 AHASH_THRESHOLD = 18
@@ -929,6 +957,21 @@ async def venom_webhook(req: Request):
         mimetype = (data.get("mimetype") or "").lower()
 
         logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype}")
+
+        # 🚨 FILTRO PARA EVITAR MENSAJES INDESEADOS 🚨
+        if mtype not in ("chat", "message"):
+            logging.info(f"⚠️ Ignorando evento tipo {mtype}")
+            return JSONResponse(
+                {"type": "text", "text": f"Ignorado evento tipo {mtype}."},
+                status_code=status.HTTP_204_NO_CONTENT
+            )
+
+        if not body.strip():
+            logging.info(f"⚠️ Mensaje vacío de {cid}, ignorado.")
+            return JSONResponse(
+                {"type": "text", "text": "Mensaje vacío ignorado."},
+                status_code=status.HTTP_204_NO_CONTENT
+            )
 
         # 2️⃣ Si es imagen en base64
         if mtype == "image" or mimetype.startswith("image"):
