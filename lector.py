@@ -5,6 +5,9 @@ import logging
 import json
 import re
 import requests
+import torch
+import clip
+import numpy as np
 import random
 import string
 import datetime
@@ -14,7 +17,6 @@ import asyncio
 from types import SimpleNamespace
 from dotenv import load_dotenv
 from PIL import Image
-import imagehash
 from fastapi import FastAPI, Request
 from openai import AsyncOpenAI
 
@@ -46,6 +48,9 @@ load_dotenv()
 # FastAPI instance
 api = FastAPI()
 
+device = "cpu"                           # Render gratis = solo CPU
+model, preprocess = clip.load("ViT-B/32", device=device)
+model.eval()                             # modo inferencia
 
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
 creds = service_account.Credentials.from_service_account_info(
@@ -55,133 +60,75 @@ creds = service_account.Credentials.from_service_account_info(
 drive_service = build("drive", "v3", credentials=creds)
 
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
-def precargar_imagenes_drive(service, root_id):
-    """
-    Recorre recursivamente la carpeta raíz de Drive (root_id),
-    descarga cada imagen, calcula su hash perceptual
-    y devuelve un dict {hash: (marca, modelo, color)}.
-    """
-    imagenes = []
 
-    def _walk(current_id, ruta):
-        query = f"'{current_id}' in parents and trashed=false"
-        page_token = None
+def precargar_embeddings_drive(service, root_id):
+    """
+    Recorre Drive, genera un embedding CLIP por imagen y lo agrupa por SKU.
+    Devuelve: {sku: vector_numpy}
+    """
+    import io, requests
+    from googleapiclient.http import MediaIoBaseDownload
+
+    emb = {}
+
+    def _walk(fid, ruta):
+        q, tok = f"'{fid}' in parents and trashed=false", None
         while True:
-            resp = service.files().list(
-                q=query,
+            r = service.files().list(
+                q=q,
                 fields="nextPageToken, files(id,name,mimeType)",
-                pageToken=page_token
+                pageToken=tok
             ).execute()
-
-            for f in resp.get("files", []):
+            for f in r.get("files", []):
                 if f["mimeType"] == "application/vnd.google-apps.folder":
                     _walk(f["id"], ruta + [f["name"]])
                 elif f["mimeType"].startswith("image/"):
-                    imagenes.append((f["id"], ruta, f["name"]))
-            page_token = resp.get("nextPageToken")
-            if page_token is None:
+                    url = f"https://drive.google.com/uc?export=download&id={f['id']}"
+                    data = requests.get(url, timeout=30)
+                    data.raise_for_status()
+
+                    img = Image.open(io.BytesIO(data.content)).convert("RGB")
+                    v   = model.encode_image(preprocess(img).unsqueeze(0).to(device)).cpu().numpy()[0]
+
+                    sku = "_".join((ruta + [f['name'].split('_')[0]])[:3]).replace(" ", "_")
+                    emb[sku] = v if sku not in emb else (emb[sku] + v) / 2
+            tok = r.get("nextPageToken")
+            if not tok:
                 break
 
-    _walk(root_id, [])  # inicia el recorrido
-
-    cache = {}
-    for file_id, ruta, filename in imagenes:
-        try:
-            url = f"https://drive.google.com/uc?export=download&id={file_id}"
-            res = requests.get(url)
-            res.raise_for_status()
-            img = Image.open(io.BytesIO(res.content))
-            h = str(imagehash.phash(img))
-            marca, modelo, color = (ruta + ["", "", ""])[:3]
-            cache[h] = (marca, modelo, color)
-        except Exception as e:
-            print(f"⚠️  No se pudo procesar {filename}: {e}")
-
-    print(f"✅ Hashes precargados: {len(cache)} imágenes")
-    return cache
+    _walk(root_id, [])
+    print(f"✅ Precargados embeddings CLIP: {len(emb)} SKUs")
+    return emb
 
 
-PHASH_THRESHOLD = 40
-AHASH_THRESHOLD = 40
-
-def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]]:
-    """
-    Descarga todas las imágenes de la carpeta de Drive, extrae SKU=modelo_color,
-    calcula phash/ahash y agrupa por SKU.
-    """
-    model_hashes: dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]] = {}
-    page_token = None
-
-    while True:
-        resp = drive_service.files().list(
-            q=f"'{folder_id}' in parents and mimeType contains 'image/'",
-            spaces="drive",
-            fields="nextPageToken, files(id, name)",
-            pageToken=page_token
-        ).execute()
-
-        for f in resp.get("files", []):
-            fid, name = f["id"], f["name"]
-            base = os.path.splitext(name)[0]
-            parts = base.split('_')
-            sku = parts[0]
-            if len(parts) > 1:
-                sku += "_" + parts[1]
-            if len(parts) > 2:
-                sku += "_" + parts[2]
-
-            request = drive_service.files().get_media(fileId=fid)
-            fh = io.BytesIO()
-            downloader = MediaIoBaseDownload(fh, request)
-            done = False
-            while not done:
-                _, done = downloader.next_chunk()
-            fh.seek(0)
-
-            try:
-                img = Image.open(fh)
-                ph = imagehash.phash(img)
-                ah = imagehash.average_hash(img)
-                model_hashes.setdefault(sku, []).append((ph, ah))
-            except Exception as e:
-                logging.error(f"No pude procesar {name}: {e}")
-
-        page_token = resp.get("nextPageToken")
-        if not page_token:
-            break
-
-    logging.info(f"▶ Precargados hashes para {len(model_hashes)} SKUs")
-    return model_hashes
-
-MODEL_HASHES = precargar_imagenes_drive(drive_service, DRIVE_FOLDER_ID)
-
-for h, ref in MODEL_HASHES.items():
-    print(f"HASH precargado: {h} → {ref}")
-
+CATALOGO_EMB = precargar_embeddings_drive(drive_service, DRIVE_FOLDER_ID)
 def identify_model_from_stream(path: str) -> str | None:
     """
-    Abre la imagen, calcula su hash, y busca el modelo más cercano por similitud.
-    Usa pHash y tolerancia (distancia de Hamming).
+    Devuelve el SKU más parecido usando CLIP + similitud coseno, mostrando score.
     """
     try:
-        img_up = Image.open(path)
-        img_up.load()
-        hash_up = imagehash.phash(img_up)
+        img = Image.open(path).convert("RGB")
+        v   = model.encode_image(preprocess(img).unsqueeze(0).to(device)).cpu().numpy()[0]
 
-        mejor_modelo = None
-        mejor_distancia = PHASH_THRESHOLD  # permitimos distancia hasta 28
+        mejor_sku, mejor_sim = None, -1.0
+        for sku, ref_vec in CATALOGO_EMB.items():
+            sim = np.dot(v, ref_vec) / (np.linalg.norm(v) * np.linalg.norm(ref_vec))
+            if sim > mejor_sim:
+                mejor_sku, mejor_sim = sku, sim
 
-        for hash_guardado, (marca, modelo, color) in MODEL_HASHES.items():
-            distancia = hash_up - imagehash.hex_to_hash(hash_guardado)
-            if distancia < mejor_distancia:
-                mejor_modelo = f"{marca}_{modelo}_{color}"
-                mejor_distancia = distancia
+        if mejor_sku:
+            logging.info(f"🧠 Mejor coincidencia: {mejor_sku} (similaridad {mejor_sim:.2f})")
 
-        return mejor_modelo
+        # Ajusta el umbral aquí si quieres ser más estricto o más tolerante
+        return mejor_sku if mejor_sim >= 0.23 else None
 
     except Exception as e:
-        logging.error(f"❌ Error al identificar modelo: {e}")
+        logging.error(f"❌ CLIP error: {e}")
         return None
+
+
+
+
 
 # ——— VARIABLES DE ENTORNO ——————————————————————————————————————————————
 OPENAI_API_KEY        = os.environ["OPENAI_API_KEY"]
@@ -937,39 +884,46 @@ async def venom_webhook(req: Request):
         # 2️⃣ Si es imagen en base64
         if mtype == "image" or mimetype.startswith("image"):
             try:
-                b64_str = body.split(",", 1)[1] if "," in body else body
+                b64_str   = body.split(",", 1)[1] if "," in body else body
                 img_bytes = base64.b64decode(b64_str + "===")
-                img = Image.open(io.BytesIO(img_bytes))
-                img.load()  # ← fuerza carga completa
-                logging.info("✅ Imagen decodificada y cargada")
+                img       = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+                img.load()                                # fuerza carga completa
+
+                # Guarda a disco para pasarlo a CLIP
+                tmp_path = f"/tmp/{cid}_img.jpg"
+                img.save(tmp_path)
+
+                # ⬇️ NUEVO: identificación con CLIP
+                ref = identify_model_from_stream(tmp_path)
+                os.remove(tmp_path)
+
+                if ref:
+                    marca, modelo, color = ref.split("_", 2)
+                    estado_usuario.setdefault(cid, reset_estado(cid))
+                    estado_usuario[cid].update(
+                        fase="imagen_detectada", marca=marca, modelo=modelo, color=color
+                    )
+                    return JSONResponse(
+                        {
+                            "type": "text",
+                            "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
+                        }
+                    )
+                else:
+                    reset_estado(cid)
+                    return JSONResponse(
+                        {
+                            "type": "text",
+                            "text": "No reconocí el modelo con la imagen enviada. Puedes intentar con otra imagen o escribir /start."
+                        }
+                    )
+
             except Exception as e:
-                logging.error(f"❌ No pude leer la imagen: {e}")
+                logging.error(f"❌ No pude procesar la imagen: {e}")
                 return JSONResponse(
                     {"type": "text", "text": "No pude leer la imagen 😕"},
                     status_code=status.HTTP_400_BAD_REQUEST
                 )
-
-            # 3️⃣ Calcular hash
-            h_in = str(imagehash.phash(img))
-            ref = MODEL_HASHES.get(h_in)
-            logging.info(f"🔍 Hash {h_in} → {ref}")
-
-            if ref:
-                marca, modelo, color = ref
-                estado_usuario.setdefault(cid, reset_estado(cid))
-                estado_usuario[cid].update(
-                    fase="imagen_detectada", marca=marca, modelo=modelo, color=color
-                )
-                return JSONResponse({
-                    "type": "text",
-                    "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
-                })
-            else:
-                reset_estado(cid)
-                return JSONResponse({
-                    "type": "text",
-                    "text": "No reconocí el modelo. Puedes intentar con otra imagen o escribir /start."
-                })
 
         # 4️⃣ Si NO es imagen, procesa como texto normal
         reply = await procesar_wa(cid, body)
