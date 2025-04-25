@@ -990,7 +990,7 @@ async def venom_webhook(req: Request):
                     {"type": "text", "text": "No pude leer la imagen 😕"},
                     status_code=status.HTTP_400_BAD_REQUEST
                 )
-aaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
             # 3️⃣ Calcular hash
             h_in = str(imagehash.phash(img))
             ref  = MODEL_HASHES.get(h_in)
