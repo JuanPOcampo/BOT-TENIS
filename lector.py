@@ -4,6 +4,7 @@ import base64
 import logging
 import json
 import re
+from PIL import Image, ImageChops
 import requests
 import random
 import string
@@ -46,6 +47,26 @@ load_dotenv()
 # FastAPI instance
 api = FastAPI()
 
+def recortar_bordes_negros(imagen: Image.Image, tolerancia: int = 10) -> Image.Image:
+    """
+    Recorta automáticamente bordes negros u oscuros de la imagen.
+    Si algo falla, devuelve la imagen original.
+    """
+    try:
+        if imagen.mode != "RGB":
+            imagen = imagen.convert("RGB")
+
+        fondo = Image.new("RGB", imagen.size, (0, 0, 0))  # fondo negro
+        diff  = ImageChops.difference(imagen, fondo)
+        diff  = ImageChops.add(diff, diff, 2.0, -tolerancia)
+        bbox  = diff.getbbox()
+
+        if bbox:
+            return imagen.crop(bbox)
+    except Exception as e:
+        logging.warning(f"⚠️ recorte falló: {e}")
+    
+    return imagen  # si falla o no hay recorte, devuelve la imagen tal cual
 
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
 creds = service_account.Credentials.from_service_account_info(
@@ -936,7 +957,8 @@ async def venom_webhook(req: Request):
                 b64_str = body.split(",", 1)[1] if "," in body else body
                 img_bytes = base64.b64decode(b64_str + "===")
                 img = Image.open(io.BytesIO(img_bytes))
-                img.load()  # ← fuerza carga completa
+                img.load()
+        img = recortar_bordes_negros(img)  # ← fuerza carga completa
                 logging.info("✅ Imagen decodificada y cargada")
             except Exception as e:
                 logging.error(f"❌ No pude leer la imagen: {e}")
