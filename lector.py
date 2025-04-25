@@ -101,8 +101,8 @@ def precargar_imagenes_drive(service, root_id):
     return cache
 
 
-PHASH_THRESHOLD = 28
-AHASH_THRESHOLD = 28
+PHASH_THRESHOLD = 40
+AHASH_THRESHOLD = 40
 
 def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]]:
     """
