@@ -155,6 +155,9 @@ def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehas
 
 MODEL_HASHES = precargar_imagenes_drive(drive_service, DRIVE_FOLDER_ID)
 
+for h, ref in MODEL_HASHES.items():
+    print(f"HASH precargado: {h} → {ref}")
+
 def identify_model_from_stream(path: str) -> str | None:
     """
     Abre la imagen subida, calcula su hash y busca directamente
@@ -918,34 +921,21 @@ async def procesar_wa(cid: str, body: str) -> dict:
 @api.post("/venom")
 async def venom_webhook(req: Request):
     logging.info("🚀 /venom invocado")
-    try:
-        data = await req.json()
-    except Exception as e:
-        logging.error(f"❌ No se pudo parsear JSON del request: {e}")
-        return JSONResponse(
-            {"type": "text", "text": "Error interno leyendo tu mensaje 😔"},
-            status_code=status.HTTP_400_BAD_REQUEST
-        )
+    data = await req.json()
 
-    cid = wa_chat_id(data.get("from", ""))
-    body = data.get("body", "") or ""
-    mtype = (data.get("type") or "").lower()
+    cid      = wa_chat_id(data.get("from", "")) or "000"
+    body     = data.get("body", "") or ""
+    mtype    = (data.get("type") or "").lower()
     mimetype = (data.get("mimetype") or "").lower()
 
-    # Si es imagen
+    # ───────── Solo procesamos imágenes ─────────
     if mtype == "image" or mimetype.startswith("image"):
         try:
             b64_str = body.split(",", 1)[1] if "," in body else body
             img_bytes = base64.b64decode(b64_str + "===")
             img = Image.open(io.BytesIO(img_bytes))
             img.load()  # fuerza carga completa
-            logging.info(f"✅ Imagen recibida y cargada (CID={cid})")
-
-            # Guarda imagen para ver en Render (debug visual)
-            os.makedirs("temp", exist_ok=True)
-            img_path = f"temp/venom_{cid}.jpg"
-            img.save(img_path)
-            logging.info(f"📸 Imagen guardada como {img_path}")
+            logging.info("✅ Imagen decodificada y cargada")
         except Exception as e:
             logging.error(f"❌ No pude leer la imagen: {e}")
             return JSONResponse(
@@ -953,34 +943,38 @@ async def venom_webhook(req: Request):
                 status_code=status.HTTP_400_BAD_REQUEST
             )
 
+        # 2️⃣  Calcular hash y buscar
         try:
             h_in = str(imagehash.phash(img))
+            logging.info(f"🧪 Hash generado: {h_in}")
+
+            # Log todos los precargados por si no encuentra nada
+            for precargado, valores in MODEL_HASHES.items():
+                logging.debug(f"📦 Precargado: {precargado} → {valores}")
+
             ref = MODEL_HASHES.get(h_in)
-            logging.info(f"🔍 Hash {h_in} → {ref}")
+            logging.info(f"🔍 Resultado búsqueda exacta: {ref}")
         except Exception as e:
-            logging.error(f"❌ Error calculando hash: {e}")
+            logging.error(f"❌ Error al calcular hash: {e}")
             ref = None
 
+        # 3️⃣  Respuesta al usuario
         if ref:
             marca, modelo, color = ref
-            text = (
-                f"La imagen coincide con {marca} {modelo} color {color}. "
-                "¿Deseas continuar tu compra? (SI/NO)"
-            )
+            text = (f"La imagen coincide con {marca} {modelo} color {color}. "
+                    "¿Deseas continuar tu compra? (SI/NO)")
+
             estado_usuario.setdefault(cid, reset_estado(cid))
             estado_usuario[cid].update(
                 fase="imagen_detectada", marca=marca, modelo=modelo, color=color
             )
         else:
-            text = (
-                "No reconocí el modelo. "
-                "Puedes intentar con otra imagen o escribir /start."
-            )
+            text = "No reconocí el modelo. Puedes intentar con otra imagen o escribir /start."
             reset_estado(cid)
 
         return JSONResponse({"type": "text", "text": text})
 
-    # Si no es imagen, se procesa normalmente como texto
+    # ───────── Si no es imagen, va al flujo normal ─────────
     reply = await procesar_wa(cid, body)
     return JSONResponse(reply)
 # -------------------------------------------------------------------------
