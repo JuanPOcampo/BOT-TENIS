@@ -155,20 +155,25 @@ def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehas
 MODEL_HASHES = precargar_imagenes_drive(drive_service, DRIVE_FOLDER_ID)
 
 def identify_model_from_stream(path: str) -> str | None:
+    """
+    Abre la imagen subida, calcula su hash y busca directamente
+    en MODEL_HASHES cuál es el modelo (marca_modelo_color).
+    """
     try:
         img_up = Image.open(path)
     except Exception as e:
         logging.error(f"No pude leer la imagen subida: {e}")
         return None
 
-    ph_up = imagehash.phash(img_up)
-    ah_up = imagehash.average_hash(img_up)
+    # ─── Aquí calculas y buscas el hash ───
+    img_hash = str(imagehash.phash(img_up))
+    modelo = next(
+        (m for m, hashes in MODEL_HASHES.items() if img_hash in hashes),
+        None
+    )
+    # ───────────────────────────────────────
 
-    for model, refs in MODEL_HASHES.items():
-        for ph_ref, ah_ref in refs:
-            if abs(ph_up - ph_ref) <= PHASH_THRESHOLD and abs(ah_up - ah_ref) <= AHASH_THRESHOLD:
-                return model
-    return None
+    return modelo
 
 # ——— VARIABLES DE ENTORNO ——————————————————————————————————————————————
 OPENAI_API_KEY        = os.environ["OPENAI_API_KEY"]
