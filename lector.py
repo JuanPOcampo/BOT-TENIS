@@ -2,7 +2,6 @@ import os
 import io
 import base64
 import logging
-from PIL import ImageChops, ImageStat
 import json
 import re
 import requests
@@ -101,113 +100,84 @@ def precargar_imagenes_drive(service, root_id):
     print(f"✅ Hashes precargados: {len(cache)} imágenes")
     return cache
 
-# ─── Parámetros globales ────────────────────────────────────────────────
-HASH_SCORE_THRESHOLD = 25            # umbral combinado (phash+ahash)
-PHASH_THRESHOLD      = 20            # ↳ puedes ajustarlos si quieres
-AHASH_THRESHOLD      = 18
 
-# ─── Utilidad: recortar bordes planos (blancos/negros) ─────────────────
-from PIL import ImageChops, Image
+PHASH_THRESHOLD = 20
+AHASH_THRESHOLD = 18
 
-def recortar_bordes(imagen: Image.Image, tolerancia: int = 10) -> Image.Image:
+def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]]:
     """
-    Recorta bordes blancos, negros o de color sólido.
+    Descarga todas las imágenes de la carpeta de Drive, extrae SKU=modelo_color,
+    calcula phash/ahash y agrupa por SKU.
     """
-    if imagen.mode != "RGB":
-        imagen = imagen.convert("RGB")
+    model_hashes: dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]] = {}
+    page_token = None
 
-    fondo = Image.new("RGB", imagen.size, imagen.getpixel((0, 0)))
-    diff  = ImageChops.difference(imagen, fondo)
-    diff  = ImageChops.add(diff, diff, 2.0, -tolerancia)   # realza diferencias
-    bbox  = diff.getbbox()
-    return imagen.crop(bbox) if bbox else imagen
+    while True:
+        resp = drive_service.files().list(
+            q=f"'{folder_id}' in parents and mimeType contains 'image/'",
+            spaces="drive",
+            fields="nextPageToken, files(id, name)",
+            pageToken=page_token
+        ).execute()
 
-# ─── Precarga hashes (pHash + aHash) desde Google Drive ────────────────
-def precargar_hashes_drive(service, root_id: str) -> dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]]:
-    """
-    Recorre recursivamente `root_id`, descarga cada imagen, recorta bordes,
-    calcula pHash + aHash y agrupa por SKU (marca_modelo_color).
-    Devuelve: {"DS_275_BLANCO": [(ph1, ah1), (ph2, ah2), ...], ...}
-    """
-    from googleapiclient.http import MediaIoBaseDownload
-    import io, requests, os
+        for f in resp.get("files", []):
+            fid, name = f["id"], f["name"]
+            base = os.path.splitext(name)[0]
+            parts = base.split('_')
+            sku = parts[0]
+            if len(parts) > 1:
+                sku += "_" + parts[1]
+            if len(parts) > 2:
+                sku += "_" + parts[2]
 
-    todo: list[tuple[str, list[str], str]] = []   # (file_id, ruta[], filename)
+            request = drive_service.files().get_media(fileId=fid)
+            fh = io.BytesIO()
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+            fh.seek(0)
 
-    def _walk(folder_id: str, ruta: list[str]):
-        q   = f"'{folder_id}' in parents and trashed=false"
-        tok = None
-        while True:
-            r = service.files().list(q=q,
-                                      fields="nextPageToken, files(id,name,mimeType)",
-                                      pageToken=tok).execute()
-            for f in r.get("files", []):
-                if f["mimeType"] == "application/vnd.google-apps.folder":
-                    _walk(f["id"], ruta + [f["name"]])
-                elif f["mimeType"].startswith("image/"):
-                    todo.append((f["id"], ruta, f["name"]))
-            tok = r.get("nextPageToken")
-            if tok is None:
-                break
+            try:
+                img = Image.open(fh)
+                ph = imagehash.phash(img)
+                ah = imagehash.average_hash(img)
+                model_hashes.setdefault(sku, []).append((ph, ah))
+            except Exception as e:
+                logging.error(f"No pude procesar {name}: {e}")
 
-    _walk(root_id, [])
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
 
-    hashes: dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]] = {}
+    logging.info(f"▶ Precargados hashes para {len(model_hashes)} SKUs")
+    return model_hashes
 
-    for fid, ruta, filename in todo:
-        try:
-            # descarga rápida vía export link
-            url  = f"https://drive.google.com/uc?export=download&id={fid}"
-            data = requests.get(url, timeout=30)
-            data.raise_for_status()
-            img  = Image.open(io.BytesIO(data.content))
-            img  = recortar_bordes(img)
+MODEL_HASHES = precargar_imagenes_drive(drive_service, DRIVE_FOLDER_ID)
 
-            ph   = imagehash.phash(img)
-            ah   = imagehash.average_hash(img)
+for h, ref in MODEL_HASHES.items():
+    print(f"HASH precargado: {h} → {ref}")
 
-            marca, modelo, color = (ruta + ["", "", ""])[:3]
-            sku  = "_".join(filter(None, (marca, modelo, color))).replace(" ", "_")
-
-            hashes.setdefault(sku, []).append((ph, ah))
-        except Exception as e:
-            logging.error(f"⚠️  No pude procesar {filename}: {e}")
-
-    logging.info(f"✅ Precargados hashes para {len(hashes)} SKUs")
-    return hashes
-
-# ─── Carga inicial ─────────────────────────────────────────────────────
-MODEL_HASHES = precargar_hashes_drive(drive_service, DRIVE_FOLDER_ID)
-
-# ─── Identificación cuando el usuario envía una foto ───────────────────
 def identify_model_from_stream(path: str) -> str | None:
     """
-    Abre la imagen subida, recorta bordes, calcula pHash + aHash y devuelve
-    el SKU (marca_modelo_color) más parecido si el puntaje ≤ HASH_SCORE_THRESHOLD.
+    Abre la imagen subida, calcula su hash y busca directamente
+    en MODEL_HASHES cuál es el modelo (marca_modelo_color).
     """
     try:
-        img = Image.open(path)
-        img = recortar_bordes(img)
+        img_up = Image.open(path)
     except Exception as e:
-        logging.error(f"❌ No pude leer la imagen subida: {e}")
+        logging.error(f"No pude leer la imagen subida: {e}")
         return None
 
-    ph_u = imagehash.phash(img)
-    ah_u = imagehash.average_hash(img)
+    # ─── Aquí calculas y buscas el hash ───
+    img_hash = str(imagehash.phash(img_up))
+    modelo = next(
+        (m for m, hashes in MODEL_HASHES.items() if img_hash in hashes),
+        None
+    )
+    # ───────────────────────────────────────
 
-    mejor_sku       = None
-    mejor_puntaje   = 999
-
-    for sku, lista in MODEL_HASHES.items():
-        for ph_ref, ah_ref in lista:
-            puntaje = (ph_u - ph_ref) + (ah_u - ah_ref)
-            if puntaje < mejor_puntaje:
-                mejor_puntaje = puntaje
-                mejor_sku     = sku
-
-    logging.info(f"🔍 Puntaje hash={mejor_puntaje} → {mejor_sku}")
-
-    return mejor_sku if mejor_puntaje <= HASH_SCORE_THRESHOLD else None
+    return modelo
 
 # ——— VARIABLES DE ENTORNO ——————————————————————————————————————————————
 OPENAI_API_KEY        = os.environ["OPENAI_API_KEY"]
@@ -952,7 +922,7 @@ async def procesar_wa(cid: str, body: str) -> dict:
 async def venom_webhook(req: Request):
     try:
         # 1️⃣ Leer JSON
-        data     = await req.json()
+        data = await req.json()
         cid      = wa_chat_id(data.get("from", ""))
         body     = data.get("body", "") or ""
         mtype    = (data.get("type") or "").lower()
@@ -978,12 +948,11 @@ async def venom_webhook(req: Request):
         # 2️⃣ Si es imagen en base64
         if mtype == "image" or mimetype.startswith("image"):
             try:
-                b64_str   = body.split(",", 1)[1] if "," in body else body
+                b64_str = body.split(",", 1)[1] if "," in body else body
                 img_bytes = base64.b64decode(b64_str + "===")
-                img       = Image.open(io.BytesIO(img_bytes))
-                img.load()                          # fuerza carga completa
-                img = recortar_bordes_negros(img)   # ← recorte automático de bordes negros
-                logging.info("✅ Imagen decodificada y recortada")
+                img = Image.open(io.BytesIO(img_bytes))
+                img.load()  # ← fuerza carga completa
+                logging.info("✅ Imagen decodificada y cargada")
             except Exception as e:
                 logging.error(f"❌ No pude leer la imagen: {e}")
                 return JSONResponse(
@@ -993,32 +962,25 @@ async def venom_webhook(req: Request):
 
             # 3️⃣ Calcular hash
             h_in = str(imagehash.phash(img))
-            ref  = MODEL_HASHES.get(h_in)
+            ref = MODEL_HASHES.get(h_in)
             logging.info(f"🔍 Hash {h_in} → {ref}")
 
             if ref:
                 marca, modelo, color = ref
                 estado_usuario.setdefault(cid, reset_estado(cid))
                 estado_usuario[cid].update(
-                    fase="imagen_detectada",
-                    marca=marca,
-                    modelo=modelo,
-                    color=color
+                    fase="imagen_detectada", marca=marca, modelo=modelo, color=color
                 )
-                return JSONResponse(
-                    {
-                        "type": "text",
-                        "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
-                    }
-                )
+                return JSONResponse({
+                    "type": "text",
+                    "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
+                })
             else:
                 reset_estado(cid)
-                return JSONResponse(
-                    {
-                        "type": "text",
-                        "text": "No reconocí el modelo. Puedes intentar con otra imagen o escribir /start."
-                    }
-                )
+                return JSONResponse({
+                    "type": "text",
+                    "text": "No reconocí el modelo. Puedes intentar con otra imagen o escribir /start."
+                })
 
         # 4️⃣ Si NO es imagen, procesa como texto normal
         reply = await procesar_wa(cid, body)
