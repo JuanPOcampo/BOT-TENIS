@@ -100,112 +100,114 @@ def precargar_imagenes_drive(service, root_id):
 
     print(f"✅ Hashes precargados: {len(cache)} imágenes")
     return cache
+
+# ─── Parámetros globales ────────────────────────────────────────────────
+HASH_SCORE_THRESHOLD = 25            # umbral combinado (phash+ahash)
+PHASH_THRESHOLD      = 20            # ↳ puedes ajustarlos si quieres
+AHASH_THRESHOLD      = 18
+
+# ─── Utilidad: recortar bordes planos (blancos/negros) ─────────────────
+from PIL import ImageChops, Image
+
+def recortar_bordes(imagen: Image.Image, tolerancia: int = 10) -> Image.Image:
+    """
+    Recorta bordes blancos, negros o de color sólido.
+    """
+    if imagen.mode != "RGB":
+        imagen = imagen.convert("RGB")
+
+    fondo = Image.new("RGB", imagen.size, imagen.getpixel((0, 0)))
+    diff  = ImageChops.difference(imagen, fondo)
+    diff  = ImageChops.add(diff, diff, 2.0, -tolerancia)   # realza diferencias
+    bbox  = diff.getbbox()
+    return imagen.crop(bbox) if bbox else imagen
+
+# ─── Precarga hashes (pHash + aHash) desde Google Drive ────────────────
+def precargar_hashes_drive(service, root_id: str) -> dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]]:
+    """
+    Recorre recursivamente `root_id`, descarga cada imagen, recorta bordes,
+    calcula pHash + aHash y agrupa por SKU (marca_modelo_color).
+    Devuelve: {"DS_275_BLANCO": [(ph1, ah1), (ph2, ah2), ...], ...}
+    """
+    from googleapiclient.http import MediaIoBaseDownload
+    import io, requests, os
+
+    todo: list[tuple[str, list[str], str]] = []   # (file_id, ruta[], filename)
+
+    def _walk(folder_id: str, ruta: list[str]):
+        q   = f"'{folder_id}' in parents and trashed=false"
+        tok = None
+        while True:
+            r = service.files().list(q=q,
+                                      fields="nextPageToken, files(id,name,mimeType)",
+                                      pageToken=tok).execute()
+            for f in r.get("files", []):
+                if f["mimeType"] == "application/vnd.google-apps.folder":
+                    _walk(f["id"], ruta + [f["name"]])
+                elif f["mimeType"].startswith("image/"):
+                    todo.append((f["id"], ruta, f["name"]))
+            tok = r.get("nextPageToken")
+            if tok is None:
+                break
+
+    _walk(root_id, [])
+
+    hashes: dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]] = {}
+
+    for fid, ruta, filename in todo:
+        try:
+            # descarga rápida vía export link
+            url  = f"https://drive.google.com/uc?export=download&id={fid}"
+            data = requests.get(url, timeout=30)
+            data.raise_for_status()
+            img  = Image.open(io.BytesIO(data.content))
+            img  = recortar_bordes(img)
+
+            ph   = imagehash.phash(img)
+            ah   = imagehash.average_hash(img)
+
+            marca, modelo, color = (ruta + ["", "", ""])[:3]
+            sku  = "_".join(filter(None, (marca, modelo, color))).replace(" ", "_")
+
+            hashes.setdefault(sku, []).append((ph, ah))
+        except Exception as e:
+            logging.error(f"⚠️  No pude procesar {filename}: {e}")
+
+    logging.info(f"✅ Precargados hashes para {len(hashes)} SKUs")
+    return hashes
+
+# ─── Carga inicial ─────────────────────────────────────────────────────
+MODEL_HASHES = precargar_hashes_drive(drive_service, DRIVE_FOLDER_ID)
+
+# ─── Identificación cuando el usuario envía una foto ───────────────────
 def identify_model_from_stream(path: str) -> str | None:
+    """
+    Abre la imagen subida, recorta bordes, calcula pHash + aHash y devuelve
+    el SKU (marca_modelo_color) más parecido si el puntaje ≤ HASH_SCORE_THRESHOLD.
+    """
     try:
-        img_up = Image.open(path)
-        img_up = recortar_bordes(img_up)  # ← nuevo paso
+        img = Image.open(path)
+        img = recortar_bordes(img)
     except Exception as e:
         logging.error(f"❌ No pude leer la imagen subida: {e}")
         return None
 
-    # Calcula ambos hashes
-    ph = imagehash.phash(img_up)
-    ah = imagehash.average_hash(img_up)
+    ph_u = imagehash.phash(img)
+    ah_u = imagehash.average_hash(img)
 
-    mejor_match = None
-    mejor_puntaje = 999  # mientras más bajo, mejor
+    mejor_sku       = None
+    mejor_puntaje   = 999
 
-    for modelo, lista_hashes in MODEL_HASHES.items():
-        for ref_ph, ref_ah in lista_hashes:
-            puntaje = (ph - ref_ph) + (ah - ref_ah)
+    for sku, lista in MODEL_HASHES.items():
+        for ph_ref, ah_ref in lista:
+            puntaje = (ph_u - ph_ref) + (ah_u - ah_ref)
             if puntaje < mejor_puntaje:
                 mejor_puntaje = puntaje
-                mejor_match = modelo
+                mejor_sku     = sku
 
-    logging.info(f"🎯 Hash combinado → Puntaje: {mejor_puntaje} | Match: {mejor_match}")
+    logging.info(f"🔍 Puntaje hash={mejor_puntaje} → {mejor_sku}")
 
-    if mejor_puntaje <= 25:  # Puedes ajustar el umbral
-        return mejor_match
-    else:
-        return None
-
-PHASH_THRESHOLD = 20
-AHASH_THRESHOLD = 18
-
-def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]]:
-    """
-    Descarga todas las imágenes de la carpeta de Drive, extrae SKU=modelo_color,
-    calcula phash/ahash y agrupa por SKU.
-    """
-    model_hashes: dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]] = {}
-    page_token = None
-
-    while True:
-        resp = drive_service.files().list(
-            q=f"'{folder_id}' in parents and mimeType contains 'image/'",
-            spaces="drive",
-            fields="nextPageToken, files(id, name)",
-            pageToken=page_token
-        ).execute()
-
-        for f in resp.get("files", []):
-            fid, name = f["id"], f["name"]
-            base = os.path.splitext(name)[0]
-            parts = base.split('_')
-            sku = parts[0]
-            if len(parts) > 1:
-                sku += "_" + parts[1]
-            if len(parts) > 2:
-                sku += "_" + parts[2]
-
-            request = drive_service.files().get_media(fileId=fid)
-            fh = io.BytesIO()
-            downloader = MediaIoBaseDownload(fh, request)
-            done = False
-            while not done:
-                _, done = downloader.next_chunk()
-            fh.seek(0)
-
-            try:
-                img = Image.open(fh)
-                ph = imagehash.phash(img)
-                ah = imagehash.average_hash(img)
-                model_hashes.setdefault(sku, []).append((ph, ah))
-            except Exception as e:
-                logging.error(f"No pude procesar {name}: {e}")
-
-        page_token = resp.get("nextPageToken")
-        if not page_token:
-            break
-
-    logging.info(f"▶ Precargados hashes para {len(model_hashes)} SKUs")
-    return model_hashes
-
-MODEL_HASHES = precargar_imagenes_drive(drive_service, DRIVE_FOLDER_ID)
-
-for h, ref in MODEL_HASHES.items():
-    print(f"HASH precargado: {h} → {ref}")
-
-def identify_model_from_stream(path: str) -> str | None:
-    """
-    Abre la imagen subida, calcula su hash y busca directamente
-    en MODEL_HASHES cuál es el modelo (marca_modelo_color).
-    """
-    try:
-        img_up = Image.open(path)
-    except Exception as e:
-        logging.error(f"No pude leer la imagen subida: {e}")
-        return None
-
-    # ─── Aquí calculas y buscas el hash ───
-    img_hash = str(imagehash.phash(img_up))
-    modelo = next(
-        (m for m, hashes in MODEL_HASHES.items() if img_hash in hashes),
-        None
-    )
-    # ───────────────────────────────────────
-
-    return modelo
+    return mejor_sku if mejor_puntaje <= HASH_SCORE_THRESHOLD else None
 
 # ——— VARIABLES DE ENTORNO ——————————————————————————————————————————————
 OPENAI_API_KEY        = os.environ["OPENAI_API_KEY"]
@@ -959,7 +961,7 @@ async def venom_webhook(req: Request):
         logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype}")
 
         # 🚨 FILTRO PARA EVITAR MENSAJES INDESEADOS 🚨
-        if mtype not in ("chat", "message"):
+        if mtype not in ("chat", "message", "image"):
             logging.info(f"⚠️ Ignorando evento tipo {mtype}")
             return JSONResponse(
                 {"type": "text", "text": f"Ignorado evento tipo {mtype}."},
@@ -975,6 +977,13 @@ async def venom_webhook(req: Request):
 
         # 2️⃣ Si es imagen en base64
         if mtype == "image" or mimetype.startswith("image"):
+            # 🔒 CONTROL DE TAMAÑO MÁXIMO
+            if len(body) > 3000000:  # 3 MB en base64
+                logging.warning(f"⚠️ Imagen demasiado grande ({len(body)/1024:.2f} KB). Ignorada.")
+                return JSONResponse(
+                    {"type": "text", "text": "📷 La imagen que enviaste es muy pesada. ¿Podrías enviarla más liviana o recortarla un poco? 🙏"},
+                    status_code=status.HTTP_200_OK
+                )
             try:
                 b64_str = body.split(",", 1)[1] if "," in body else body
                 img_bytes = base64.b64decode(b64_str + "===")
