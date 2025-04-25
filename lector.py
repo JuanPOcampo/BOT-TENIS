@@ -155,25 +155,20 @@ def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehas
 MODEL_HASHES = precargar_imagenes_drive(drive_service, DRIVE_FOLDER_ID)
 
 def identify_model_from_stream(path: str) -> str | None:
-    """
-    Abre la imagen subida, calcula su hash y busca directamente
-    en MODEL_HASHES cuál es el modelo (marca_modelo_color).
-    """
     try:
         img_up = Image.open(path)
     except Exception as e:
         logging.error(f"No pude leer la imagen subida: {e}")
         return None
 
-    # ─── Aquí calculas y buscas el hash ───
-    img_hash = str(imagehash.phash(img_up))
-    modelo = next(
-        (m for m, hashes in MODEL_HASHES.items() if img_hash in hashes),
-        None
-    )
-    # ───────────────────────────────────────
+    ph_up = imagehash.phash(img_up)
+    ah_up = imagehash.average_hash(img_up)
 
-    return modelo
+    for model, refs in MODEL_HASHES.items():
+        for ph_ref, ah_ref in refs:
+            if abs(ph_up - ph_ref) <= PHASH_THRESHOLD and abs(ah_up - ah_ref) <= AHASH_THRESHOLD:
+                return model
+    return None
 
 # ——— VARIABLES DE ENTORNO ——————————————————————————————————————————————
 OPENAI_API_KEY        = os.environ["OPENAI_API_KEY"]
@@ -913,6 +908,16 @@ async def procesar_wa(cid: str, body: str) -> dict:
     return {"type": "text", "text": ctx.resp[-1] if ctx.resp else "No entendí 🥲"}
 
 # 4. Webhook para WhatsApp (usado por Venom)
+# --------------------------------------------------------------------
+# 4. Webhook para WhatsApp (usado por Venom)
+#     – Maneja texto (body) y también imágenes (type == "image")
+# --------------------------------------------------------------------
+# ---------------------------------------------------------------------
+#  webhook /venom  – recibe mensajes de Venom (WhatsApp)
+# ---------------------------------------------------------------------
+# ---------------------------------------------------------------------
+#  webhook /venom  – recibe mensajes de Venom (WhatsApp)
+# ---------------------------------------------------------------------
 @api.post("/venom")
 async def venom_webhook(req: Request):
     try:
@@ -1009,19 +1014,10 @@ async def venom_webhook(req: Request):
 
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
+# -------------------------------------------------------------------------
 if __name__ == "__main__":
-    import os
-    import uvicorn
-
-    # Leer la variable que Render inyecta
-    port = int(os.environ.get("PORT", 8000))  
-    # OJO: si tú localmente usas otro puerto, cámbialo aquí, pero en Render
-    # siempre tendrás PORT definido y será un número distinto.
-
-    uvicorn.run(
-        "lector:app",        # módulo:app
-        host="0.0.0.0",      # escucha en todas las interfaces
-        port=port            # ¡úsalo aquí!
-    )
+    import uvicorn, os
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(api, host="0.0.0.0", port=port)
 
 
