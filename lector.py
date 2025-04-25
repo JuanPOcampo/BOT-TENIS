@@ -6,7 +6,7 @@ import json
 import re
 import requests
 import torch
-import clip
+import open_clip
 import numpy as np
 import random
 import string
@@ -49,7 +49,7 @@ load_dotenv()
 api = FastAPI()
 
 device = "cpu"                           # Render gratis = solo CPU
-model, preprocess = clip.load("ViT-B/32", device=device)
+model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='openai')
 model.eval()                             # modo inferencia
 
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
