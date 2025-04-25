@@ -49,24 +49,49 @@ api = FastAPI()
 
 def recortar_bordes_negros(imagen: Image.Image, tolerancia: int = 10) -> Image.Image:
     """
-    Recorta automáticamente bordes negros u oscuros de la imagen.
-    Si algo falla, devuelve la imagen original.
+    Recorta solo barras negras arriba y abajo (estilo móvil) entre 60 y 100px máximo.
+    Si no cumple o queda muy pequeña, devuelve la imagen original.
     """
     try:
         if imagen.mode != "RGB":
             imagen = imagen.convert("RGB")
 
         fondo = Image.new("RGB", imagen.size, (0, 0, 0))  # fondo negro
-        diff  = ImageChops.difference(imagen, fondo)
-        diff  = ImageChops.add(diff, diff, 2.0, -tolerancia)
-        bbox  = diff.getbbox()
+        diff = ImageChops.difference(imagen, fondo)
+        diff = ImageChops.add(diff, diff, 2.0, -tolerancia)
+        bbox = diff.getbbox()
 
-        if bbox:
-            return imagen.crop(bbox)
+        if not bbox:
+            return imagen
+
+        left, upper, right, lower = bbox
+
+        # 🔒 Limitar el recorte SOLO a arriba/abajo con máximo 100 y mínimo 60 px
+        max_limite = 100
+        min_limite = 60
+
+        # Recorte superior
+        if upper > min_limite:
+            upper = min(upper, max_limite)
+        else:
+            upper = 0
+
+        # Recorte inferior
+        if imagen.height - lower > min_limite:
+            lower = max(lower, imagen.height - max_limite)
+        else:
+            lower = imagen.height
+
+        img_crop = imagen.crop((0, upper, imagen.width, lower))
+
+        if img_crop.height < 200:
+            return imagen
+
+        return img_crop
+
     except Exception as e:
-        logging.warning(f"⚠️ recorte falló: {e}")
-    
-    return imagen  # si falla o no hay recorte, devuelve la imagen tal cual
+        logging.warning(f"⚠️ Recorte móvil falló: {e}")
+        return imagen
 
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
 creds = service_account.Credentials.from_service_account_info(
