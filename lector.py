@@ -930,8 +930,12 @@ async def venom_webhook(req: Request):
     if mtype == "image" or mimetype.startswith("image"):
         try:
             # 1️⃣  Base64 → bytes → PIL.Image
-            b64_str  = body.split(",", 1)[1] if "," in body else body
-            img      = Image.open(io.BytesIO(base64.b64decode(b64_str)))
+            b64_str = body
+            if "," in body:
+                b64_str = body.split(",", 1)[1]
+
+            img_bytes = base64.b64decode(b64_str + "===")
+            img = Image.open(io.BytesIO(img_bytes))
             logging.info("✅ Imagen decodificada")
         except Exception as e:
             logging.error(f"❌ Error decodificando: {e}")
@@ -940,31 +944,18 @@ async def venom_webhook(req: Request):
                 status_code=status.HTTP_400_BAD_REQUEST
             )
 
-        # 2️⃣  Identificar por hash con tolerancia
+        # 2️⃣  Identificar por hash
         try:
-            h_in = imagehash.phash(img)
-            ref = None
-            min_diff = 10  # Umbral ajustable (más bajo = más estricto)
-
-            for modelo, hashes in MODEL_HASHES.items():
-                for h_guardado in hashes:
-                    diff = h_in - imagehash.hex_to_hash(h_guardado)
-                    if diff < min_diff:
-                        min_diff = diff
-                        ref = modelo
-
-            logging.info(f"🔍 Hash calculado: {str(h_in)} — Coincidencia: {ref}")
+            h_in = str(imagehash.phash(img))
+            ref = MODEL_HASHES.get(h_in)
+            logging.info(f"🔍 Hash {h_in} → {ref}")
         except Exception as e:
             logging.error(f"❌ Error hashing: {e}")
             ref = None
 
         # 3️⃣  Responder al usuario
         if ref:
-            try:
-                marca, modelo, color = ref.split('_', 2)
-            except ValueError:
-                marca, modelo, color = "Marca", "Modelo", "Color"
-
+            marca, modelo, color = ref
             text = (f"La imagen coincide con {marca} {modelo} color {color}. "
                     "¿Deseas continuar tu compra? (SI/NO)")
 
