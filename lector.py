@@ -961,7 +961,7 @@ async def venom_webhook(req: Request):
         logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype}")
 
         # 🚨 FILTRO PARA EVITAR MENSAJES INDESEADOS 🚨
-        if mtype not in ("chat", "message", "image"):
+        if mtype not in ("chat", "message"):
             logging.info(f"⚠️ Ignorando evento tipo {mtype}")
             return JSONResponse(
                 {"type": "text", "text": f"Ignorado evento tipo {mtype}."},
@@ -976,21 +976,14 @@ async def venom_webhook(req: Request):
             )
 
         # 2️⃣ Si es imagen en base64
-        if mtype == "image" or mimetype.startswith("image"):
-            # 🔒 CONTROL DE TAMAÑO MÁXIMO
-            if len(body) > 3000000:  # 3 MB en base64
-                logging.warning(f"⚠️ Imagen demasiado grande ({len(body)/1024:.2f} KB). Ignorada.")
-                return JSONResponse(
-                    {"type": "text", "text": "📷 La imagen que enviaste es muy pesada. ¿Podrías enviarla más liviana o recortarla un poco? 🙏"},
-                    status_code=status.HTTP_200_OK
-                )
+        if mtype == "image" or mimetype.startswith("image"):            
             try:
-                b64_str = body.split(",", 1)[1] if "," in body else body
-                img_bytes = base64.b64decode(b64_str + "===")
-                img = Image.open(io.BytesIO(img_bytes))
-                img.load()  # ← fuerza carga completa
-                logging.info("✅ Imagen decodificada y cargada")
-            except Exception as e:
+                b64_str   = body.split(",", 1)[1] if "," in body else body
+                                          img_bytes = base64.b64decode(b64_str + "===")
+                                          img       = Image.open(io.BytesIO(img_bytes))
+                                          img.load()                          # fuerza carga completa
+                                          img = recortar_bordes_negros(img)   # ← recorte automático de bordes negros
+                                           logging.info("✅ Imagen decodificada y recortada")            except Exception as e:
                 logging.error(f"❌ No pude leer la imagen: {e}")
                 return JSONResponse(
                     {"type": "text", "text": "No pude leer la imagen 😕"},
