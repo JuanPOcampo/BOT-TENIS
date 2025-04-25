@@ -54,6 +54,51 @@ creds = service_account.Credentials.from_service_account_info(
 drive_service = build("drive", "v3", credentials=creds)
 
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
+def precargar_imagenes_drive(service, root_id):
+    """
+    Recorre recursivamente la carpeta raíz de Drive (root_id),
+    descarga cada imagen, calcula su hash perceptual
+    y devuelve un dict {hash: (marca, modelo, color)}.
+    """
+    imagenes = []
+
+    def _walk(current_id, ruta):
+        query = f"'{current_id}' in parents and trashed=false"
+        page_token = None
+        while True:
+            resp = service.files().list(
+                q=query,
+                fields="nextPageToken, files(id,name,mimeType)",
+                pageToken=page_token
+            ).execute()
+
+            for f in resp.get("files", []):
+                if f["mimeType"] == "application/vnd.google-apps.folder":
+                    _walk(f["id"], ruta + [f["name"]])
+                elif f["mimeType"].startswith("image/"):
+                    imagenes.append((f["id"], ruta, f["name"]))
+            page_token = resp.get("nextPageToken")
+            if page_token is None:
+                break
+
+    _walk(root_id, [])  # inicia el recorrido
+
+    cache = {}
+    for file_id, ruta, filename in imagenes:
+        try:
+            url = f"https://drive.google.com/uc?export=download&id={file_id}"
+            res = requests.get(url)
+            res.raise_for_status()
+            img = Image.open(io.BytesIO(res.content))
+            h = str(imagehash.phash(img))
+            marca, modelo, color = (ruta + ["", "", ""])[:3]
+            cache[h] = (marca, modelo, color)
+        except Exception as e:
+            print(f"⚠️  No se pudo procesar {filename}: {e}")
+
+    print(f"✅ Hashes precargados: {len(cache)} imágenes")
+    return cache
+
 
 PHASH_THRESHOLD = 20
 AHASH_THRESHOLD = 18
@@ -107,27 +152,32 @@ def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehas
     logging.info(f"▶ Precargados hashes para {len(model_hashes)} SKUs")
     return model_hashes
 
-MODEL_HASHES = precargar_hashes_from_drive(DRIVE_FOLDER_ID)
+MODEL_HASHES = precargar_imagenes_drive(drive_service, DRIVE_FOLDER_ID)
 
 def identify_model_from_stream(path: str) -> str | None:
+    """
+    Abre la imagen subida, calcula su hash y busca directamente
+    en MODEL_HASHES cuál es el modelo (marca_modelo_color).
+    """
     try:
         img_up = Image.open(path)
     except Exception as e:
         logging.error(f"No pude leer la imagen subida: {e}")
         return None
 
-    ph_up = imagehash.phash(img_up)
-    ah_up = imagehash.average_hash(img_up)
+    # ─── Aquí calculas y buscas el hash ───
+    img_hash = str(imagehash.phash(img_up))
+    modelo = next(
+        (m for m, hashes in MODEL_HASHES.items() if img_hash in hashes),
+        None
+    )
+    # ───────────────────────────────────────
 
-    for model, refs in MODEL_HASHES.items():
-        for ph_ref, ah_ref in refs:
-            if abs(ph_up - ph_ref) <= PHASH_THRESHOLD and abs(ah_up - ah_ref) <= AHASH_THRESHOLD:
-                return model
-    return None
+    return modelo
 
 # ——— VARIABLES DE ENTORNO ——————————————————————————————————————————————
 OPENAI_API_KEY        = os.environ["OPENAI_API_KEY"]
-NOMBRE_NEGOCIO        = os.environ.get("NOMBRE_NEGOCIO", "Tienda Tenis")
+NOMBRE_NEGOCIO        = os.environ.get("NOMBRE_NEGOCIO", "X100🔥👟")
 URL_SHEETS_INVENTARIO = os.environ["URL_SHEETS_INVENTARIO"]
 URL_SHEETS_PEDIDOS    = os.environ["URL_SHEETS_PEDIDOS"]
 EMAIL_DEVOLUCIONES    = os.environ["EMAIL_DEVOLUCIONES"]
@@ -140,8 +190,8 @@ EMAIL_PASSWORD        = os.environ.get("EMAIL_PASSWORD")
 WELCOME_TEXT = (
     f"¡Bienvenido a {NOMBRE_NEGOCIO}!\n\n"
     "¿Qué te gustaría hacer hoy?\n"
-    "– ¿Tienes alguna marca en mente?\n"
-    "– ¿Puedes enviarme la foto del que quieres ordenar?\n"
+    "– ¿Tienes alguna referencia en mente?\n"
+    "– ¿Puedes enviarme la foto del pedido?\n"
     "– ¿Te gustaría ver el catálogo?\n"
     "– ¿Te gustaría rastrear tu pedido?\n"
     "– ¿Te gustaría realizar un cambio?\n"
@@ -151,7 +201,7 @@ CLIP_INSTRUCTIONS = (
     "Para enviarme una imagen, pulsa el ícono de clip (📎), "
     "selecciona “Galería” o “Archivo” y elige la foto."
 )
-CATALOG_LINK    = "https://shoopsneakers.com/categoria-producto/hombre/"
+CATALOG_LINK    = "https://wa.me/c/573007607245🔝"
 CATALOG_MESSAGE = f"Aquí tienes el catálogo: {CATALOG_LINK}"
 
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
