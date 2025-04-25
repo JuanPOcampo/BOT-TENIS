@@ -913,108 +913,61 @@ async def procesar_wa(cid: str, body: str) -> dict:
     return {"type": "text", "text": ctx.resp[-1] if ctx.resp else "No entendí 🥲"}
 
 # 4. Webhook para WhatsApp (usado por Venom)
-# --------------------------------------------------------------------
-# 4. Webhook para WhatsApp (usado por Venom)
-#     – Maneja texto (body) y también imágenes (type == "image")
-# --------------------------------------------------------------------
-# ---------------------------------------------------------------------
-#  webhook /venom  – recibe mensajes de Venom (WhatsApp)
-# ---------------------------------------------------------------------
-# ---------------------------------------------------------------------
-#  webhook /venom  – recibe mensajes de Venom (WhatsApp)
-# ---------------------------------------------------------------------
-@api.post("/venom")
+# ---------- VENOM WEBHOOK ----------
+@app.post("/venom")
 async def venom_webhook(req: Request):
-    try:
-        # -----------------------------------------------------------------
-        # 1. Leer JSON entrante
-        # -----------------------------------------------------------------
-        data = await req.json()
+    logging.info("🚀 /venom invocado")
+    data = await req.json()
 
-        import pprint, base64, datetime, os, logging
-        pp = pprint.PrettyPrinter(indent=2)
-        pp.pprint(data)             # ← DEBUG opcional
+    cid      = wa_chat_id(data.get("from", ""))
+    body     = data.get("body", "") or ""
+    mtype    = (data.get("type") or "").lower()
+    mimetype = (data.get("mimetype") or "").lower()
 
-        cid      = wa_chat_id(data.get("from", ""))
-        body     = data.get("body", "") or ""
-        mtype    = data.get("type", "")
-        mimetype = (data.get("mimetype") or "").lower()   # 🔧 asegura str
+    # ───────── Procesamos SOLO imágenes ─────────
+    if mtype == "image" or mimetype.startswith("image"):
+        try:
+            # 1️⃣  Base64 → bytes → PIL.Image  --------------
+            b64_str  = body.split(",", 1)[1] if "," in body else body
+            img      = Image.open(io.BytesIO(base64.b64decode(b64_str)))
+            logging.info("✅ Imagen decodificada")
+        except Exception as e:
+            logging.error(f"❌ Error decodificando: {e}")
+            return JSONResponse(
+                {"type": "text", "text": "No pude leer la imagen 😕"},
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
-        logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype}")
+        # 2️⃣  Identificar por hash  -----------------------
+        try:
+            h_in   = str(imagehash.phash(img))
+            ref    = MODEL_HASHES.get(h_in)          # (marca,modelo,color) o None
+            logging.info(f"🔍 Hash {h_in} → {ref}")
+        except Exception as e:
+            logging.error(f"❌ Error hashing: {e}")
+            ref = None
 
-        # -----------------------------------------------------------------
-        # 2. Si es IMAGEN en base64
-        # -----------------------------------------------------------------
-        if mtype == "image" or mimetype.startswith("image"):     # 🔧 usa mimetype
-            try:
-                img_data = base64.b64decode(body)
-                logging.info("📥 Imagen decodificada correctamente desde base64.")
-            except Exception as e:
-                logging.error(f"❌ No se pudo decodificar la imagen: {e}")
-                return JSONResponse({"type": "text",
-                                     "text": "No pude procesar la imagen 😕"})
-
-            # Guardar archivo temporal
-            os.makedirs("temp", exist_ok=True)
-            local_path = f"temp/{cid}_{int(datetime.datetime.now().timestamp())}.jpg"
-            with open(local_path, "wb") as f:
-                f.write(img_data)
-            logging.info(f"💾 Imagen guardada en: {local_path}")
-
-            # Calcular hash y buscar coincidencia
-            try:
-                logging.info("🧠 Enviando a identify_model_from_stream…")
-                ref = identify_model_from_stream(local_path)
-                logging.info(f"🔍 Resultado del hash: {ref}")
-            except Exception as e:
-                logging.error(f"❌ Error al procesar la imagen: {e}")
-                return JSONResponse({"type": "text",
-                                     "text": "Error al procesar la imagen 😕"})
-            finally:
-                try:
-                    os.remove(local_path)
-                    logging.info(f"🧹 Eliminado {local_path}")
-                except:
-                    pass
-
-            # Coincidencia
-            if ref:
-                try:
-                    marca, modelo, color = ref.split('_', 2)
-                except ValueError:
-                    marca, modelo, color = "Marca", "Modelo", "Color"
-
-                estado_usuario.setdefault(cid, reset_estado(cid))
-                est = estado_usuario[cid]
-                est.update({"fase":   "imagen_detectada",
-                            "marca":  marca,
-                            "modelo": modelo,
-                            "color":  color})
-
-                return JSONResponse({"type": "text",
-                                     "text": f"La imagen coincide con {marca} {modelo} color {color}. "
-                                             "¿Deseas continuar tu compra? (SI/NO)"})
-
-            # Sin coincidencia
+        # 3️⃣  Responder al usuario  -----------------------
+        if ref:
+            marca, modelo, color = ref              # ← ref ya es tupla de 3
+            text = (f"La imagen coincide con {marca} {modelo} color {color}. "
+                    "¿Deseas continuar tu compra? (SI/NO)")
+            # Actualiza estado (si usas FSM)
+            estado_usuario.setdefault(cid, reset_estado(cid))
+            estado_usuario[cid].update(
+                fase="imagen_detectada", marca=marca, modelo=modelo, color=color
+            )
+        else:
+            text = ("No reconocí el modelo. "
+                    "Puedes intentar con otra imagen o escribir /start.")
             reset_estado(cid)
-            return JSONResponse({"type": "text",
-                                 "text": "No reconocí el modelo. "
-                                         "Puedes intentar con otra imagen o escribir /start para reiniciar."})
 
-        # -----------------------------------------------------------------
-        # 3. Si NO es imagen → procesar texto
-        # -----------------------------------------------------------------
-        reply = await procesar_wa(cid, body)
-        return JSONResponse(reply)
+        await venom_client.send_text(cid, text)
+        return Response(status_code=status.HTTP_200_OK)
 
-    # ---------------------------------------------------------------------
-    # 4. Error global del webhook
-    # ---------------------------------------------------------------------
-    except Exception:
-        logging.exception("🔥 Error en /venom")
-        return JSONResponse({"type": "text",
-                             "text": "Error interno en el bot. Intenta de nuevo."},
-                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    # ───────── Si NO es imagen, cae aquí ─────────
+    reply = await procesar_wa(cid, body)
+    return JSONResponse(reply)
 
 
 # -------------------------------------------------------------------------
