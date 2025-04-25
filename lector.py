@@ -112,6 +112,8 @@ def precargar_imagenes_drive(service, root_id):
             res = requests.get(url)
             res.raise_for_status()
             img = Image.open(io.BytesIO(res.content))
+            img.load()
+            img = recortar_bordes_negros(img)
             h = str(imagehash.phash(img))
             marca, modelo, color = (ruta + ["", "", ""])[:3]
             cache[h] = (marca, modelo, color)
@@ -122,8 +124,8 @@ def precargar_imagenes_drive(service, root_id):
     return cache
 
 
-PHASH_THRESHOLD = 20
-AHASH_THRESHOLD = 18
+PHASH_THRESHOLD = 22
+AHASH_THRESHOLD = 20
 
 def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]]:
     """
