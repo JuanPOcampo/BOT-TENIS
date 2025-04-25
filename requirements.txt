@@ -1,15 +1,23 @@
 python-telegram-bot[webhooks]
-pillow
-imagehash
-openai
+
+fastapi
+uvicorn
+nest_asyncio
+python-dotenv==1.0.1
+
 requests
 gdown
+
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
+
 pydub
 ffmpeg-python
-uvicorn
-fastapi
-nest_asyncio
-python-dotenv==1.0.1
+
+torch               # motor de PyTorch
+clip-by-openai      # modelo CLIP
+pillow              # procesamiento de imágenes (PIL)
+numpy               # operaciones numéricas
+
+openai              # si sigues usando la API para otras cosas
