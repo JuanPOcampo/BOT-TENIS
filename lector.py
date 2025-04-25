@@ -47,46 +47,6 @@ load_dotenv()
 # FastAPI instance
 api = FastAPI()
 
-def recortar_bordes_negros(imagen: Image.Image, tolerancia: int = 10) -> Image.Image:
-    """
-    Recorta solo barras negras arriba/abajo si superan cierto umbral y no recorta más del 20% de la altura.
-    Si no hay bordes claros o el recorte es excesivo, devuelve la imagen original.
-    """
-    try:
-        if imagen.mode != "RGB":
-            imagen = imagen.convert("RGB")
-
-        fondo = Image.new("RGB", imagen.size, (0, 0, 0))  # fondo negro puro
-        diff = ImageChops.difference(imagen, fondo)
-        diff = ImageChops.add(diff, diff, 2.0, -tolerancia)
-        bbox = diff.getbbox()
-
-        if not bbox:
-            return imagen  # No hay diferencia visible
-
-        # Limitar solo vertical (superior/inferior)
-        _, upper, _, lower = bbox
-
-        altura_original = imagen.height
-        max_recorte_total = int(altura_original * 0.2)  # máximo 20% de altura
-
-        recorte_sup = upper
-        recorte_inf = altura_original - lower
-
-        if recorte_sup + recorte_inf > max_recorte_total:
-            return imagen  # recortaría demasiado → cancelamos
-
-        # Aplica recorte vertical seguro
-        img_crop = imagen.crop((0, recorte_sup, imagen.width, lower))
-
-        if img_crop.height < 200:
-            return imagen  # imagen resultante muy pequeña
-
-        return img_crop
-
-    except Exception as e:
-        logging.warning(f"⚠️ Recorte falló: {e}")
-        return imagen
 
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
 creds = service_account.Credentials.from_service_account_info(
@@ -144,8 +104,8 @@ def precargar_imagenes_drive(service, root_id):
     return cache
 
 
-PHASH_THRESHOLD = 22
-AHASH_THRESHOLD = 20
+PHASH_THRESHOLD = 26
+AHASH_THRESHOLD = 26
 
 def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]]:
     """
@@ -980,8 +940,6 @@ async def venom_webhook(req: Request):
                 img_bytes = base64.b64decode(b64_str + "===")
                 img       = Image.open(io.BytesIO(img_bytes))
                 img.load()
-                img       = recortar_bordes_negros(img)  # ← recorte de bordes negros aquí
-                print(f"📐 [PRINT] Tamaño tras recorte: {img.size}")
                 logging.info("✅ Imagen decodificada y recortada")
             except Exception as e:
                 logging.error(f"❌ No pude leer la imagen: {e}")
