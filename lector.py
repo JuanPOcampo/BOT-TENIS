@@ -930,21 +930,6 @@ async def venom_webhook(req: Request):
 
         logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype}")
 
-        # 🚨 FILTRO PARA EVITAR MENSAJES INDESEADOS 🚨
-        if mtype not in ("chat", "message"):
-            logging.info(f"⚠️ Ignorando evento tipo {mtype}")
-            return JSONResponse(
-                {"type": "text", "text": f"Ignorado evento tipo {mtype}."},
-                status_code=status.HTTP_204_NO_CONTENT
-            )
-
-        if not body.strip():
-            logging.info(f"⚠️ Mensaje vacío de {cid}, ignorado.")
-            return JSONResponse(
-                {"type": "text", "text": "Mensaje vacío ignorado."},
-                status_code=status.HTTP_204_NO_CONTENT
-            )
-
         # 2️⃣ Si es imagen en base64
         if mtype == "image" or mimetype.startswith("image"):
             try:
