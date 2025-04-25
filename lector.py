@@ -2,12 +2,6 @@ import os
 import io
 import base64
 import logging
-from dotenv import load_dotenv
-load_dotenv()
-import imagehash
-from types import SimpleNamespace
-from PIL import Image
-from openai import AsyncOpenAI
 import json
 import re
 import requests
@@ -17,13 +11,19 @@ import datetime
 import unicodedata
 import difflib
 import asyncio
+from types import SimpleNamespace
+from dotenv import load_dotenv
+from PIL import Image
+import imagehash
 from fastapi import FastAPI, Request
-api = FastAPI()
+from openai import AsyncOpenAI
 
+# Google Drive
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
+# Telegram
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
@@ -31,7 +31,7 @@ from telegram import (
     ReplyKeyboardRemove,
     InputMediaPhoto,
 )
-from telegram.constants import ChatAction  # ✅ Importación correcta en versiones 20+
+from telegram.constants import ChatAction
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -39,14 +39,12 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from telegram.constants import ChatAction  # ✅ Importación correcta en versiones 20+
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+
+# Inicializa dotenv
+load_dotenv()
+
+# FastAPI instance
+api = FastAPI()
 
 
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
@@ -919,59 +917,72 @@ async def procesar_wa(cid: str, body: str) -> dict:
 # ---------- VENOM WEBHOOK ----------
 @api.post("/venom")
 async def venom_webhook(req: Request):
+    logging.info("🚀 /venom invocado")
     try:
-        logging.info("🚀 /venom invocado")
         data = await req.json()
-
-        cid      = wa_chat_id(data.get("from", ""))
-        body     = data.get("body", "") or ""
-        mtype    = (data.get("type") or "").lower()
-        mimetype = (data.get("mimetype") or "").lower()
-
-        if mtype == "image" or mimetype.startswith("image"):
-            try:
-                b64_str = body.split(",", 1)[1] if "," in body else body
-                img_bytes = base64.b64decode(b64_str + "===")
-                img = Image.open(io.BytesIO(img_bytes))
-                img.load()
-                logging.info("✅ Imagen decodificada y cargada")
-            except Exception as e:
-                logging.error(f"❌ No pude leer la imagen: {e}")
-                return JSONResponse(
-                    {"type": "text", "text": "No pude leer la imagen 😕"},
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
-
-            h_in = str(imagehash.phash(img))
-            ref  = MODEL_HASHES.get(h_in)
-            logging.info(f"🔍 Hash {h_in} → {ref}")
-
-            if ref:
-                marca, modelo, color = ref
-                text = (f"La imagen coincide con {marca} {modelo} color {color}. "
-                        "¿Deseas continuar tu compra? (SI/NO)")
-                estado_usuario.setdefault(cid, reset_estado(cid))
-                estado_usuario[cid].update(
-                    fase="imagen_detectada", marca=marca, modelo=modelo, color=color
-                )
-            else:
-                text = ("No reconocí el modelo. "
-                        "Puedes intentar con otra imagen o escribir /start.")
-                reset_estado(cid)
-
-            return JSONResponse({"type": "text", "text": text})
-
-        # No es imagen → texto plano
-        reply = await procesar_wa(cid, body)
-        return JSONResponse(reply)
-
     except Exception as e:
-        logging.exception("🔥 Error inesperado en /venom")
+        logging.error(f"❌ No se pudo parsear JSON del request: {e}")
         return JSONResponse(
-            {"type": "text", "text": "Ocurrió un error interno procesando la imagen 😵"},
-            status_code=500
+            {"type": "text", "text": "Error interno leyendo tu mensaje 😔"},
+            status_code=status.HTTP_400_BAD_REQUEST
         )
 
+    cid = wa_chat_id(data.get("from", ""))
+    body = data.get("body", "") or ""
+    mtype = (data.get("type") or "").lower()
+    mimetype = (data.get("mimetype") or "").lower()
+
+    # Si es imagen
+    if mtype == "image" or mimetype.startswith("image"):
+        try:
+            b64_str = body.split(",", 1)[1] if "," in body else body
+            img_bytes = base64.b64decode(b64_str + "===")
+            img = Image.open(io.BytesIO(img_bytes))
+            img.load()  # fuerza carga completa
+            logging.info(f"✅ Imagen recibida y cargada (CID={cid})")
+
+            # Guarda imagen para ver en Render (debug visual)
+            os.makedirs("temp", exist_ok=True)
+            img_path = f"temp/venom_{cid}.jpg"
+            img.save(img_path)
+            logging.info(f"📸 Imagen guardada como {img_path}")
+        except Exception as e:
+            logging.error(f"❌ No pude leer la imagen: {e}")
+            return JSONResponse(
+                {"type": "text", "text": "No pude leer la imagen 😕"},
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            h_in = str(imagehash.phash(img))
+            ref = MODEL_HASHES.get(h_in)
+            logging.info(f"🔍 Hash {h_in} → {ref}")
+        except Exception as e:
+            logging.error(f"❌ Error calculando hash: {e}")
+            ref = None
+
+        if ref:
+            marca, modelo, color = ref
+            text = (
+                f"La imagen coincide con {marca} {modelo} color {color}. "
+                "¿Deseas continuar tu compra? (SI/NO)"
+            )
+            estado_usuario.setdefault(cid, reset_estado(cid))
+            estado_usuario[cid].update(
+                fase="imagen_detectada", marca=marca, modelo=modelo, color=color
+            )
+        else:
+            text = (
+                "No reconocí el modelo. "
+                "Puedes intentar con otra imagen o escribir /start."
+            )
+            reset_estado(cid)
+
+        return JSONResponse({"type": "text", "text": text})
+
+    # Si no es imagen, se procesa normalmente como texto
+    reply = await procesar_wa(cid, body)
+    return JSONResponse(reply)
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
