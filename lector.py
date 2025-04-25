@@ -171,7 +171,26 @@ def identify_model_from_stream(path: str) -> str | None:
         (m for m, hashes in MODEL_HASHES.items() if img_hash in hashes),
         None
     )
-    # ───────────────────────────────────────
+   
+def identify_model_from_stream(path: str) -> tuple[str, str, str] | None:
+    """
+    Abre la imagen subida, calcula su hash y devuelve
+    la tupla (marca, modelo, color) si existe en MODEL_HASHES.
+    """
+    try:
+        img_up = Image.open(path)
+    except Exception as e:
+        logging.error(f"No pude leer la imagen subida: {e}")
+        return None
+
+    # Calcula el hash perceptual
+    img_hash = str(imagehash.phash(img_up))
+
+    # Busca directamente la tupla (marca, modelo, color) por clave
+    ref = MODEL_HASHES.get(img_hash)
+    return ref
+
+ # ───────────────────────────────────────
 
     return modelo
 
@@ -913,16 +932,7 @@ async def procesar_wa(cid: str, body: str) -> dict:
     return {"type": "text", "text": ctx.resp[-1] if ctx.resp else "No entendí 🥲"}
 
 # 4. Webhook para WhatsApp (usado por Venom)
-# --------------------------------------------------------------------
-# 4. Webhook para WhatsApp (usado por Venom)
-#     – Maneja texto (body) y también imágenes (type == "image")
-# --------------------------------------------------------------------
-# ---------------------------------------------------------------------
-#  webhook /venom  – recibe mensajes de Venom (WhatsApp)
-# ---------------------------------------------------------------------
-# ---------------------------------------------------------------------
-#  webhook /venom  – recibe mensajes de Venom (WhatsApp)
-# ---------------------------------------------------------------------
+
 @api.post("/venom")
 async def venom_webhook(req: Request):
     try:
