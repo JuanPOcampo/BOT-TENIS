@@ -923,18 +923,19 @@ async def venom_webhook(req: Request):
     logging.info("🚀 /venom invocado")
     data = await req.json()
 
-    cid      = wa_chat_id(data.get("from", "")) or "000"
+    cid      = wa_chat_id(data.get("from", ""))
     body     = data.get("body", "") or ""
     mtype    = (data.get("type") or "").lower()
     mimetype = (data.get("mimetype") or "").lower()
 
     # ───────── Solo procesamos imágenes ─────────
     if mtype == "image" or mimetype.startswith("image"):
+        # 1) Decodificar base64 ------------------------------------------
         try:
             b64_str = body.split(",", 1)[1] if "," in body else body
             img_bytes = base64.b64decode(b64_str + "===")
             img = Image.open(io.BytesIO(img_bytes))
-            img.load()  # fuerza carga completa
+            img.load()                                       # ← ¡carga completa!
             logging.info("✅ Imagen decodificada y cargada")
         except Exception as e:
             logging.error(f"❌ No pude leer la imagen: {e}")
@@ -943,38 +944,29 @@ async def venom_webhook(req: Request):
                 status_code=status.HTTP_400_BAD_REQUEST
             )
 
-        # 2️⃣  Calcular hash y buscar
-        try:
-            h_in = str(imagehash.phash(img))
-            logging.info(f"🧪 Hash generado: {h_in}")
+        # 2) Calcular hash y buscar -------------------------------------
+        h_in = str(imagehash.phash(img))
+        ref  = MODEL_HASHES.get(h_in)        # dict[hash] ⇒ (marca, modelo, color)
+        logging.info(f"🔍 Hash {h_in} → {ref}")
 
-            # Log todos los precargados por si no encuentra nada
-            for precargado, valores in MODEL_HASHES.items():
-                logging.debug(f"📦 Precargado: {precargado} → {valores}")
-
-            ref = MODEL_HASHES.get(h_in)
-            logging.info(f"🔍 Resultado búsqueda exacta: {ref}")
-        except Exception as e:
-            logging.error(f"❌ Error al calcular hash: {e}")
-            ref = None
-
-        # 3️⃣  Respuesta al usuario
+        # 3) Responder ---------------------------------------------------
         if ref:
             marca, modelo, color = ref
             text = (f"La imagen coincide con {marca} {modelo} color {color}. "
                     "¿Deseas continuar tu compra? (SI/NO)")
-
             estado_usuario.setdefault(cid, reset_estado(cid))
             estado_usuario[cid].update(
                 fase="imagen_detectada", marca=marca, modelo=modelo, color=color
             )
         else:
-            text = "No reconocí el modelo. Puedes intentar con otra imagen o escribir /start."
+            text = ("No reconocí el modelo. "
+                    "Puedes intentar con otra imagen o escribir /start.")
             reset_estado(cid)
 
+        # devolvemos JSON (no usamos venom_client)
         return JSONResponse({"type": "text", "text": text})
 
-    # ───────── Si no es imagen, va al flujo normal ─────────
+    # ───────── No es imagen → flujo normal ─────────
     reply = await procesar_wa(cid, body)
     return JSONResponse(reply)
 # -------------------------------------------------------------------------
