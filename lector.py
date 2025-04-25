@@ -101,8 +101,8 @@ def precargar_imagenes_drive(service, root_id):
     return cache
 
 
-PHASH_THRESHOLD = 25
-AHASH_THRESHOLD = 25
+PHASH_THRESHOLD = 28
+AHASH_THRESHOLD = 28
 
 def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]]:
     """
@@ -160,24 +160,28 @@ for h, ref in MODEL_HASHES.items():
 
 def identify_model_from_stream(path: str) -> str | None:
     """
-    Abre la imagen subida, calcula su hash y busca directamente
-    en MODEL_HASHES cuál es el modelo (marca_modelo_color).
+    Abre la imagen, calcula su hash, y busca el modelo más cercano por similitud.
+    Usa pHash y tolerancia (distancia de Hamming).
     """
     try:
         img_up = Image.open(path)
+        img_up.load()
+        hash_up = imagehash.phash(img_up)
+
+        mejor_modelo = None
+        mejor_distancia = PHASH_THRESHOLD  # permitimos distancia hasta 28
+
+        for hash_guardado, (marca, modelo, color) in MODEL_HASHES.items():
+            distancia = hash_up - imagehash.hex_to_hash(hash_guardado)
+            if distancia < mejor_distancia:
+                mejor_modelo = f"{marca}_{modelo}_{color}"
+                mejor_distancia = distancia
+
+        return mejor_modelo
+
     except Exception as e:
-        logging.error(f"No pude leer la imagen subida: {e}")
+        logging.error(f"❌ Error al identificar modelo: {e}")
         return None
-
-    # ─── Aquí calculas y buscas el hash ───
-    img_hash = str(imagehash.phash(img_up))
-    modelo = next(
-        (m for m, hashes in MODEL_HASHES.items() if img_hash in hashes),
-        None
-    )
-    # ───────────────────────────────────────
-
-    return modelo
 
 # ——— VARIABLES DE ENTORNO ——————————————————————————————————————————————
 OPENAI_API_KEY        = os.environ["OPENAI_API_KEY"]
