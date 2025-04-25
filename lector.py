@@ -1019,10 +1019,19 @@ async def venom_webhook(req: Request):
 
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
-# -------------------------------------------------------------------------
 if __name__ == "__main__":
-    import uvicorn, os
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(api, host="0.0.0.0", port=port)
+    import os
+    import uvicorn
+
+    # Leer la variable que Render inyecta
+    port = int(os.environ.get("PORT", 8000))  
+    # OJO: si tú localmente usas otro puerto, cámbialo aquí, pero en Render
+    # siempre tendrás PORT definido y será un número distinto.
+
+    uvicorn.run(
+        "lector:app",        # módulo:app
+        host="0.0.0.0",      # escucha en todas las interfaces
+        port=port            # ¡úsalo aquí!
+    )
 
 
