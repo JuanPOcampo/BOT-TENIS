@@ -959,7 +959,7 @@ async def venom_webhook(req: Request):
                 img       = Image.open(io.BytesIO(img_bytes))
                 img.load()
                 img       = recortar_bordes_negros(img)  # ← recorte de bordes negros aquí
-                logging.info(f"📐 Tamaño tras recorte: {img.size}")
+                print(f"📐 [PRINT] Tamaño tras recorte: {img.size}")
                 logging.info("✅ Imagen decodificada y recortada")
             except Exception as e:
                 logging.error(f"❌ No pude leer la imagen: {e}")
