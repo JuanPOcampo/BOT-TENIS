@@ -480,6 +480,111 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     reset_estado(cid)
     await saludo_bienvenida(update, ctx)
     estado_usuario[cid]["fase"] = "esperando_comando"
+# Función para manejar la solicitud de precio por referencia
+PALABRAS_PRECIO = ['precio', 'vale', 'cuesta', 'valor', 'coste', 'precios', 'cuánto']
+
+async def manejar_precio(update, context, inventario):
+    cid = update.effective_chat.id
+    mensaje = (update.message.text or "").lower()
+
+    # Buscar si menciona precio
+    if any(palabra in mensaje for palabra in PALABRAS_PRECIO):
+        referencia_encontrada = re.search(r'\b\d{3}\b', mensaje)
+        if referencia_encontrada:
+            referencia = referencia_encontrada.group()
+            precio = buscar_precio_referencia(referencia, inventario)
+
+            if precio:
+                await context.bot.send_message(
+                    chat_id=cid,
+                    text=f"🚀 Los *DS-{referencia}* tienen un precio especial de *${precio}* con envío gratis 🚚.\n\n👉 ¿Te gustaría proseguir con la compra? (Sí / No)"
+                )
+                estado_usuario[cid]["fase"] = "esperando_confirmacion_compra"
+                estado_usuario[cid]["referencia"] = referencia
+            else:
+                await context.bot.send_message(
+                    chat_id=cid,
+                    text="😔 Lo siento, no encontré esa referencia. ¿Podrías revisarla y enviarla de nuevo, por favor?"
+                )
+            return
+
+        else:
+            await context.bot.send_message(
+                chat_id=cid,
+                text="✨ ¡Claro! ¿Qué *referencia* deseas consultar? 📋"
+            )
+            estado_usuario[cid]["fase"] = "esperando_referencia_precio"
+            return
+
+    # Si estaba esperando referencia
+    if estado_usuario[cid].get("fase") == "esperando_referencia_precio":
+        referencia = mensaje.upper().replace("DS-", "").replace(" ", "")
+        precio = buscar_precio_referencia(referencia, inventario)
+
+        if precio:
+            await context.bot.send_message(
+                chat_id=cid,
+                text=f"🚀 Los *DS-{referencia}* tienen un precio especial de *${precio}* con envío gratis 🚚.\n\n👉 ¿Te gustaría proseguir con la compra? (Sí / No)"
+            )
+            estado_usuario[cid]["fase"] = "esperando_confirmacion_compra"
+            estado_usuario[cid]["referencia"] = referencia
+        else:
+            await context.bot.send_message(
+                chat_id=cid,
+                text="😔 No encontré esa referencia. ¿Puedes revisarla y enviarla de nuevo, por favor?"
+            )
+        return
+
+    # Si estaba esperando confirmación de compra
+    if estado_usuario[cid].get("fase") == "esperando_confirmacion_compra":
+        if "sí" in mensaje or "si" in mensaje:
+            await context.bot.send_message(
+                chat_id=cid,
+                text="🔥 ¡Perfecto! Vamos a seguir con tu compra. ¿Cuál es tu *nombre completo*?"
+            )
+            estado_usuario[cid]["fase"] = "esperando_nombre"
+        elif "no" in mensaje:
+            await context.bot.send_message(
+                chat_id=cid,
+                text="👍 No hay problema. Si deseas consultar otra referencia, ¡me avisas! 📋"
+            )
+            reset_estado(cid)
+        else:
+            await context.bot.send_message(
+                chat_id=cid,
+                text="¿Te gustaría proseguir con la compra? Por favor responde *Sí* o *No* 🙏"
+            )
+        return
+# Bloque para manejar preguntas frecuentes
+PALABRAS_FRECUENTES = {
+    "cuanto demora": (
+        "⏳ El tiempo de entrega depende de la ciudad de destino, "
+        "pero generalmente tarda 2 días hábiles en llegar a la puerta de tu casa. "
+        "Si los necesitas para mañana, podemos enviarlos para reclamar en el terminal de transporte de tu ciudad "
+        "y mañana mismo después de las 2 p.m. puedes reclamarlos. "
+        "Esta modalidad requiere pago anticipado ya que las empresas de buses no manejan contra entrega."
+    ),
+    "pago contra entrega": (
+        "📦 Por supuesto que tenemos pago contra entrega. "
+        "Pedimos un anticipo de $35.000 para cubrir el flete. "
+        "Este valor es descontado del precio total de las zapatillas. "
+        "Por ejemplo, si el precio es $219.900 y haces el anticipo, "
+        "al recibirlas solo pagas $184.900. "
+        "Solicitamos el anticipo porque algunas personas antes no recogían los pedidos "
+        "y la empresa terminaba asumiendo el costo de los envíos fallidos."
+    ),
+}
+
+async def manejar_preguntas_frecuentes(update, context):
+    cid = update.effective_chat.id
+    mensaje = (update.message.text or "").lower()
+
+    for clave, respuesta in PALABRAS_FRECUENTES.items():
+        if clave in mensaje:
+            await context.bot.send_message(chat_id=cid, text=respuesta)
+            return True  # ya respondimos
+
+    return False  # no era pregunta frecuente
 
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
