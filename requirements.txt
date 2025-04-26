@@ -1,22 +1,16 @@
 python-telegram-bot[webhooks]
-import imagehash
-
 fastapi
 uvicorn
 nest_asyncio
 python-dotenv==1.0.1
-
 requests
 gdown
-
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
-
 pydub
 ffmpeg-python
-
 pillow
 numpy
-
 openai
+ImageHash
