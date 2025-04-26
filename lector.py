@@ -193,59 +193,77 @@ def buscar_precio_referencia(referencia, inventario):
 # Función principal para manejar la solicitud de precio
 import re  # ← Importa esto arriba en tu archivo
 
-async def manejar_precio(txt, update, context, inventario):
+async def manejar_precio(update, context, inventario):
+    cid = update.effective_chat.id
     mensaje = update.message.text.lower()
 
-    # Paso 1: Verificar si el mensaje menciona algo sobre precio
+    # Buscar si menciona precio
     if any(palabra in mensaje for palabra in PALABRAS_PRECIO):
-        # Intentar detectar referencia numérica en el mismo mensaje
-        referencia_encontrada = re.search(r'\b\d{3}\b', mensaje)  # Busca número de 3 dígitos
-
+        referencia_encontrada = re.search(r'\b\d{3}\b', mensaje)
         if referencia_encontrada:
             referencia = referencia_encontrada.group()
             precio = buscar_precio_referencia(referencia, inventario)
 
             if precio:
                 await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
+                    chat_id=cid,
                     text=f"🚀 Los *DS-{referencia}* tienen un precio especial de *${precio}* con envío gratis 🚚.\n\n👉 ¿Te gustaría proseguir con la compra? (Sí / No)"
                 )
-                context.user_data['esperando_confirmacion_compra'] = True
-                context.user_data['referencia_seleccionada'] = referencia
+                estado_usuario[cid]["fase"] = "esperando_confirmacion_compra"
+                estado_usuario[cid]["referencia"] = referencia
             else:
                 await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
+                    chat_id=cid,
                     text="😔 Lo siento, no encontré esa referencia. ¿Podrías revisarla y enviarla de nuevo, por favor?"
                 )
-            return  # 🚀 Ya respondió, no sigue preguntando
-
-        else:
-            # Si no encuentra referencia, entonces pregunta normalmente
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="✨ ¡Claro! ¿Qué *referencia* deseas consultar? 📋"
-            )
-            context.user_data['esperando_referencia_precio'] = True
             return
 
-    # Paso 2: Si ya preguntamos por la referencia, capturarla
-    if context.user_data.get('esperando_referencia_precio'):
+        else:
+            await context.bot.send_message(
+                chat_id=cid,
+                text="✨ ¡Claro! ¿Qué *referencia* deseas consultar? 📋"
+            )
+            estado_usuario[cid]["fase"] = "esperando_referencia_precio"
+            return
+
+    # Si estaba esperando referencia
+    if estado_usuario[cid].get("fase") == "esperando_referencia_precio":
         referencia = mensaje.upper().replace("DS-", "").replace(" ", "")
         precio = buscar_precio_referencia(referencia, inventario)
 
         if precio:
             await context.bot.send_message(
-                chat_id=update.effective_chat.id,
+                chat_id=cid,
                 text=f"🚀 Los *DS-{referencia}* tienen un precio especial de *${precio}* con envío gratis 🚚.\n\n👉 ¿Te gustaría proseguir con la compra? (Sí / No)"
             )
-            context.user_data['esperando_confirmacion_compra'] = True
-            context.user_data['referencia_seleccionada'] = referencia
+            estado_usuario[cid]["fase"] = "esperando_confirmacion_compra"
+            estado_usuario[cid]["referencia"] = referencia
         else:
             await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="😔 Lo siento, no encontré esa referencia. ¿Podrías revisarla y enviarla de nuevo, por favor?"
+                chat_id=cid,
+                text="😔 No encontré esa referencia. ¿Puedes revisarla y enviarla de nuevo, por favor?"
             )
-        context.user_data.pop('esperando_referencia_precio', None)
+        return
+
+    # Si estaba esperando confirmación de compra
+    if estado_usuario[cid].get("fase") == "esperando_confirmacion_compra":
+        if "sí" in mensaje or "si" in mensaje:
+            await context.bot.send_message(
+                chat_id=cid,
+                text="🔥 ¡Perfecto! Vamos a seguir con tu compra. ¿Cuál es tu *nombre completo*?"
+            )
+            estado_usuario[cid]["fase"] = "esperando_nombre"
+        elif "no" in mensaje:
+            await context.bot.send_message(
+                chat_id=cid,
+                text="👍 No hay problema. Si deseas consultar otra referencia, ¡me avisas! 📋"
+            )
+            reset_estado(cid)
+        else:
+            await context.bot.send_message(
+                chat_id=cid,
+                text="¿Te gustaría proseguir con la compra? Por favor responde *Sí* o *No* 🙏"
+            )
         return
 
 # ——— VARIABLES DE ENTORNO ——————————————————————————————————————————————
