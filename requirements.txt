@@ -15,8 +15,6 @@ google-auth-oauthlib
 pydub
 ffmpeg-python
 
-torch
-open_clip_torch        # 👈 NUEVO (mejor que clip-by-openai)
 pillow
 numpy
 
