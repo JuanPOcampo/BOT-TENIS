@@ -186,8 +186,10 @@ PALABRAS_PRECIO = ['precio', 'vale', 'cuesta', 'valor', 'coste', 'precios', 'cu�
 # Función para buscar el precio en el Sheets
 def buscar_precio_referencia(referencia, inventario):
     for item in inventario:
-        if str(item.get('modelo', '')).strip().lower() == referencia.strip().lower():
-            return item.get('precio')
+        if isinstance(item, dict):  # ← VERIFICAR que item sea un diccionario
+            modelo = str(item.get('modelo', '')).strip().lower()
+            if modelo == referencia.strip().lower():
+                return item.get('precio')
     return None
 
 # Función principal para manejar la solicitud de precio
