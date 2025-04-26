@@ -193,7 +193,7 @@ def buscar_precio_referencia(referencia, inventario):
 # Función principal para manejar la solicitud de precio
 import re  # ← Importa esto arriba en tu archivo
 
-async def manejar_precio(update, context, inventario):
+async def manejar_precio(txt, update, context, inventario):
     mensaje = update.message.text.lower()
 
     # Paso 1: Verificar si el mensaje menciona algo sobre precio
