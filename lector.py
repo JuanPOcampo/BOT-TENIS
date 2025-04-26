@@ -153,15 +153,17 @@ def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehas
     logging.info(f"▶ Precargados hashes para {len(model_hashes)} SKUs")
     return model_hashes
 
-MODEL_HASHES = precargar_imagenes_drive(drive_service, DRIVE_FOLDER_ID)
+HASH_REF = precargar_imagenes_drive(drive_service, DRIVE_FOLDER_ID)
 
-for h, ref in MODEL_HASHES.items():
+MODEL_HASHES = list(HASH_REF.keys())
+
+for h, ref in HASH_REF.items():
     print(f"HASH precargado: {h} → {ref}")
 
 def identify_model_from_stream(path: str) -> str | None:
     """
     Abre la imagen subida, calcula su hash y busca directamente
-    en MODEL_HASHES cuál es el modelo (marca_modelo_color).
+    en HASH_REF cuál es el modelo (marca_modelo_color).
     """
     try:
         img_up = Image.open(path)
@@ -169,15 +171,17 @@ def identify_model_from_stream(path: str) -> str | None:
         logging.error(f"No pude leer la imagen subida: {e}")
         return None
 
-    # ─── Aquí calculas y buscas el hash ───
+    # Calcular el hash de la imagen subida
     img_hash = str(imagehash.phash(img_up))
-    modelo = next(
-        (m for m, hashes in MODEL_HASHES.items() if img_hash in hashes),
-        None
-    )
-    # ───────────────────────────────────────
 
-    return modelo
+    # Buscar si ese hash exacto está en HASH_REF
+    if img_hash in HASH_REF:
+        marca, modelo, color = HASH_REF[img_hash]
+        return f"{marca}_{modelo}_{color}"
+
+    # Si no encontró coincidencia exacta, retornar None
+    return None
+
 # Bloque para manejar solicitud de precio por referencia
 
 # Primero, define palabras clave que detecten que el usuario habla de precio
@@ -509,6 +513,9 @@ async def mostrar_imagenes_modelo(cid, ctx, marca, tipo_modelo):
     )
 
 def registrar_orden(data: dict):
+    """
+    Envía el resumen de venta a Google Sheets (URL_SHEETS_PEDIDOS).
+    """
     payload = {
         "numero_venta": data.get("Número Venta", ""),
         "fecha_venta":  data.get("Fecha Venta", ""),
@@ -529,33 +536,9 @@ def registrar_orden(data: dict):
         logging.error(f"[SHEETS] Error al hacer POST: {e}")
 
 def generate_sale_id() -> str:
-    ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    rnd = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
-    return f"VEN-{ts}-{rnd}"
-
-#  HOJA DE PEDIDOS
-# ───────────────────────────────────────────────────────────────
-def registrar_orden(data: dict):
-    payload = {
-        "numero_venta": data.get("Número Venta", ""),
-        "fecha_venta":  data.get("Fecha Venta", ""),
-        "cliente":      data.get("Cliente", ""),
-        "telefono":     data.get("Teléfono", ""),
-        "producto":     data.get("Producto", ""),
-        "color":        data.get("Color", ""),
-        "talla":        data.get("Talla", ""),
-        "correo":       data.get("Correo", ""),
-        "pago":         data.get("Pago", ""),
-        "estado":       data.get("Estado", "")
-    }
-    logging.info(f"[SHEETS] Payload JSON que envío:\n{payload}")
-    try:
-        resp = requests.post(URL_SHEETS_PEDIDOS, json=payload)
-        logging.info(f"[SHEETS] HTTP {resp.status_code} — Body: {resp.text}")
-    except Exception as e:
-        logging.error(f"[SHEETS] Error al hacer POST: {e}")
-
-def generate_sale_id() -> str:
+    """
+    Genera un ID único para cada venta (ej: VEN-20250426123045-AB12).
+    """
     ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     rnd = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
     return f"VEN-{ts}-{rnd}"
@@ -1006,28 +989,7 @@ if __name__ == "__main__":
 
 
 
-# ——— VARIABLES DE ENTORNO ——————————————————————————————————————————————
-OPENAI_API_KEY        = os.environ["OPENAI_API_KEY"]
-NOMBRE_NEGOCIO        = os.environ.get("NOMBRE_NEGOCIO", "X100🔥👟")
-URL_SHEETS_INVENTARIO = os.environ["URL_SHEETS_INVENTARIO"]
-URL_SHEETS_PEDIDOS    = os.environ["URL_SHEETS_PEDIDOS"]
-EMAIL_DEVOLUCIONES    = os.environ["EMAIL_DEVOLUCIONES"]
-EMAIL_JEFE            = os.environ["EMAIL_JEFE"]
-SMTP_SERVER           = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
-SMTP_PORT             = int(os.environ.get("SMTP_PORT", 587))
-EMAIL_REMITENTE       = os.environ.get("EMAIL_REMITENTE")
-EMAIL_PASSWORD        = os.environ.get("EMAIL_PASSWORD")
 
-WELCOME_TEXT = (
-    f"¡Bienvenido a {NOMBRE_NEGOCIO}!\n\n"
-    "¿Qué te gustaría hacer hoy?\n"
-    "– ¿Tienes alguna referencia en mente?\n"
-    "– ¿Puedes enviarme la foto del pedido?\n"
-    "– ¿Te gustaría ver el catálogo?\n"
-    "– ¿Te gustaría rastrear tu pedido?\n"
-    "– ¿Te gustaría realizar un cambio?\n"
-    "Cuéntame sin ningún problema 😀"
-)
 CLIP_INSTRUCTIONS = (
     "Para enviarme una imagen, pulsa el ícono de clip (📎), "
     "selecciona “Galería” o “Archivo” y elige la foto."
@@ -1239,58 +1201,6 @@ async def mostrar_imagenes_modelo(cid, ctx, marca, tipo_modelo):
             obtener_colores_por_modelo(obtener_inventario(), est["marca"], tipo_modelo)
         )
     )
-
-def registrar_orden(data: dict):
-    payload = {
-        "numero_venta": data.get("Número Venta", ""),
-        "fecha_venta":  data.get("Fecha Venta", ""),
-        "cliente":      data.get("Cliente", ""),
-        "telefono":     data.get("Teléfono", ""),
-        "producto":     data.get("Producto", ""),
-        "color":        data.get("Color", ""),
-        "talla":        data.get("Talla", ""),
-        "correo":       data.get("Correo", ""),
-        "pago":         data.get("Pago", ""),
-        "estado":       data.get("Estado", "")
-    }
-    logging.info(f"[SHEETS] Payload JSON que envío:\n{payload}")
-    try:
-        resp = requests.post(URL_SHEETS_PEDIDOS, json=payload)
-        logging.info(f"[SHEETS] HTTP {resp.status_code} — Body: {resp.text}")
-    except Exception as e:
-        logging.error(f"[SHEETS] Error al hacer POST: {e}")
-
-def generate_sale_id() -> str:
-    ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    rnd = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
-    return f"VEN-{ts}-{rnd}"
-
-#  HOJA DE PEDIDOS
-# ───────────────────────────────────────────────────────────────
-def registrar_orden(data: dict):
-    payload = {
-        "numero_venta": data.get("Número Venta", ""),
-        "fecha_venta":  data.get("Fecha Venta", ""),
-        "cliente":      data.get("Cliente", ""),
-        "telefono":     data.get("Teléfono", ""),
-        "producto":     data.get("Producto", ""),
-        "color":        data.get("Color", ""),
-        "talla":        data.get("Talla", ""),
-        "correo":       data.get("Correo", ""),
-        "pago":         data.get("Pago", ""),
-        "estado":       data.get("Estado", "")
-    }
-    logging.info(f"[SHEETS] Payload JSON que envío:\n{payload}")
-    try:
-        resp = requests.post(URL_SHEETS_PEDIDOS, json=payload)
-        logging.info(f"[SHEETS] HTTP {resp.status_code} — Body: {resp.text}")
-    except Exception as e:
-        logging.error(f"[SHEETS] Error al hacer POST: {e}")
-
-def generate_sale_id() -> str:
-    ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    rnd = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
-    return f"VEN-{ts}-{rnd}"
 
 # ——— HANDLERS —————————————————————————————————————————————————————
 
