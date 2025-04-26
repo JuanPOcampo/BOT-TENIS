@@ -407,8 +407,14 @@ def obtener_inventario() -> list[dict]:
     global inventario_cache
     if inventario_cache is None:
         try:
-            inventario_cache = requests.get(URL_SHEETS_INVENTARIO).json()
-        except:
+            resp = requests.get(URL_SHEETS_INVENTARIO)
+            if resp.status_code == 200:
+                inventario_cache = resp.json()
+            else:
+                logging.error(f"Error cargando inventario: {resp.status_code}")
+                inventario_cache = []
+        except Exception as e:
+            logging.error(f"Error obteniendo inventario: {e}")
             inventario_cache = []
     return inventario_cache
 
