@@ -627,7 +627,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     # 6) Intentar manejar solicitud de precio por referencia
-    await manejar_precio(txt, update, ctx, inv)
+    await manejar_precio(update, inv, estado_usuario)
 
     # 7) ——— Detección de marca ———
     marcas = obtener_marcas_unicas(inv)
@@ -1318,7 +1318,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # Carga de estado e inventario
 
     # 2) Procesar primero si es un tema de precios
-    await manejar_precio(txt, update, ctx, inv)
+    await manejar_precio(update, inv, estado_usuario)
     # 3) Procesamos audio o texto plano
     txt_raw = ""
     if update.message.voice or update.message.audio:
