@@ -1378,6 +1378,9 @@ if match_ref:
 
    
 # --------------------------------------------------------------------
+import base64, io
+from PIL import Image
+import imagehash
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 import nest_asyncio
@@ -1392,68 +1395,66 @@ nest_asyncio.apply()
 # 1. Instancia FastAPI
 api = FastAPI(title="AYA Bot – WhatsApp")
 
-# 2. Conversión de número WhatsApp (ej. 573001234567@c.us → 573001234567)
+# 2. Conversión de número WhatsApp
 def wa_chat_id(wa_from: str) -> str:
     return re.sub(r"\D", "", wa_from)
 
-# 3. Simula un mensaje de WhatsApp dentro del flujo `responder`
-async def procesar_wa(cid: str, body: str) -> dict:
-    class DummyMsg(SimpleNamespace):
-        async def reply_text(self, text, **kw): self._ctx.resp.append(text)
+# 3. OpenAI conexión
+import openai
 
-    dummy_msg = DummyMsg(text=body, photo=None, voice=None, audio=None)
-    dummy_update = SimpleNamespace(
-        message=dummy_msg,
-        effective_chat=SimpleNamespace(id=cid)
-    )
+async def responder_con_openai(mensaje_usuario):
+    openai.api_key = os.getenv("OPENAI_API_KEY")  # o fija la clave aquí si prefieres
 
-    class DummyCtx(SimpleNamespace):
-        async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
-
-class DummyCtx(SimpleNamespace):
-    async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
-    async def bot_send_chat_action(self, chat_id, action, **kw): pass  # <-- agregar esto vacío
-    async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ''}")
-
-ctx = DummyCtx(resp=[], bot=SimpleNamespace(
-    send_message=lambda chat_id, text, **kw: asyncio.create_task(ctx.bot_send(chat_id, text)),
-    send_chat_action=lambda chat_id, action, **kw: asyncio.create_task(ctx.bot_send_chat_action(chat_id, action)),
-    send_video=lambda chat_id, video, caption=None, **kw: asyncio.create_task(ctx.bot_send_video(chat_id, video, caption=caption))
-))
-
-# 4. Webhook para WhatsApp (usado por Venom)
-# ---------- VENOM WEBHOOK ----------
-@api.post("/venom")
-async def venom_webhook(req: Request):
     try:
-        # 1️⃣ Leer JSON
-        data = await req.json()
-        cid      = wa_chat_id(data.get("from", ""))
-        body     = data.get("body", "") or ""
-        mtype    = (data.get("type") or "").lower()
-        mimetype = (data.get("mimetype") or "").lower()
+        respuesta = await openai.ChatCompletion.acreate(
+            model="gpt-4-1106-preview",
+            messages=[
+                {"role": "system", "content": "Eres un asistente de ventas experto en una tienda de zapatos. Responde de forma amable, clara y breve a las preguntas de los clientes sobre productos, precios, envíos, tallas y detalles."},
+                {"role": "user", "content": mensaje_usuario}
+            ],
+            temperature=0.5,
+            max_tokens=300
+        )
+        return respuesta['choices'][0]['message']['content']
+    except Exception as e:
+        print(f"Error al consultar OpenAI: {e}")
+        return "Disculpa, estamos teniendo un inconveniente en este momento. ¿Puedes intentar de nuevo más tarde?"
 
-        logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype}")
+# 4. Procesar mensaje de WhatsApp
+async def procesar_wa(cid: str, body: str) -> dict:
+    texto = body.lower()
+    palabras_genericas = [
+        "hola", "buenas", "gracias", "catálogo", "ver catálogo", 
+        "hacer pedido", "enviar imagen", "rastrear pedido", "realizar cambio"
+    ]
 
-        # 2️⃣ Si es imagen en base64
-        if mtype == "image" or mimetype.startswith("image"):
-            try:
-                b64_str = body.split(",", 1)[1] if "," in body else body
-                img_bytes = base64.b64decode(b64_str + "===")
-                img = Image.open(io.BytesIO(img_bytes))
-                img.load()  # ← fuerza carga completa
-                logging.info("✅ Imagen decodificada y cargada")
-            except Exception as e:
-                logging.error(f"❌ No pude leer la imagen: {e}")
-                return JSONResponse(
-                    {"type": "text", "text": "No pude leer la imagen 😕"},
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
+    if any(palabra in texto for palabra in palabras_genericas):
+        class DummyMsg(SimpleNamespace):
+            async def reply_text(self, text, **kw): self._ctx.resp.append(text)
 
-            # 3️⃣ Calcular hash
-            h_in = str(imagehash.phash(img))
-            ref = MODEL_HASHES.get(h_in)
-            logging.info(f"🔍 Hash {h_in} → {ref}")
+        dummy_msg = DummyMsg(text=body, photo=None, voice=None, audio=None)
+        dummy_update = SimpleNamespace(
+            message=dummy_msg,
+            effective_chat=SimpleNamespace(id=cid)
+        )
+
+        class DummyCtx(SimpleNamespace):
+            async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
+            async def bot_send_chat_action(self, chat_id, action, **kw): pass
+            async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ''}")
+
+        ctx = DummyCtx(resp=[], bot=SimpleNamespace(
+            send_message=lambda chat_id, text, **kw: asyncio.create_task(ctx.bot_send(chat_id, text)),
+            send_chat_action=lambda chat_id, action, **kw: asyncio.create_task(ctx.bot_send_chat_action(chat_id, action)),
+            send_video=lambda chat_id, video, caption=None, **kw: asyncio.create_task(ctx.bot_send_video(chat_id, video, caption=caption))
+        ))
+
+        await responder(dummy_update, ctx)
+        return {"type": "text", "text": "\n".join(ctx.resp)}
+
+    else:
+        respuesta_ia = await responder_con_openai(body)
+        return {"type": "text", "text": respuesta_ia}
 
 
 # 4. Webhook para WhatsApp (usado por Venom)
@@ -1504,7 +1505,6 @@ async def venom_webhook(req: Request):
                 reset_estado(cid)
                 return JSONResponse({
                     "type": "text",
-                    "text": "No reconocí el modelo. Puedes intentar con otra imagen o escribir /start."
                 })
 
         # 4️⃣ Si NO es imagen, procesa como texto normal
