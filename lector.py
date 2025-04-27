@@ -496,7 +496,7 @@ async def manejar_precio(update, context, inventario):
 
         # Busca el modelo en inventario
         modelos_encontrados = [
-            item for item in inventario 
+            item for item in inventario
             if referencia_normalizada in normalize(item.get("modelo", "")) and disponible(item)
         ]
 
@@ -510,7 +510,10 @@ async def manejar_precio(update, context, inventario):
                 respuestas.append(f"✅ {marca} {modelo_nombre} ({color}) cuesta {precio}.")
 
             respuesta_final = "\n".join(respuestas)
-            await update.message.reply_text(respuesta_final, reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"]))
+            await update.message.reply_text(
+                respuesta_final,
+                reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
+            )
         else:
             await update.message.reply_text(
                 f"No encontré productos con la referencia '{referencia}'. ¿Quieres revisar el catálogo?",
@@ -540,12 +543,11 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     inv = obtener_inventario()
 
     # 3) Procesar audio o texto plano
-txt_raw = ""
-audio_recibido = False
-
-    # 🔥 Reconocimiento MEJORADO de audios vía Whisper
     txt_raw = ""
+    audio_recibido = False
+
     if update.message.voice or update.message.audio:
+        audio_recibido = True
         fobj = update.message.voice or update.message.audio
         tg_file = await fobj.get_file()
         local_path = os.path.join(TEMP_AUDIO_DIR, f"{cid}_{tg_file.file_id}.ogg")
@@ -569,12 +571,14 @@ audio_recibido = False
     else:
         txt_raw = update.message.text or ""
 
-if audio_recibido and not txt:
-    await update.message.reply_text(
-        "Parece que el audio no contenía palabras claras 😕. ¿Puedes intentarlo de nuevo?",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    return
+    txt = normalize(txt_raw)
+
+    if audio_recibido and not txt:
+        await update.message.reply_text(
+            "Parece que el audio no contenía palabras claras 😕. ¿Puedes intentarlo de nuevo?",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
 
     # 4) Reinicio explícito
     if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
@@ -635,8 +639,9 @@ if audio_recibido and not txt:
         )
         return
 
+
     # 🔥 Pregunta 4: ¿cómo sé que no me van a robar?
-# 🔥 BLOQUE: Video de respaldo automático para clientes desconfiados
+    # 🔥 BLOQUE: Video de respaldo automático para clientes desconfiados
     if any(frase in txt for frase in (
         "no me van a robar", "me van a robar", "es seguro",
         "como se que es seguro", "no es estafa", "es confiable",
@@ -649,8 +654,11 @@ if audio_recibido and not txt:
         )
         video_url = "https://tudominio.com/videos/video_confianza.mp4"
         await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
-        await ctx.bot.send_video(chat_id=cid, video=video_url, caption="¡Estamos aquí para ayudarte en lo que necesites! 👟✨")
-
+        await ctx.bot.send_video(
+            chat_id=cid,
+            video=video_url,
+            caption="¡Estamos aquí para ayudarte en lo que necesites! 👟✨"
+        )
         return
 
     # 🔥 Pregunta 5: ¿dónde están ubicados?
@@ -754,17 +762,16 @@ if audio_recibido and not txt:
             "Así que si usas tallas grandes, también tenemos opciones para ti 👟✨."
         )
         return
-# 🔥 NUEVO: Envío de video automático cuando el cliente muestra desconfianza
+
+    # 🔥 NUEVO: Envío de video automático cuando el cliente muestra desconfianza
     if any(frase in txt for frase in (
         "no me fio", "no confio", "es seguro", "como se que no me roban",
         "como se que no me estafan", "desconfio", "no creo", "estafa", "miedo a comprar"
     )):
-        # ID DEL VIDEO EN GOOGLE DRIVE (ajusta aquí)
         VIDEO_DRIVE_ID = "TU_ID_DEL_VIDEO_DE_CONFIANZA"
-
         video_url = f"https://drive.google.com/uc?id={VIDEO_DRIVE_ID}"
 
-        await ctx.bot.send_chat_action(cid, ChatAction.UPLOAD_VIDEO)
+        await ctx.bot.send_chat_action(cid, action=ChatAction.UPLOAD_VIDEO)
         await ctx.bot.send_video(
             chat_id=cid,
             video=video_url,
@@ -776,73 +783,6 @@ if audio_recibido and not txt:
         )
         return
 
-async def fallback_inteligente(txt, update):
-    respuesta_ia = await consultar_ia_fallback(txt)
-
-    if respuesta_ia:
-        await update.message.reply_text(respuesta_ia, reply_markup=menu_botones(["Ver catálogo", "Hacer pedido", "Enviar imagen"]))
-    else:
-        await update.message.reply_text("😔 No logré entenderte bien. ¿Quieres volver al inicio?", reply_markup=menu_botones(["Volver al menú"]))
-
-async def consultar_ia_fallback(mensaje_usuario):
-    prompt_fallback = f"""
-Eres un asistente de una tienda de zapatillas llamada X100.
-
-Tu tarea es:
-- Si el cliente pregunta algo poco claro o mal escrito, intenta entenderlo y darle una respuesta corta, educada y amigable.
-- Si no entiendes lo que dice, invita a volver al menú principal.
-
-Cliente dijo: "{mensaje_usuario}"
-
-Responde de forma muy breve, amigable y directa.
-    """
-
-    try:
-        respuesta = await client.chat.completions.create(
-            model="gpt-4-1106-preview",  # o "gpt-4o", o "gpt-4.1-mini"
-            messages=[
-                {"role": "system", "content": prompt_fallback},
-                {"role": "user", "content": mensaje_usuario}
-            ],
-            temperature=0.5,
-            max_tokens=150,
-        )
-        return respuesta.choices[0].message.content.strip()
-    except Exception as e:
-        logging.error(f"Error fallback IA: {e}")
-        return None
-# 🔥 BLOQUE: Detección automática de referencias para consultar precios en Sheets
-match_ref = re.search(r"(?:referencia|precio|valor|vale|cuesta|cuánto.*?)(?:\s+|#)?(\d{2,4})", txt)
-if match_ref:
-    ref_busqueda = match_ref.group(1)
-
-    # Buscar la referencia en Sheets
-    producto = next(
-        (item for item in inv if ref_busqueda in normalize(item.get("modelo", ""))),
-        None
-    )
-
-    if producto and producto.get("precio"):
-        precio = producto["precio"]
-        modelo = producto["modelo"]
-        marca = producto["marca"]
-        color = producto["color"]
-        await update.message.reply_text(
-            f"👟 ¡La referencia *{modelo}* ({marca}, color {color}) tiene un precio de *${precio}*!\n\n"
-            "¿Quieres continuar con tu pedido?",
-            reply_markup=menu_botones(["Sí, continuar", "No, gracias"])
-        )
-        est["fase"] = "confirmacion_precio"
-        est["marca"] = marca
-        est["modelo"] = modelo
-        est["color"] = color
-        return
-    else:
-        await update.message.reply_text(
-            "🤔 No encontré esa referencia en el inventario. ¿Quieres intentar con otra o ver el catálogo?",
-            reply_markup=menu_botones(["Ver catálogo", "Intentar otra referencia"])
-        )
-        return
 
 async def fallback_inteligente(txt, update):
     respuesta_ia = await consultar_ia_fallback(txt)
@@ -857,6 +797,7 @@ async def fallback_inteligente(txt, update):
             reply_markup=menu_botones(["Volver al menú"])
         )
 
+
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
 
@@ -868,31 +809,86 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     est = estado_usuario[cid]
     inv = obtener_inventario()
 
-# 🔥 BLOQUE MEJORADO: Transcripción automática de audios con Whisper en cualquier fase
-if update.message.voice or update.message.audio:
-    await update.message.reply_text("🎧 Estoy escuchando tu audio... dame un momento.")
-    fobj = update.message.voice or update.message.audio
-    tg_file = await fobj.get_file()
-    local_path = os.path.join(TEMP_AUDIO_DIR, f"{cid}_{tg_file.file_id}.ogg")
-    await tg_file.download_to_drive(local_path)
-    
-    txt_raw = await transcribe_audio(local_path)
-    os.remove(local_path)
-    
-    if txt_raw:
-        await update.message.reply_text(f"Entendí: «{txt_raw}»")
-    else:
-        await update.message.reply_text(
-            "😕 Ese audio no se escuchó claro. ¿Puedes intentarlo nuevamente o escribir tu mensaje?",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return
-else:
     txt_raw = update.message.text or ""
+    txt = normalize(txt_raw)
+
+    # 🔥 BLOQUE: Detección automática de referencias para consultar precios en Sheets
+    match_ref = re.search(r"(?:referencia|precio|valor|vale|cuesta|cuánto.*?)(?:\s+|#)?(\d{2,4})", txt)
+    if match_ref:
+        ref_busqueda = match_ref.group(1)
+
+        producto = next(
+            (item for item in inv if ref_busqueda in normalize(item.get("modelo", ""))),
+            None
+        )
+
+        if producto and producto.get("precio"):
+            precio = producto["precio"]
+            modelo = producto["modelo"]
+            marca = producto["marca"]
+            color = producto["color"]
+
+            await update.message.reply_text(
+                f"👟 ¡La referencia *{modelo}* ({marca}, color {color}) tiene un precio de *${precio}*!\n\n"
+                "¿Quieres continuar con tu pedido?",
+                reply_markup=menu_botones(["Sí, continuar", "No, gracias"])
+            )
+
+            est["fase"] = "confirmacion_precio"
+            est["marca"] = marca
+            est["modelo"] = modelo
+            est["color"] = color
+            return
+
+        else:
+            await update.message.reply_text(
+                "🤔 No encontré esa referencia en el inventario. ¿Quieres intentar con otra o ver el catálogo?",
+                reply_markup=menu_botones(["Ver catálogo", "Intentar otra referencia"])
+            )
+            return
+
+    # (y aquí seguiría tu flujo normal: preguntas frecuentes, imágenes, etc.)
+
+
+
+# --------------------------------------------------------------------------------------------------
+
+async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cid = update.effective_chat.id
+
+    if cid not in estado_usuario:
+        reset_estado(cid)
+        await saludo_bienvenida(update, ctx)
+        return
+
+    est = estado_usuario[cid]
+    inv = obtener_inventario()
+
+    # 🔥 BLOQUE MEJORADO: Transcripción automática de audios con Whisper en cualquier fase
+    if update.message.voice or update.message.audio:
+        await update.message.reply_text("🎧 Estoy escuchando tu audio... dame un momento.")
+        fobj = update.message.voice or update.message.audio
+        tg_file = await fobj.get_file()
+        local_path = os.path.join(TEMP_AUDIO_DIR, f"{cid}_{tg_file.file_id}.ogg")
+        await tg_file.download_to_drive(local_path)
+
+        txt_raw = await transcribe_audio(local_path)
+        os.remove(local_path)
+
+        if txt_raw:
+            await update.message.reply_text(f"Entendí: «{txt_raw}»")
+        else:
+            await update.message.reply_text(
+                "😕 Ese audio no se escuchó claro. ¿Puedes intentarlo nuevamente o escribir tu mensaje?",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+    else:
+        txt_raw = update.message.text or ""
 
     txt = normalize(txt_raw)
 
-# 🔥 NUEVO: Ofrecer videos de referencias automáticamente al inicio
+    # 🔥 NUEVO: Ofrecer videos de referencias automáticamente al inicio
     if any(frase in txt for frase in (
         "videos", "tienen videos", "muéstrame videos", "videos de referencia",
         "ver videos", "quiero videos", "puedes mandarme videos"
@@ -908,7 +904,6 @@ else:
         est["fase"] = "esperando_video_referencia"
         return
 
-    # Manejo posterior de solicitud de video específico
     if est["fase"] == "esperando_video_referencia":
         if txt in ("ds 277", "277"):
             VIDEO_DRIVE_ID = "ID_VIDEO_DS277"
@@ -928,20 +923,21 @@ else:
             caption=f"Aquí tienes el video de la referencia {txt.upper()} 👟✨.\n¿Te interesa hacer un pedido?",
             reply_markup=menu_botones(["Sí, quiero pedir", "Volver al menú"])
         )
-        est["fase"] = "inicio"  # Volver al flujo inicial tras enviar video
+        est["fase"] = "inicio"
         return
 
     if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
         reset_estado(cid)
         await saludo_bienvenida(update, ctx)
         return
+
     # 🔥 NUEVO: Detección automática de referencia y precios desde Sheets
     match_ref = re.search(r"(?:referencia|modelo)?\s*(\d{3})", txt)
     if match_ref:
         referencia_buscar = match_ref.group(1)
         inventario = obtener_inventario()
         productos_coincidentes = [
-            item for item in inventario 
+            item for item in inventario
             if referencia_buscar in normalize(item.get("modelo", ""))
         ]
 
@@ -967,9 +963,6 @@ else:
             )
             return
 
-    # Aquí tus FAQs normal (cuánto demora, pago contra entrega, etc...)
-    # 🔥 [Insertar todos los if de las preguntas frecuentes aquí como ya tienes]
-
     # 🔥 Procesar imágenes
     if menciona_imagen(txt):
         if est["fase"] != "esperando_imagen":
@@ -977,9 +970,9 @@ else:
             await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
         return
 
-# 🔥 Solicitud de precios (con manejo completo)
+    # 🔥 Solicitud de precios (con manejo completo)
     if await manejar_precio(update, ctx, inv):
-        return  # Si se encontró referencia, termina aquí la respuesta del bot.
+        return
 
     # 🔥 Detección de marca
     marcas = obtener_marcas_unicas(inv)
@@ -1017,26 +1010,28 @@ else:
             reply_markup=menu_botones(["Volver al menú"])
         )
 
-        if elegido:
-            logging.info(f"Marca detectada: {elegido}")
-            est["marca"] = elegido
-            est["fase"] = "esperando_modelo"
-            await update.message.reply_text(
-                f"¡Genial! Veo que buscas {elegido}. ¿Qué modelo de {elegido} te interesa?",
-                reply_markup=menu_botones(obtener_modelos_por_marca(inv, elegido))
-            )
-            return
-            
+    if elegido:
+        logging.info(f"Marca detectada: {elegido}")
+        est["marca"] = elegido
+        est["fase"] = "esperando_modelo"
+        await update.message.reply_text(
+            f"¡Genial! Veo que buscas {elegido}. ¿Qué modelo de {elegido} te interesa?",
+            reply_markup=menu_botones(obtener_modelos_por_marca(inv, elegido))
+        )
+        return
 
-        # ——— Fallback ———
+    # ——— Fallback Extra ———
     respuesta = await consultar_ia_fallback(txt)
     if respuesta:
         await update.message.reply_text(respuesta)
-        else:
+    else:
         await update.message.reply_text(
             "😅 No logré entender tu solicitud. ¿Quieres volver al menú? Pulsa /start."
-            )
-        return
+        )
+    return
+
+
+
 
     # ——— Rastrear pedido ———
     if est["fase"] == "esperando_numero_rastreo":
