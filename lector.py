@@ -962,31 +962,54 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     est = estado_usuario[cid]
     inv = obtener_inventario()
 
-    # 🔥 BLOQUE MEJORADO: Transcripción automática de audios con Whisper en cualquier fase
-    if update.message.voice or update.message.audio:
-        await update.message.reply_text("🎧 Estoy escuchando tu audio... dame un momento.")
-        fobj = update.message.voice or update.message.audio
-        tg_file = await fobj.get_file()
-        local_path = os.path.join(TEMP_AUDIO_DIR, f"{cid}_{tg_file.file_id}.ogg")
-        await tg_file.download_to_drive(local_path)
+    # 🔥 BLOQUE: Transcripción automática de audios con Whisper
+    txt_raw = ""
 
-        txt_raw = await transcribe_audio(local_path)
-        os.remove(local_path)
+    if update.message:
+        if update.message.voice or update.message.audio:
+            await update.message.reply_text("🎧 Estoy escuchando tu audio... dame un momento.")
+            fobj = update.message.voice or update.message.audio
+            tg_file = await fobj.get_file()
+            local_path = os.path.join(TEMP_AUDIO_DIR, f"{cid}_{tg_file.file_id}.ogg")
+            await tg_file.download_to_drive(local_path)
 
-        if txt_raw:
-            await update.message.reply_text(f"Entendí: «{txt_raw}»")
+            txt_raw = await transcribe_audio(local_path)
+            os.remove(local_path)
+
+            if txt_raw:
+                await update.message.reply_text(f"Entendí: «{txt_raw}»")
+            else:
+                await update.message.reply_text(
+                    "😕 Ese audio no se escuchó claro. ¿Puedes intentarlo nuevamente o escribir tu mensaje?",
+                    reply_markup=ReplyKeyboardRemove()
+                )
+                return
         else:
-            await update.message.reply_text(
-                "😕 Ese audio no se escuchó claro. ¿Puedes intentarlo nuevamente o escribir tu mensaje?",
-                reply_markup=ReplyKeyboardRemove()
-            )
-            return
-    else:
-        txt_raw = update.message.text or ""
+            txt_raw = update.message.text or ""
+
+    # Si por alguna razón no se extrajo texto
+    if not txt_raw:
+        await update.message.reply_text(
+            "❗ No recibí un mensaje válido. ¿Puedes enviarme texto o un audio claro?",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
 
     txt = normalize(txt_raw)
 
-    # 🔥 NUEVO: Ofrecer videos de referencias automáticamente al inicio
+    # 🔥 1) Reinicio explícito primero
+    if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
+        reset_estado(cid)
+        await saludo_bienvenida(update, ctx)
+        return
+
+    # 🔥 2) Si estaba esperando que elija un video
+    if est.get("fase") == "esperando_video_referencia":
+        await enviar_video_referencia(cid, ctx, txt)
+        est["fase"] = "inicio"
+        return
+
+    # 🔥 3) Ofrecer videos si los pidió
     if any(frase in txt for frase in (
         "videos", "tienen videos", "muéstrame videos", "videos de referencia",
         "ver videos", "quiero videos", "puedes mandarme videos"
@@ -1002,15 +1025,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "esperando_video_referencia"
         return
 
-if est["fase"] == "esperando_video_referencia":
-    await enviar_video_referencia(cid, ctx, txt)
-    est["fase"] = "inicio"
-    return
+    # 🔥 4) Aquí seguiría el flujo para referencias, precios, imágenes, tallas, etc.
 
-    if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
-        reset_estado(cid)
-        await saludo_bienvenida(update, ctx)
-        return
 
     # 🔥 NUEVO: Detección automática de referencia y precios desde Sheets
     match_ref = re.search(r"(?:referencia|modelo)?\s*(\d{3})", txt)
