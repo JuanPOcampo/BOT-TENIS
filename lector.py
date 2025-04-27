@@ -554,6 +554,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "terminal de transporte de tu ciudad y mañana, después de las 2 p. m., ya los puedes recoger. "
             "Para esta modalidad de envío solo aplica el *pago anticipado* porque las empresas de buses "
             "no tienen convenio de pago contra entrega."
+        )
         return
 
     # 🔥 Pregunta 2: ¿tienen pago contra entrega?
@@ -569,6 +570,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "cuando lleguen solo le pagas a la transportadora *$184 900*.\n\n"
             "Solicitamos el anticipo porque, en el pasado, algunos pedidos no se recogían y la "
             "transportadora nos devolvía las zapatillas, generando pérdidas de envío."
+        )
         return
 
     # 🔥 Pregunta 3: ¿tienen garantía?
@@ -581,6 +583,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "🛡️ ¡Claro que sí! Todos nuestros productos tienen *garantía de 60 días* "
             "por *pegue* o *defectos de fábrica*.\n\n"
             "Si llegas a tener algún inconveniente, contáctanos y te ayudaremos a solucionarlo."
+        )
         return
 
     # 🔥 Pregunta 4: ¿cómo sé que no me van a robar?
@@ -594,6 +597,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Somos una empresa seria, recomendada por más de *40 famosos* que confían en nuestra marca. "
             "Ningún famoso expondría su imagen para respaldar a una empresa que robe a las personas.\n\n"
             "Puedes verlos en nuestro Instagram oficial:\n👉 https://www.instagram.com/x100_col/"
+        )
         return
 
     # 🔥 Pregunta 5: ¿dónde están ubicados?
@@ -607,6 +611,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "🏡 *Barrio San Miguel, CLL 52 # 16-74* 🔥💋\n\n"
             "🚚 Enviamos a *todo el país* con *Servientrega*.\n\n"
             "Google Maps → https://maps.google.com/?q=7.109500,-73.121597"
+        )
         return
 
     # 🔥 Pregunta 6: ¿son nacionales o importados?
@@ -618,6 +623,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "🇨🇴 Nuestra marca es *100 % colombiana* y las zapatillas "
             "se elaboran con orgullo en *Bucaramanga* por artesanos locales."
+        )
         return
 
     # 🔥 Pregunta 7: ¿son originales?
@@ -628,6 +634,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "✅ ¡Claro! Son *originales*. Somos *X100*, marca 100 % colombiana "
             "reconocida por su calidad y diseño."
+        )
         return
 
     # 🔥 Pregunta 8: ¿de qué calidad son?
@@ -639,6 +646,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "✨ Nuestras zapatillas están elaboradas con *materiales de alta calidad*.\n\n"
             "Cada par es fabricado cuidadosamente para asegurar que sean de *calidad AAA* 👟🔝, "
             "garantizando comodidad, durabilidad y un excelente acabado."
+        )
         return
 
     # 🔥 Pregunta 9: ¿hay descuento si compro 2 pares?
@@ -650,6 +658,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "🎉 ¡Claro que sí! Si compras *2 pares* te damos un *10% de descuento adicional* sobre el total.\n\n"
             "Aprovecha esta oportunidad para estrenar más y pagar menos 🔥👟👟."
+        )
         return
 
     # 🔥 Pregunta 10: ¿manejan precios para mayoristas?
@@ -663,6 +672,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "sin importar talla ni referencia.\n\n"
             "La única condición es que debes venderlos *mínimo al mismo precio* que nosotros para "
             "cuidar el mercado y asegurar que tengas un buen margen de utilidad."
+        )
         return
 
     # 🔥 Pregunta 11: ¿las tallas son normales o grandes?
@@ -676,6 +686,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Para mayor seguridad, te recomendamos enviarnos una foto de la *etiqueta interna* de tus tenis actuales "
             "(en la lengüeta o costado interno), donde aparece el equivalente en *centímetros*. "
             "Así podemos confirmar mejor la talla correcta para ti. 📏✨"
+        )
         return
 
     # 🔥 Pregunta 12: ¿cuál es la talla más grande que manejan?
@@ -688,6 +699,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "• *45 Nacional* 🇨🇴\n"
             "• *47 Europeo* 🇪🇺\n\n"
             "Así que si usas tallas grandes, también tenemos opciones para ti 👟✨."
+        )
         return
 
  # 5) Intención de enviar imagen
