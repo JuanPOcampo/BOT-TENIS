@@ -1028,37 +1028,48 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 🔥 4) Aquí seguiría el flujo para referencias, precios, imágenes, tallas, etc.
 
 
-    # 🔥 NUEVO: Detección automática de referencia y precios desde Sheets
-    match_ref = re.search(r"(?:referencia|modelo)?\s*(\d{3})", txt)
-    if match_ref:
-        referencia_buscar = match_ref.group(1)
-        inventario = obtener_inventario()
-        productos_coincidentes = [
-            item for item in inventario
-            if referencia_buscar in normalize(item.get("modelo", ""))
-        ]
+# 🔥 NUEVO: Detección automática de referencia y agrupación por color
+match_ref = re.search(r"(?:referencia|modelo)?\s*(\d{3})", txt)
+if match_ref:
+    referencia_buscar = match_ref.group(1)
+    inventario = obtener_inventario()
 
-        if productos_coincidentes:
-            respuesta_precio = "💰 Encontré esto para ti:\n\n"
-            for prod in productos_coincidentes:
-                respuesta_precio += (
-                    f"👟 {prod['marca']} {prod['modelo']} ({prod['color']}) — "
-                    f"*{prod['precio']}*\n"
-                )
-            respuesta_precio += "\n¿Quieres pedir alguno de estos modelos?"
-            await update.message.reply_text(
-                respuesta_precio,
-                reply_markup=menu_botones(["Sí, quiero pedir", "Volver al menú"])
+    productos_coincidentes = [
+        item for item in inventario
+        if referencia_buscar in normalize(item.get("modelo", ""))
+        and disponible(item)
+    ]
+
+    if productos_coincidentes:
+        # Agrupar por modelo + color + precio
+        modelos = {}
+
+        for item in productos_coincidentes:
+            key = (item['modelo'], item['color'], item['precio'])
+            modelos.setdefault(key, []).append(str(item.get('talla', '')))
+
+        respuesta_precio = "💰 Encontré esto para ti:\n\n"
+        for (modelo, color, precio), tallas in modelos.items():
+            tallas_ordenadas = sorted(tallas, key=lambda x: int(x) if x.isdigit() else x)
+            respuesta_precio += (
+                f"👟 {modelo} ({color}) — *{precio}*\n"
+                f"Tallas disponibles: {', '.join(tallas_ordenadas)}\n\n"
             )
-            est["fase"] = "inicio"
-            return
-        else:
-            await update.message.reply_text(
-                f"No encontré la referencia {referencia_buscar} en el inventario actual. "
-                "¿Quieres intentar con otra?",
-                reply_markup=menu_botones(["Volver al menú"])
-            )
-            return
+
+        respuesta_precio += "¿Quieres pedir alguno de estos modelos?"
+        await update.message.reply_text(
+            respuesta_precio,
+            reply_markup=menu_botones(["Sí, quiero pedir", "Volver al menú"])
+        )
+        est["fase"] = "inicio"
+        return
+    else:
+        await update.message.reply_text(
+            f"No encontré la referencia {referencia_buscar} en el inventario actual. "
+            "¿Quieres intentar con otra?",
+            reply_markup=menu_botones(["Volver al menú"])
+        )
+        return
 
     # 🔥 Procesar imágenes
     if menciona_imagen(txt):
@@ -1399,13 +1410,51 @@ async def procesar_wa(cid: str, body: str) -> dict:
     class DummyCtx(SimpleNamespace):
         async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
 
-    ctx = DummyCtx(resp=[], bot=SimpleNamespace(
-        send_message=lambda chat_id, text, **kw: asyncio.create_task(ctx.bot_send(chat_id, text))
-    ))
-    dummy_msg._ctx = ctx
+class DummyCtx(SimpleNamespace):
+    async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
+    async def bot_send_chat_action(self, chat_id, action, **kw): pass  # <-- agregar esto vacío
+    async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ''}")
 
-    await responder(dummy_update, ctx)
-    return {"type": "text", "text": ctx.resp[-1] if ctx.resp else "No entendí 🥲"}
+ctx = DummyCtx(resp=[], bot=SimpleNamespace(
+    send_message=lambda chat_id, text, **kw: asyncio.create_task(ctx.bot_send(chat_id, text)),
+    send_chat_action=lambda chat_id, action, **kw: asyncio.create_task(ctx.bot_send_chat_action(chat_id, action)),
+    send_video=lambda chat_id, video, caption=None, **kw: asyncio.create_task(ctx.bot_send_video(chat_id, video, caption=caption))
+))
+
+# 4. Webhook para WhatsApp (usado por Venom)
+# ---------- VENOM WEBHOOK ----------
+@api.post("/venom")
+async def venom_webhook(req: Request):
+    try:
+        # 1️⃣ Leer JSON
+        data = await req.json()
+        cid      = wa_chat_id(data.get("from", ""))
+        body     = data.get("body", "") or ""
+        mtype    = (data.get("type") or "").lower()
+        mimetype = (data.get("mimetype") or "").lower()
+
+        logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype}")
+
+        # 2️⃣ Si es imagen en base64
+        if mtype == "image" or mimetype.startswith("image"):
+            try:
+                b64_str = body.split(",", 1)[1] if "," in body else body
+                img_bytes = base64.b64decode(b64_str + "===")
+                img = Image.open(io.BytesIO(img_bytes))
+                img.load()  # ← fuerza carga completa
+                logging.info("✅ Imagen decodificada y cargada")
+            except Exception as e:
+                logging.error(f"❌ No pude leer la imagen: {e}")
+                return JSONResponse(
+                    {"type": "text", "text": "No pude leer la imagen 😕"},
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
+
+            # 3️⃣ Calcular hash
+            h_in = str(imagehash.phash(img))
+            ref = MODEL_HASHES.get(h_in)
+            logging.info(f"🔍 Hash {h_in} → {ref}")
+
 
 # 4. Webhook para WhatsApp (usado por Venom)
 # ---------- VENOM WEBHOOK ----------
