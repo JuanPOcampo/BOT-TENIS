@@ -547,6 +547,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "en cuanto llega", "en cuánto llega",
         "me llega rapido", "llegan rapido"
     )):
+    # 🔥 Pregunta 1: ¿cuánto demora el envío?
+    if any(frase in txt for frase in (
+        "cuanto demora", "cuánto demora",
+        "cuanto tarda",  "cuánto tarda",
+        "cuanto se demora", "cuánto se demora",
+        "en cuanto llega", "en cuánto llega",
+        "me llega rapido", "llegan rapido"
+    )):
         # 1) Respuesta informativa
         await update.message.reply_text(
             "🚚 El tiempo de entrega depende de la ciudad de destino, "
@@ -564,7 +572,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
         )
         return
- # 🔥 Pregunta: ¿tienen pago contra entrega?
+    # 🔥 Pregunta 2: ¿tienen pago contra entrega?
     if any(frase in txt for frase in (
         "pago contra entrega", "contraentrega", "contra entrega",
         "pagan al recibir", "puedo pagar al recibir", "¿tienen contra entrega"
@@ -579,12 +587,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "transportadora nos devolvía las zapatillas, generando pérdidas de envío."
         )
         await update.message.reply_text(
-            "💬 *¿Quieres continuar con tu pedido?* "
-            "Envíame el modelo o pulsa una opción 👇",
+            "💬 *¿Quieres continuar con tu pedido?* Envíame el modelo que deseas o pulsa una opción 👇",
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
         )
         return
-       # 🔥 Pregunta: ¿tienen garantía?
+
+    # 🔥 Pregunta 3: ¿tienen garantía?
     if any(frase in txt for frase in (
         "tienen garantia", "tienen garantía", 
         "hay garantía", "hay garantia", 
@@ -596,12 +604,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Puedes comunicarte con nosotros si llegas a tener algún inconveniente y te ayudaremos a solucionarlo."
         )
         await update.message.reply_text(
-            "💬 *¿Te gustaría continuar con tu compra?* "
-            "Envíame el modelo que deseas o elige una opción 👇",
+            "💬 *¿Te gustaría continuar con tu compra?* Envíame el modelo que deseas o elige una opción 👇",
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
         )
         return
-    # 🔥 Pregunta: ¿cómo sé que no me van a robar?
+
+    # 🔥 Pregunta 4: ¿cómo sé que no me van a robar?
     if any(frase in txt for frase in (
         "no me van a robar", "me van a robar", "es seguro", "como se que es seguro",
         "como se que no es estafa", "como se que no me estafan", "es confiable",
@@ -615,12 +623,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "👉 https://www.instagram.com/x100_col/"
         )
         await update.message.reply_text(
-            "💬 *¿Te gustaría seguir con tu pedido?* "
-            "Puedes enviarme el modelo que quieres o elegir una opción 👇",
+            "💬 *¿Te gustaría seguir con tu pedido?* Envíame el modelo que deseas o pulsa una opción 👇",
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
         )
         return
-    # 🔥 Pregunta: ¿dónde están ubicados?
+
+    # 🔥 Pregunta 5: ¿dónde están ubicados?
     if any(frase in txt for frase in (
         "donde estan ubicados", "donde queda", "ubicacion", "ubicación",
         "direccion", "dirección", "donde estan", "donde es la tienda",
@@ -634,12 +642,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "👉 https://maps.google.com/?q=7.109500,-73.121597"
         )
         await update.message.reply_text(
-            "💬 *¿Deseas continuar con tu compra?* "
-            "Envíame el modelo que deseas o pulsa una opción 👇",
+            "💬 *¿Deseas continuar con tu compra?* Envíame el modelo que deseas o pulsa una opción 👇",
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
         )
         return
-    # 🔥 Pregunta: ¿son nacionales o importados?
+
+    # 🔥 Pregunta 6: ¿son nacionales o importados?
     if any(frase in txt for frase in (
         "son nacionales", "son importados", "es nacional o importado",
         "nacionales o importados", "hecho en colombia", "fabricados en colombia",
@@ -652,12 +660,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Gracias por apoyar el talento nacional 💛💚."
         )
         await update.message.reply_text(
-            "💬 *¿Quieres seguir con tu pedido?* "
-            "Puedes enviarme el modelo que deseas o elegir una opción 👇",
+            "💬 *¿Quieres seguir con tu pedido?* Envíame el modelo que deseas o pulsa una opción 👇",
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
         )
         return
-    # 🔥 Pregunta: ¿son originales?
+
+    # 🔥 Pregunta 7: ¿son originales?
     if any(frase in txt for frase in (
         "son originales", "es original", "originales", "es copia", "son copia",
         "son replicas", "son réplica", "son imitacion", "es imitación", "es replica"
@@ -667,12 +675,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Somos *X100*, una marca *100% colombiana*, reconocida por la calidad y diseño de nuestras zapatillas 👟🇨🇴."
         )
         await update.message.reply_text(
-            "💬 *¿Te gustaría continuar con tu pedido?* "
-            "Envíame el modelo que te interesa o selecciona una opción 👇",
+            "💬 *¿Te gustaría continuar con tu pedido?* Envíame el modelo que te interesa o pulsa una opción 👇",
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
         )
         return
-    # 🔥 Pregunta: ¿de qué calidad son?
+
+    # 🔥 Pregunta 8: ¿de qué calidad son?
     if any(frase in txt for frase in (
         "que calidad son", "de que calidad son", "son buena calidad", "son de buena calidad",
         "son de mala calidad", "que calidad manejan", "que calidad tienen", "calidad de las zapatillas"
@@ -683,12 +691,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "garantizando comodidad, durabilidad y un excelente acabado."
         )
         await update.message.reply_text(
-            "💬 *¿Te gustaría seguir con tu pedido?* "
-            "Puedes enviarme el modelo que deseas o elegir una opción 👇",
+            "💬 *¿Te gustaría seguir con tu pedido?* Envíame el modelo que deseas o pulsa una opción 👇",
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
         )
         return
-    # 🔥 Pregunta: ¿hay descuento si compro 2 pares?
+
+    # 🔥 Pregunta 9: ¿hay descuento si compro 2 pares?
     if any(frase in txt for frase in (
         "si compro 2 pares", "dos pares descuento", "descuento por 2 pares",
         "descuento por dos pares", "me descuentan si compro dos", "descuento si compro dos",
@@ -699,12 +707,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Aprovecha esta oportunidad para estrenar más y pagar menos 🔥👟👟."
         )
         await update.message.reply_text(
-            "💬 *¿Quieres aprovechar la promoción?* "
-            "Envíame los modelos que deseas o elige una opción 👇",
+            "💬 *¿Quieres aprovechar la promoción?* Envíame los modelos que deseas o pulsa una opción 👇",
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
         )
         return
-    # 🔥 Pregunta: ¿manejan precios para mayoristas?
+
+    # 🔥 Pregunta 10: ¿manejan precios para mayoristas?
     if any(frase in txt for frase in (
         "precio mayorista", "precios para mayoristas", "mayorista", "quiero vender",
         "puedo venderlos", "descuento para revender", "revender", "comprar para vender",
@@ -717,12 +725,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "cuidar el mercado y asegurar que tengas un buen margen de utilidad."
         )
         await update.message.reply_text(
-            "💬 *¿Te gustaría recibir el catálogo mayorista?* "
-            "Envíame la palabra *Mayorista* o elige una opción 👇",
+            "💬 *¿Te gustaría recibir el catálogo mayorista?* Envíame la palabra *Mayorista* o pulsa una opción 👇",
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen", "Mayorista"])
         )
         return
-    # 🔥 Pregunta: ¿las tallas son normales o grandes o pequeñas?
+
+    # 🔥 Pregunta 11: ¿las tallas son normales o grandes?
     if any(frase in txt for frase in (
         "las tallas son normales", "horma normal", "talla normal",
         "horma grande", "horma pequeña", "tallas grandes", "tallas pequeñas",
@@ -735,12 +743,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Así podemos confirmar mejor la talla correcta para ti. 📏✨"
         )
         await update.message.reply_text(
-            "💬 *¿Quieres enviarme la etiqueta para ayudarte?* "
-            "O si prefieres, dime directamente la talla que deseas 👇",
+            "💬 *¿Quieres enviarme la etiqueta para ayudarte?* O dime directamente la talla 👇",
             reply_markup=menu_botones(["Enviar imagen", "Hacer pedido", "Ver catálogo"])
         )
         return
-    # 🔥 Pregunta: ¿cuál es la talla más grande que manejan?
+
+    # 🔥 Pregunta 12: ¿cuál es la talla más grande que manejan?
     if any(frase in txt for frase in (
         "talla mas grande", "talla más grande", "cual es la talla mas grande",
         "hasta que talla llegan", "mayor talla", "talla maxima", "talla máxima"
@@ -753,7 +761,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(
             "💬 *¿Quieres que te ayude a encontrar tu modelo ideal?* "
-            "Envíame la talla que deseas o elige una opción 👇",
+            "Envíame la talla que deseas o pulsa una opción 👇",
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
         )
         return
