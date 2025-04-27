@@ -539,35 +539,33 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-# 🔥 Pregunta: ¿cuánto se demora el envío?
+    # 🔥 Pregunta 1: ¿cuánto se demora el envío?
     if any(frase in txt for frase in (
         "cuanto demora", "cuánto demora",
-        "cuanto tarda", "cuánto tarda",
+        "cuanto tarda",  "cuánto tarda",
         "cuanto se demora", "cuánto se demora",
         "en cuanto llega", "en cuánto llega",
         "me llega rapido", "llegan rapido"
     )):
-    # 1) Respuesta informativa
-    await update.message.reply_text(
-        "🚚 El tiempo de entrega depende de la ciudad de destino, "
-        "pero generalmente tardan *2 días hábiles* en llegar a la puerta de tu casa.\n\n"
-        "Si los necesitas para *mañana mismo*, podemos enviarlos para reclamar en el "
-        "terminal de transporte de tu ciudad y mañana, después de las 2 p. m., ya los puedes recoger. "
-        "Para esta modalidad de envío solo aplica el *pago anticipado* porque las empresas de buses "
-        "no tienen convenio de pago contra entrega."
-    )
+        await update.message.reply_text(
+            "🚚 El tiempo de entrega depende de la ciudad de destino, "
+            "pero generalmente tardan *2 días hábiles* en llegar a la puerta de tu casa.\n\n"
+            "Si los necesitas para *mañana mismo*, podemos enviarlos para reclamar en el "
+            "terminal de transporte de tu ciudad y mañana, después de las 2 p. m., ya los puedes recoger. "
+            "Para esta modalidad de envío solo aplica el *pago anticipado* porque las empresas de buses "
+            "no tienen convenio de pago contra entrega."
+        )
+        await update.message.reply_text(
+            "💬 *¿Quieres realizar la compra?* "
+            "Si gustas, envíame el *modelo* que te interesa o pulsa una de las opciones 👇",
+            reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
+        )
+        return
 
-    # 2) Llamado a la acción
-    await update.message.reply_text(
-        "💬 *¿Quieres realizar la compra?* "
-        "Si gustas, envíame el *modelo* que te interesa o pulsa una de las opciones 👇",
-        reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
-    )
-    return
     # 🔥 Pregunta 2: ¿tienen pago contra entrega?
     if any(frase in txt for frase in (
         "pago contra entrega", "contraentrega", "contra entrega",
-        "pagan al recibir", "puedo pagar al recibir", "¿tienen contra entrega"
+        "pagan al recibir", "puedo pagar al recibir", "tienen contra entrega"
     )):
         await update.message.reply_text(
             "📦 Por supuesto que tenemos *pago contra entrega*.\n\n"
@@ -586,14 +584,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 🔥 Pregunta 3: ¿tienen garantía?
     if any(frase in txt for frase in (
-        "tienen garantia", "tienen garantía", 
-        "hay garantía", "hay garantia", 
+        "tienen garantia", "tienen garantía",
+        "hay garantía", "hay garantia",
         "garantía", "garantia", "tienen garantia de fabrica"
     )):
         await update.message.reply_text(
             "🛡️ ¡Claro que sí! Todos nuestros productos tienen *garantía de 60 días* "
             "por *pegue* o *defectos de fábrica*.\n\n"
-            "Puedes comunicarte con nosotros si llegas a tener algún inconveniente y te ayudaremos a solucionarlo."
+            "Si llegas a tener algún inconveniente, contáctanos y te ayudaremos a solucionarlo."
         )
         await update.message.reply_text(
             "💬 *¿Te gustaría continuar con tu compra?* Envíame el modelo que deseas o elige una opción 👇",
@@ -608,11 +606,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "me estafan", "roban por internet", "es real", "no es estafa"
     )):
         await update.message.reply_text(
-            "🔒 Entendemos completamente tu desconfianza, ya que hay muchas personas robando por internet.\n\n"
-            "Pero nosotros somos una empresa seria, recomendada por más de *40 famosos* que confían en nuestra marca.\n\n"
-            "Sabes que ningún famoso pondría su imagen para respaldar una empresa que robe a las personas. "
-            "Todos estos famosos los puedes ver en nuestra página de Instagram oficial:\n"
-            "👉 https://www.instagram.com/x100_col/"
+            "🔒 Entendemos tu desconfianza; hay mucha gente robando por internet.\n\n"
+            "Somos una empresa seria, recomendada por más de *40 famosos* que confían en nuestra marca. "
+            "Ningún famoso expondría su imagen para respaldar a una empresa que robe a las personas.\n\n"
+            "Puedes verlos en nuestro Instagram oficial:\n👉 https://www.instagram.com/x100_col/"
         )
         await update.message.reply_text(
             "💬 *¿Te gustaría seguir con tu pedido?* Envíame el modelo que deseas o pulsa una opción 👇",
@@ -627,14 +624,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
     )):
         await update.message.reply_text(
-            "📍 Estamos ubicados en *Bucaramanga, Santander* 💛💚.\n\n"
+            "📍 Estamos en *Bucaramanga, Santander* 💛💚.\n\n"
             "🏡 *Barrio San Miguel, CLL 52 # 16-74* 🔥💋\n\n"
-            "🚚 Realizamos envíos a *todo el país* a través de *Servientrega*.\n\n"
-            "Puedes ver nuestra ubicación en Google Maps aquí:\n"
-            "👉 https://maps.google.com/?q=7.109500,-73.121597"
+            "🚚 Enviamos a *todo el país* con *Servientrega*.\n\n"
+            "Google Maps → https://maps.google.com/?q=7.109500,-73.121597"
         )
         await update.message.reply_text(
-            "💬 *¿Deseas continuar con tu compra?* Envíame el modelo que deseas o pulsa una opción 👇",
+            "💬 *¿Deseas continuar con tu compra?* Envía el modelo que quieres o pulsa una opción 👇",
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
         )
         return
@@ -646,10 +642,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "son de aqui", "es de colombia", "fabricacion colombiana"
     )):
         await update.message.reply_text(
-            "🇨🇴 Nuestra marca es *100% colombiana* 🇨🇴.\n\n"
-            "👟 Todas nuestras zapatillas son elaboradas con dedicación por *artesanos colombianos* "
-            "en la ciudad de *Bucaramanga*.\n\n"
-            "Gracias por apoyar el talento nacional 💛💚."
+            "🇨🇴 Nuestra marca es *100 % colombiana* y las zapatillas "
+            "se elaboran con orgullo en *Bucaramanga* por artesanos locales."
         )
         await update.message.reply_text(
             "💬 *¿Quieres seguir con tu pedido?* Envíame el modelo que deseas o pulsa una opción 👇",
@@ -659,12 +653,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 🔥 Pregunta 7: ¿son originales?
     if any(frase in txt for frase in (
-        "son originales", "es original", "originales", "es copia", "son copia",
-        "son replicas", "son réplica", "son imitacion", "es imitación", "es replica"
+        "son originales", "es original", "originales",
+        "es copia", "son copia", "son replica", "réplica", "imitacion"
     )):
         await update.message.reply_text(
-            "✅ ¡Claro que sí! Nuestras zapatillas son *originales*.\n\n"
-            "Somos *X100*, una marca *100% colombiana*, reconocida por la calidad y diseño de nuestras zapatillas 👟🇨🇴."
+            "✅ ¡Claro! Son *originales*. Somos *X100*, marca 100 % colombiana "
+            "reconocida por su calidad y diseño."
         )
         await update.message.reply_text(
             "💬 *¿Te gustaría continuar con tu pedido?* Envíame el modelo que te interesa o pulsa una opción 👇",
@@ -674,13 +668,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 🔥 Pregunta 8: ¿de qué calidad son?
     if any(frase in txt for frase in (
-        "que calidad son", "de que calidad son", "son buena calidad", "son de buena calidad",
-        "son de mala calidad", "que calidad manejan", "que calidad tienen", "calidad de las zapatillas"
+        "que calidad son", "de que calidad son", "son buena calidad",
+        "son de buena calidad", "que calidad tienen", "calidad de las zapatillas"
     )):
         await update.message.reply_text(
-            "✨ Nuestras zapatillas están elaboradas con *materiales de alta calidad*.\n\n"
-            "Cada par es fabricado cuidadosamente para asegurar que sean de *calidad AAA* 👟🔝, "
-            "garantizando comodidad, durabilidad y un excelente acabado."
+            "✨ Están hechas con *materiales de alta calidad*. Cada par es de *calidad AAA*, "
+            "garantizando comodidad, durabilidad y un acabado premium."
         )
         await update.message.reply_text(
             "💬 *¿Te gustaría seguir con tu pedido?* Envíame el modelo que deseas o pulsa una opción 👇",
@@ -691,33 +684,29 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 🔥 Pregunta 9: ¿hay descuento si compro 2 pares?
     if any(frase in txt for frase in (
         "si compro 2 pares", "dos pares descuento", "descuento por 2 pares",
-        "descuento por dos pares", "me descuentan si compro dos", "descuento si compro dos",
-        "hay descuento por dos", "promocion dos pares", "descuento en 2 pares"
+        "descuento si compro dos", "hay descuento por dos", "promocion dos pares"
     )):
         await update.message.reply_text(
-            "🎉 ¡Claro que sí! Si compras *2 pares* te damos un *10% de descuento adicional* sobre el total.\n\n"
-            "Aprovecha esta oportunidad para estrenar más y pagar menos 🔥👟👟."
+            "🎉 ¡Claro! Si compras *2 pares* obtienes un *10 % de descuento adicional*."
         )
         await update.message.reply_text(
-            "💬 *¿Quieres aprovechar la promoción?* Envíame los modelos que deseas o pulsa una opción 👇",
+            "💬 *¿Quieres aprovechar la promo?* Envíame los modelos que deseas o pulsa una opción 👇",
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
         )
         return
 
     # 🔥 Pregunta 10: ¿manejan precios para mayoristas?
     if any(frase in txt for frase in (
-        "precio mayorista", "precios para mayoristas", "mayorista", "quiero vender",
-        "puedo venderlos", "descuento para revender", "revender", "comprar para vender",
-        "manejan precios para mayoristas", "mayoreo", "venta al por mayor"
+        "precio mayorista", "precios para mayoristas", "mayorista",
+        "descuento para revender", "comprar para vender", "venta al por mayor"
     )):
         await update.message.reply_text(
-            "🛍️ ¡Claro que sí! Manejamos *precios para mayoristas* en pedidos de *6 pares en adelante*, "
-            "sin importar talla ni referencia.\n\n"
-            "La única condición es que debes venderlos *mínimo al mismo precio* que nosotros para "
-            "cuidar el mercado y asegurar que tengas un buen margen de utilidad."
+            "🛍️ Sí, tenemos *precios mayoristas* a partir de *6 pares*, "
+            "sin importar talla o referencia. Solo pedimos que los vendas mínimo al mismo precio "
+            "para cuidar el mercado y tu rentabilidad."
         )
         await update.message.reply_text(
-            "💬 *¿Te gustaría recibir el catálogo mayorista?* Envíame la palabra *Mayorista* o pulsa una opción 👇",
+            "💬 *¿Quieres el catálogo mayorista?* Escribe *Mayorista* o elige una opción 👇",
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen", "Mayorista"])
         )
         return
@@ -725,35 +714,28 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 🔥 Pregunta 11: ¿las tallas son normales o grandes?
     if any(frase in txt for frase in (
         "las tallas son normales", "horma normal", "talla normal",
-        "horma grande", "horma pequeña", "tallas grandes", "tallas pequeñas",
-        "las tallas son grandes", "las tallas son pequeñas", "como son las tallas"
+        "horma grande", "horma pequeña", "tallas grandes", "tallas pequeñas"
     )):
         await update.message.reply_text(
-            "👟 Nuestra horma es *normal*. Si calzas talla *40* nacional, te queda bien la *40* de nosotros.\n\n"
-            "Para mayor seguridad, te recomendamos enviarnos una foto de la *etiqueta interna* de tus tenis actuales "
-            "(en la lengüeta o costado interno), donde aparece el equivalente en *centímetros*. "
-            "Así podemos confirmar mejor la talla correcta para ti. 📏✨"
+            "👟 Nuestra horma es *normal*. Si calzas 40 nacional, te queda la 40 nuestra.\n\n"
+            "Para mayor seguridad, envíanos foto de la *etiqueta interna* con los centímetros y te confirmamos."
         )
         await update.message.reply_text(
-            "💬 *¿Quieres enviarme la etiqueta para ayudarte?* O dime directamente la talla 👇",
+            "💬 *¿Quieres enviarme la etiqueta o seguir?* Pulsa una opción 👇",
             reply_markup=menu_botones(["Enviar imagen", "Hacer pedido", "Ver catálogo"])
         )
         return
 
     # 🔥 Pregunta 12: ¿cuál es la talla más grande que manejan?
     if any(frase in txt for frase in (
-        "talla mas grande", "talla más grande", "cual es la talla mas grande",
-        "hasta que talla llegan", "mayor talla", "talla maxima", "talla máxima"
+        "talla mas grande", "talla más grande", "hasta que talla llegan",
+        "mayor talla", "talla maxima", "talla máxima"
     )):
         await update.message.reply_text(
-            "📏 La talla más grande que manejamos es:\n\n"
-            "• *45 Nacional* 🇨🇴\n"
-            "• *47 Europeo* 🇪🇺\n\n"
-            "Así que si usas tallas grandes, también tenemos opciones para ti 👟✨."
+            "📏 La talla más grande disponible es *45 Nacional* (equivale a *47 EUR*)."
         )
         await update.message.reply_text(
-            "💬 *¿Quieres que te ayude a encontrar tu modelo ideal?* "
-            "Envíame la talla que deseas o pulsa una opción 👇",
+            "💬 *¿Quieres que busquemos modelos en esa talla?* Dime y con gusto te ayudo 👇",
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
         )
         return
