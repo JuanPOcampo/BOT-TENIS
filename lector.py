@@ -539,7 +539,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🔥 Pregunta: ¿cuánto se demora el envío?
+# 🔥 Pregunta: ¿cuánto se demora el envío?
     if any(frase in txt for frase in (
         "cuanto demora", "cuánto demora",
         "cuanto tarda", "cuánto tarda",
@@ -547,24 +547,23 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "en cuanto llega", "en cuánto llega",
         "me llega rapido", "llegan rapido"
     )):
-    )):
-        # 1) Respuesta informativa
-        await update.message.reply_text(
-            "🚚 El tiempo de entrega depende de la ciudad de destino, "
-            "pero generalmente tardan *2 días hábiles* en llegar a la puerta de tu casa.\n\n"
-            "Si los necesitas para *mañana mismo*, podemos enviarlos para reclamar en el "
-            "terminal de transporte de tu ciudad y mañana, después de las 2 p. m., ya los puedes recoger. "
-            "Para esta modalidad de envío solo aplica el *pago anticipado* porque las empresas de buses "
-            "no tienen convenio de pago contra entrega."
-        )
+    # 1) Respuesta informativa
+    await update.message.reply_text(
+        "🚚 El tiempo de entrega depende de la ciudad de destino, "
+        "pero generalmente tardan *2 días hábiles* en llegar a la puerta de tu casa.\n\n"
+        "Si los necesitas para *mañana mismo*, podemos enviarlos para reclamar en el "
+        "terminal de transporte de tu ciudad y mañana, después de las 2 p. m., ya los puedes recoger. "
+        "Para esta modalidad de envío solo aplica el *pago anticipado* porque las empresas de buses "
+        "no tienen convenio de pago contra entrega."
+    )
 
-        # 2) Llamado a la acción
-        await update.message.reply_text(
-            "💬 *¿Quieres realizar la compra?* "
-            "Si gustas, envíame el *modelo* que te interesa o pulsa una de las opciones 👇",
-            reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
-        )
-        return
+    # 2) Llamado a la acción
+    await update.message.reply_text(
+        "💬 *¿Quieres realizar la compra?* "
+        "Si gustas, envíame el *modelo* que te interesa o pulsa una de las opciones 👇",
+        reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
+    )
+    return
     # 🔥 Pregunta 2: ¿tienen pago contra entrega?
     if any(frase in txt for frase in (
         "pago contra entrega", "contraentrega", "contra entrega",
