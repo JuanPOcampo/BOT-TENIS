@@ -375,8 +375,101 @@ async def transcribe_audio(file_path: str) -> str | None:
     except Exception as e:
         logging.error(f"❌ Whisper error: {e}")
     return None
+async def enviar_video_referencia(cid, ctx, referencia):
+    try:
+        videos = {
+            "ds 277": "ID_VIDEO_DS277",
+            "277": "ID_VIDEO_DS277",
+            "ds 288": "ID_VIDEO_DS288",
+            "288": "ID_VIDEO_DS288",
+            "ds 299": "ID_VIDEO_DS299",
+            "299": "ID_VIDEO_DS299",
+        }
 
-# ——— Función para mostrar imágenes de modelo desde Drive ——————————————————
+        video_id = videos.get(referencia.lower())
+
+        if video_id:
+            video_url = f"https://drive.google.com/uc?id={video_id}"
+            await ctx.bot.send_chat_action(cid, ChatAction.UPLOAD_VIDEO)
+            await ctx.bot.send_video(
+                chat_id=cid,
+                video=video_url,
+                caption=f"🎬 Video de referencia {referencia.upper()}.\n¿Deseas continuar tu compra? (SI/NO)"
+            )
+        else:
+            await ctx.bot.send_message(cid, "😕 No tengo un video específico para esa referencia.")
+    except Exception as e:
+        logging.error(f"Error enviando video: {e}")
+        await ctx.bot.send_message(cid, "⚠️ Ocurrió un error al intentar enviar el video. Intenta de nuevo.")
+async def manejar_pqrs(update, ctx) -> bool:
+    txt = normalize(update.message.text or "")
+
+    faq_respuestas = {
+        "garantia": "🛡️ Todos nuestros productos tienen *60 días de garantía* por defectos de fábrica.",
+        "garantía": "🛡️ Todos nuestros productos tienen *60 días de garantía* por defectos de fábrica.",
+        "envio": "🚚 Hacemos envíos a toda Colombia en máximo *2 días hábiles*.",
+        "envío": "🚚 Hacemos envíos a toda Colombia en máximo *2 días hábiles*.",
+        "demora": "⏳ El envío normalmente tarda *2 días hábiles*. ¡Te llega rápido!",
+        "contraentrega": "💵 Tenemos *pago contra entrega* con anticipo de $35.000.",
+        "pago": "💳 Puedes pagar por transferencia bancaria, QR o contra entrega.",
+        "original": "✅ Sí, son *originales colombianos* de alta calidad.",
+        "ubicacion": "📍 Estamos en *Bucaramanga, Santander* y enviamos a todo el país.",
+        "ubicación": "📍 Estamos en *Bucaramanga, Santander* y enviamos a todo el país.",
+        "talla": "📏 Nuestra horma es *normal*. La talla que usas normalmente te quedará perfecta.",
+        "descuento": "🎉 Si compras 2 pares te damos *10% de descuento* adicional."
+    }
+
+    for palabra, respuesta in faq_respuestas.items():
+        if palabra in txt:
+            await update.message.reply_text(respuesta, parse_mode="Markdown")
+            return True
+
+    return False
+
+async def manejar_imagen(update, ctx):
+    cid = update.effective_chat.id
+    est = estado_usuario.setdefault(cid, reset_estado(cid))
+
+    # Descargar imagen temporal
+    f = await update.message.photo[-1].get_file()
+    tmp_path = os.path.join("temp", f"{cid}.jpg")
+    os.makedirs("temp", exist_ok=True)
+    await f.download_to_drive(tmp_path)
+
+    # Buscar el modelo usando hashing
+    ref = identify_model_from_stream(tmp_path)
+    os.remove(tmp_path)
+
+    if ref:
+        try:
+            marca, modelo, color = ref.split('_')
+        except Exception as e:
+            logging.error(f"Error al desempaquetar referencia: {e}")
+            marca, modelo, color = "Desconocido", ref, ""
+
+        est.update({
+            "marca": marca,
+            "modelo": modelo,
+            "color": color,
+            "fase": "imagen_detectada"
+        })
+
+        await update.message.reply_text(
+            f"📸 La imagen coincide con:\n"
+            f"*Marca:* {marca}\n"
+            f"*Modelo:* {modelo}\n"
+            f"*Color:* {color}\n\n"
+            "¿Deseas continuar tu compra con este modelo? (SI/NO)",
+            parse_mode="Markdown",
+            reply_markup=menu_botones(["SI", "NO"])
+        )
+    else:
+        reset_estado(cid)
+        await update.message.reply_text(
+            "😔 No pude reconocer el modelo de la imagen. ¿Quieres intentar otra vez?",
+            reply_markup=menu_botones(["Enviar otra imagen", "Ver catálogo"])
+        )
+
 async def mostrar_imagenes_modelo(cid, ctx, marca, tipo_modelo):
     sku = f"{marca.replace(' ','_')}_{tipo_modelo}"
     resp = drive_service.files().list(
@@ -525,6 +618,8 @@ async def manejar_precio(update, context, inventario):
 
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
+    if await manejar_pqrs(update, ctx):
+        return
 
     # 1) Primer contacto: saludo y se queda en esperando_comando
     if cid not in estado_usuario:
@@ -578,6 +673,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Parece que el audio no contenía palabras claras 😕. ¿Puedes intentarlo de nuevo?",
             reply_markup=ReplyKeyboardRemove()
         )
+        return
+    if update.message.photo:
+        await manejar_imagen(update, ctx)
         return
 
     # 4) Reinicio explícito
@@ -904,27 +1002,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "esperando_video_referencia"
         return
 
-    if est["fase"] == "esperando_video_referencia":
-        if txt in ("ds 277", "277"):
-            VIDEO_DRIVE_ID = "ID_VIDEO_DS277"
-        elif txt in ("ds 288", "288"):
-            VIDEO_DRIVE_ID = "ID_VIDEO_DS288"
-        elif txt in ("ds 299", "299"):
-            VIDEO_DRIVE_ID = "ID_VIDEO_DS299"
-        else:
-            await update.message.reply_text("No tengo ese video específico. ¿Quieres ver otro?")
-            return
-
-        video_url = f"https://drive.google.com/uc?id={VIDEO_DRIVE_ID}"
-        await ctx.bot.send_chat_action(cid, ChatAction.UPLOAD_VIDEO)
-        await ctx.bot.send_video(
-            chat_id=cid,
-            video=video_url,
-            caption=f"Aquí tienes el video de la referencia {txt.upper()} 👟✨.\n¿Te interesa hacer un pedido?",
-            reply_markup=menu_botones(["Sí, quiero pedir", "Volver al menú"])
-        )
-        est["fase"] = "inicio"
-        return
+if est["fase"] == "esperando_video_referencia":
+    await enviar_video_referencia(cid, ctx, txt)
+    est["fase"] = "inicio"
+    return
 
     if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
         reset_estado(cid)
