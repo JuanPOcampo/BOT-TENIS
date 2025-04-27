@@ -547,13 +547,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "en cuanto llega", "en cuánto llega",
         "me llega rapido", "llegan rapido"
     )):
-    # 🔥 Pregunta 1: ¿cuánto demora el envío?
-    if any(frase in txt for frase in (
-        "cuanto demora", "cuánto demora",
-        "cuanto tarda",  "cuánto tarda",
-        "cuanto se demora", "cuánto se demora",
-        "en cuanto llega", "en cuánto llega",
-        "me llega rapido", "llegan rapido"
     )):
         # 1) Respuesta informativa
         await update.message.reply_text(
