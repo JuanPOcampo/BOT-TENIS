@@ -637,15 +637,22 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🔥 Aquí agregamos el tiempo de entrega
-    if any(palabra in txt for palabra in ["cuánto demora", "cuanto demora", "cuánto tarda", "cuanto tarda", "en cuánto llega", "en cuanto llega"]):
-        MENSAJE_TIEMPO_ENTREGA = (
-            "🚚 El tiempo de entrega depende de tu ciudad, pero generalmente tardan *2 días hábiles* en llegar a la puerta de tu casa.\n\n"
-            "✨ Si los necesitas para *mañana mismo*, podemos enviarlos para reclamar en el *terminal de transporte* de tu ciudad. "
-            "Mañana después de las 2PM podrías reclamarlos. Para esta modalidad, el pago debe ser *anticipado* porque "
-            "los buses no tienen pago contra entrega."
+    # 🔥 Pregunta: ¿cuánto se demora el envío?
+    if any(frase in txt for frase in (
+        "cuanto demora", "cuánto demora",
+        "cuanto tarda", "cuánto tarda",
+        "cuanto se demora", "cuánto se demora",
+        "en cuanto llega", "en cuánto llega",
+        "me llega rapido", "llegan rapido"
+    )):
+        await update.message.reply_text(
+            "🚚 El tiempo de entrega depende de la ciudad de destino, "
+            "pero generalmente tardan *2 días hábiles* en llegar a la puerta de tu casa.\n\n"
+            "Si los necesitas para *mañana mismo*, podemos enviarlos para reclamar en el "
+            "terminal de transporte de tu ciudad y mañana, después de las 2 p. m., ya los puedes recoger. "
+            "Para esta modalidad de envío solo aplica el *pago anticipado*, ya que las empresas de buses "
+            "no tienen convenio de pago contra entrega."
         )
-        await update.message.reply_text(MENSAJE_TIEMPO_ENTREGA)
         return
 
     # 5) Intención de enviar imagen
