@@ -1493,22 +1493,34 @@ async def fallback_inteligente(txt, update):
         reset_estado(cid)
         return
 
-    # ——— Fallback Inteligente IA 4.1 Mini ———
-    respuesta = await consultar_ia_fallback(txt_raw)
-    if respuesta:
+    # 🔥 Fallback Final: usar IA GPT-4 si no coincidió nada antes
+    palabras_clave_flujo = [
+        "catalogo", "catálogo", "ver catálogo", "ver catalogo",
+        "imagen", "foto", "enviar imagen", "ver tallas",
+        "quiero comprar", "hacer pedido", "comprar", "zapatos", "tenis",
+        "pago", "contraentrega", "garantía", "garantia",
+        "demora", "envío", "envio"
+    ]
+
+    if any(palabra in txt for palabra in palabras_clave_flujo):
+        # 🔵 Si detectamos palabras clave del flujo, guiamos al cliente al menú
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="📋 Parece que quieres hacer un pedido o consultar el catálogo. Por favor usa las opciones disponibles para continuar. 😉",
+            reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"]),
+            parse_mode="Markdown"
+        )
+        return
+    else:
+        # 🧠 Si no reconocimos nada, usamos GPT-4 real para ayudar al cliente
+        respuesta = await responder_con_openai(txt_raw)
         await ctx.bot.send_message(
             chat_id=cid,
             text=respuesta,
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"]),
             parse_mode="Markdown"
         )
-    else:
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="😅 No logré entender tu solicitud. ¿Quieres volver al menú?",
-            reply_markup=menu_botones(["Volver al menú"]),
-            parse_mode="Markdown"
-        )
+        return
 
 
    
