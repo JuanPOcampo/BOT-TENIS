@@ -13,6 +13,7 @@ import unicodedata
 import difflib
 import asyncio
 from types import SimpleNamespace
+from collections import defaultdict
 
 # ——— Librerías externas ———
 from dotenv import load_dotenv
@@ -942,327 +943,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 reply_markup=menu_botones(colores),
             )
         return
-
-    # 2) Procesamos audio o texto plano ───────────────────────────
-    txt_raw = ""
-    if update.message.voice or update.message.audio:
-        fobj = update.message.voice or update.message.audio
-        tg_file = await fobj.get_file()
-        local_path = os.path.join(TEMP_AUDIO_DIR, f"{cid}_{tg_file.file_id}.ogg")
-        await tg_file.download_to_drive(local_path)
-        txt_raw = await transcribe_audio(local_path)
-        os.remove(local_path)
-        if not txt_raw:
-            await update.message.reply_text(
-                "Ese audio se escucha muy mal 😕. ¿Podrías enviarlo de nuevo o escribir tu mensaje?",
-                reply_markup=ReplyKeyboardRemove()
-            )
-            return
-
-    # 4) Intención global de enviar imagen (en cualquier fase) ────
-    if menciona_imagen(txt):
-        if est["fase"] != "esperando_imagen":
-            est["fase"] = "esperando_imagen"
-            await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
-        return
-
-    # 5) Manejar precio por referencia ────────────────────────────
-    if await manejar_precio(update, ctx, inv):
-        return
-
-# Función para manejar la solicitud de precio por referencia
-PALABRAS_PRECIO = ['precio', 'vale', 'cuesta', 'valor', 'coste', 'precios', 'cuánto']
-
-async def manejar_precio(update, ctx, inventario):
-    cid = update.effective_chat.id
-    mensaje = (update.message.text or "").lower()
-
-    # Busca números en el mensaje (referencias numéricas)
-    numeros = re.findall(r"\b\d+\b", mensaje)
-
-    if numeros:
-        referencia = numeros[0]  # toma solo la primera referencia detectada
-        referencia_normalizada = normalize(referencia)
-
-        # Busca el modelo en inventario
-        modelos_encontrados = [
-            item for item in inventario
-            if referencia_normalizada in normalize(item.get("modelo", "")) and disponible(item)
-        ]
-
-        if modelos_encontrados:
-            respuestas = []
-            for modelo in modelos_encontrados:
-                marca = modelo.get('marca', 'desconocida')
-                modelo_nombre = modelo.get('modelo', 'desconocido')
-                color = modelo.get('color', 'varios colores')
-                precio = modelo.get('precio', 'No disponible')
-                respuestas.append(f"✅ {marca} {modelo_nombre} ({color}) cuesta {precio}.")
-
-            respuesta_final = "\n".join(respuestas)
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=respuesta_final,
-                reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"]),
-                parse_mode="Markdown"
-            )
-            return True
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=f"No encontré productos con la referencia '{referencia}'. ¿Quieres revisar el catálogo?",
-                reply_markup=menu_botones(["Ver catálogo", "Volver al menú"]),
-                parse_mode="Markdown"
-            )
-            return True
-    return False
-
-
-
-    # 🔥 NUEVO: Envío de video automático cuando el cliente muestra desconfianza
-    if any(frase in txt for frase in (
-        "no me fio", "no confio", "es seguro", "como se que no me roban",
-        "como se que no me estafan", "desconfio", "no creo", "estafa", "miedo a comprar"
-    )):
-        VIDEO_DRIVE_ID = "TU_ID_DEL_VIDEO_DE_CONFIANZA"  # ← recuerda poner el ID real
-        video_url = f"https://drive.google.com/uc?id={VIDEO_DRIVE_ID}"
-
-        await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
-        await ctx.bot.send_video(
-            chat_id=cid,
-            video=video_url,
-            caption=(
-                "🔒 Entendemos perfectamente tu preocupación. "
-                "Aquí te dejamos un video corto donde nuestros clientes reales comparten su experiencia. "
-                "Somos una empresa seria y segura, ¡puedes confiar en nosotros! 😊👍"
-            )
-        )
-        return
-
-# 🔥 Función fallback inteligente
-async def fallback_inteligente(txt, update):
-    respuesta_ia = await consultar_ia_fallback(txt)
-    if respuesta_ia:
-        await ctx.bot.send_message(
-    chat_id=update.effective_chat.id,
-    text=respuesta_ia,
-            reply_markup=menu_botones(["Ver catálogo", "Hacer pedido", "Enviar imagen"],
-)
-)
-    else:
-        await ctx.bot.send_message(
-    chat_id=update.effective_chat.id,
-    text="😔 No logré entenderte bien. ¿Quieres volver al inicio?",
-            reply_markup=menu_botones(["Volver al menú"],
-    parse_mode="Markdown"
-)
-)
-
-    # 🔥 Validar si realmente se extrajo texto
-    if not txt_raw:
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="❗ No recibí un mensaje válido. ¿Puedes enviarme texto o un audio claro?",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        return
-
-    txt = normalize(txt_raw)
-
-    # 🔥 1) Reinicio explícito primero
-    if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
-        reset_estado(cid)
-        await saludo_bienvenida(update, ctx)
-        return
-
-    # 🔥 2) Si estaba esperando que elija un video
-    if est.get("fase") == "esperando_video_referencia":
-        await enviar_video_referencia(cid, ctx, txt)
-        est["fase"] = "inicio"
-        return
-
-    # 🔥 3) Ofrecer videos si los pidió
-    if any(frase in txt for frase in (
-        "videos", "tienen videos", "muéstrame videos", "videos de referencia",
-        "ver videos", "quiero videos", "puedes mandarme videos"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="🎬 ¡Claro! Tengo videos de nuestras referencias más populares:\n\n"
-                 "• DS 277\n"
-                 "• DS 288\n"
-                 "• DS 299\n\n"
-                 "Dime cuál te gustaría ver o escribe directamente la referencia.",
-            reply_markup=menu_botones(["DS 277", "DS 288", "DS 299"]),
-            parse_mode="Markdown"
-        )
-        est["fase"] = "esperando_video_referencia"
-        return
-
-
-    # 🔥 4) Detección automática de referencia (modelo o referencia de 3-4 dígitos)
-    m_ref = re.search(r"(?:referencia|modelo)?\s*(\d{3,4})", txt)
-    if m_ref:
-        referencia = m_ref.group(1)
-        inv = obtener_inventario()
-        productos = [
-            it for it in inv
-            if referencia in normalize(it.get("modelo", ""))
-            and disponible(it)
-        ]
-
-        if productos:
-            from collections import defaultdict
-            agrupados = defaultdict(set)
-            for it in productos:
-                key = (
-                    it.get('modelo', 'desconocido'),
-                    it.get('color', 'varios colores'),
-                    it.get('precio', 'No disponible')
-                )
-                agrupados[key].add(str(it.get('talla', '')))
-
-            # Tomemos el primer grupo (si hay varios, podrías iterar)
-            (modelo, color, precio), tallas = next(iter(agrupados.items()))
-            tallas_ordenadas = sorted(tallas, key=lambda t: int(t) if t.isdigit() else t)
-            tallas_str = ", ".join(tallas_ordenadas)
-
-            # Mensaje personalizado:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
-                    f"👟 *{modelo}* ({color})\n"
-                    f"💲 Precio: *{precio}*\n"
-                    f"Tallas disponibles: {tallas_str}\n\n"
-                    "¿Te gustaría proseguir con la compra?"
-                ),
-                parse_mode="Markdown",
-                reply_markup=menu_botones(["Sí, quiero comprar", "No, gracias"])
-            )
-
-            # Cambiamos fase para saber que ahora esperamos confirmación
-            est["fase"] = "confirmar_compra"
-            return
-
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=f"😕 No encontré la referencia {referencia}. ¿Quieres intentar con otra?",
-                reply_markup=menu_botones(["Volver al menú"])
-            )
-            return
-
-    # 🔥 5) Procesar imágenes (cuando el usuario menciona "imagen")
-    if menciona_imagen(txt):
-        if est.get("fase") != "esperando_imagen":
-            est["fase"] = "esperando_imagen"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=CLIP_INSTRUCTIONS,
-                reply_markup=ReplyKeyboardRemove(),
-                parse_mode="Markdown"
-            )
-        return
-
-    # 🔥 6) Identificar modelo a partir de la foto recibida
-    if est.get("fase") == "esperando_imagen" and update.message.photo:
-        f = await update.message.photo[-1].get_file()
-        tmp = os.path.join("temp", f"{cid}.jpg")
-        os.makedirs("temp", exist_ok=True)
-        await f.download_to_drive(tmp)
-
-        ref_detectada = identify_model_from_stream(tmp)
-        os.remove(tmp)
-
-        if ref_detectada:
-            marca, modelo, color = ref_detectada.split('_')
-            est.update({
-                "marca": marca,
-                "modelo": modelo,
-                "color": color,
-                "fase": "imagen_detectada"
-            })
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=f"La imagen coincide con {marca} {modelo} color {color}. ¿Continuamos? (SI/NO)",
-                reply_markup=menu_botones(["SI", "NO"]),
-            )
-        else:
-            reset_estado(cid)
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="😕 No reconocí el modelo en la imagen. ¿Puedes intentar otra imagen o escribir /start?",
-                parse_mode="Markdown"
-            )
-        return
-
-    # 🔥 7) Solicitud explícita de precios usando helper manejar_precio
-    if await manejar_precio(update, ctx, inventario):
-        return
-
-    # 🔥 8) Detección de marca escrita por el usuario
-    marcas = obtener_marcas_unicas(inventario)
-    elegida = next((m for m in marcas if any(t in txt for t in normalize(m).split())), None)
-
-    if not elegida:
-        tokens = txt.split()
-        for m in marcas:
-            for tok in normalize(m).split():
-                if difflib.get_close_matches(tok, tokens, n=1, cutoff=0.6):
-                    elegida = m
-                    break
-            if elegida:
-                break
-
-    if elegida:
-        est["marca"] = elegida
-        est["fase"] = "esperando_modelo"
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=f"¡Genial! Veo que buscas {elegida}. ¿Qué modelo de {elegida} te interesa?",
-            reply_markup=menu_botones(obtener_modelos_por_marca(inventario, elegida)),
-        )
-        return
-
-
-    # ——— Rastrear pedido ———
-    if est.get("fase") == "esperando_numero_rastreo":
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="Guía para rastrear: https://www.instagram.com/juanp_ocampo/",
-            parse_mode="Markdown"
-        )
-        reset_estado(cid)
-        return
-
-
-    # ——— Devolución ———
-    if est.get("fase") == "esperando_numero_devolucion":
-        est["referencia"] = txt_raw.strip()
-        est["fase"] = "esperando_motivo_devolucion"
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="Motivo de devolución:",
-            parse_mode="Markdown"
-        )
-        return
-
-    if est.get("fase") == "esperando_motivo_devolucion":
-        enviar_correo(
-            EMAIL_DEVOLUCIONES,
-            f"Devolución {NOMBRE_NEGOCIO}",
-            f"Venta: {est['referencia']}\nMotivo: {txt_raw}"
-        )
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="Solicitud enviada exitosamente. ✅",
-            parse_mode="Markdown"
-        )
-        reset_estado(cid)
-        return
-
     # Datos del usuario y pago
     if est["fase"] == "esperando_talla":
         tallas = obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
@@ -1445,20 +1125,311 @@ async def fallback_inteligente(txt, update):
         )
         reset_estado(cid)
         return
-
-    # ——— Hasta aquí llega todo el flujo normal del bot ———
-
-    # 🔥 1) Fallback inteligente rápido
-    respuesta_fallback = await consultar_ia_fallback(txt_raw)
-    if respuesta_fallback:
+    # ——— Rastrear pedido ———
+    if est.get("fase") == "esperando_numero_rastreo":
         await ctx.bot.send_message(
             chat_id=cid,
-            text=respuesta_fallback,
-            reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
+            text="Guía para rastrear: https://www.instagram.com/juanp_ocampo/",
+            parse_mode="Markdown"
+        )
+        reset_estado(cid)
+        return
+
+
+    # ——— Devolución ———
+    if est.get("fase") == "esperando_numero_devolucion":
+        est["referencia"] = txt_raw.strip()
+        est["fase"] = "esperando_motivo_devolucion"
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="Motivo de devolución:",
+            parse_mode="Markdown"
         )
         return
 
-    # 🔥 2) Detección de palabras clave típicas para guiar al menú
+    if est.get("fase") == "esperando_motivo_devolucion":
+        enviar_correo(
+            EMAIL_DEVOLUCIONES,
+            f"Devolución {NOMBRE_NEGOCIO}",
+            f"Venta: {est['referencia']}\nMotivo: {txt_raw}"
+        )
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="Solicitud enviada exitosamente. ✅",
+            parse_mode="Markdown"
+        )
+        reset_estado(cid)
+        return
+
+    # 2) Procesamos audio o texto plano ───────────────────────────
+    if update.message.voice or update.message.audio:
+        fobj = update.message.voice or update.message.audio
+        tg_file = await fobj.get_file()
+        local_path = os.path.join(TEMP_AUDIO_DIR, f"{cid}_{tg_file.file_id}.ogg")
+        await tg_file.download_to_drive(local_path)
+        txt_raw = await transcribe_audio(local_path)
+        os.remove(local_path)
+        if not txt_raw:
+            await update.message.reply_text(
+                "Ese audio se escucha muy mal 😕. ¿Podrías enviarlo de nuevo o escribir tu mensaje?",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+
+    # 4) Intención global de enviar imagen (en cualquier fase) ────
+    if menciona_imagen(txt):
+        if est["fase"] != "esperando_imagen":
+            est["fase"] = "esperando_imagen"
+            await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
+        return
+
+    # 5) Manejar precio por referencia ────────────────────────────
+    if await manejar_precio(update, ctx, inv):
+        return
+
+# Función para manejar la solicitud de precio por referencia
+PALABRAS_PRECIO = ['precio', 'vale', 'cuesta', 'valor', 'coste', 'precios', 'cuánto']
+
+async def manejar_precio(update, ctx, inventario):
+    cid = update.effective_chat.id
+    mensaje = (update.message.text or "").lower()
+
+    # Busca números en el mensaje (referencias numéricas)
+    numeros = re.findall(r"\b\d+\b", mensaje)
+
+    if numeros:
+        referencia = numeros[0]  # toma solo la primera referencia detectada
+        referencia_normalizada = normalize(referencia)
+
+        # Busca el modelo en inventario
+        modelos_encontrados = [
+            item for item in inventario
+            if referencia_normalizada in normalize(item.get("modelo", "")) and disponible(item)
+        ]
+
+        if modelos_encontrados:
+            respuestas = []
+            for modelo in modelos_encontrados:
+                marca = modelo.get('marca', 'desconocida')
+                modelo_nombre = modelo.get('modelo', 'desconocido')
+                color = modelo.get('color', 'varios colores')
+                precio = modelo.get('precio', 'No disponible')
+                respuestas.append(f"✅ {marca} {modelo_nombre} ({color}) cuesta {precio}.")
+
+            respuesta_final = "\n".join(respuestas)
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=respuesta_final,
+                reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"]),
+                parse_mode="Markdown"
+            )
+            return True
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=f"No encontré productos con la referencia '{referencia}'. ¿Quieres revisar el catálogo?",
+                reply_markup=menu_botones(["Ver catálogo", "Volver al menú"]),
+                parse_mode="Markdown"
+            )
+            return True
+    return False
+
+
+
+    # 🔥 NUEVO: Envío de video automático cuando el cliente muestra desconfianza
+    if any(frase in txt for frase in (
+        "no me fio", "no confio", "es seguro", "como se que no me roban",
+        "como se que no me estafan", "desconfio", "no creo", "estafa", "miedo a comprar"
+    )):
+        VIDEO_DRIVE_ID = "TU_ID_DEL_VIDEO_DE_CONFIANZA"  # ← recuerda poner el ID real
+        video_url = f"https://drive.google.com/uc?id={VIDEO_DRIVE_ID}"
+
+        await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
+        await ctx.bot.send_video(
+            chat_id=cid,
+            video=video_url,
+            caption=(
+                "🔒 Entendemos perfectamente tu preocupación. "
+                "Aquí te dejamos un video corto donde nuestros clientes reales comparten su experiencia. "
+                "Somos una empresa seria y segura, ¡puedes confiar en nosotros! 😊👍"
+            )
+        )
+        return
+
+    # 🔥 Validar si realmente se extrajo texto
+    if not txt_raw:
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="❗ No recibí un mensaje válido. ¿Puedes enviarme texto o un audio claro?",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="Markdown"
+        )
+        return
+
+    # 🔥 Reinicio explícito primero
+    if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
+        reset_estado(cid)
+        await saludo_bienvenida(update, ctx)
+        return
+
+    # 🔥 5) Ofrecer videos si los pidió
+    if any(frase in txt for frase in ("videos", "quiero videos", "ver videos")):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                "🎬 ¡Claro! Aquí tienes videos de nuestras referencias más populares:\n\n"
+                "• DS 277: https://drive.google.com/file/d/1W7nMJ4RRYUvr9LiPDe5p_U6Mg_azyHLN/view?usp=drive_link\n"
+                "• DS 288: https://youtu.be/ID_DEL_VIDEO_288\n"
+                "• DS 299: https://youtu.be/ID_DEL_VIDEO_299\n\n"
+                "¿Cuál te gustaría ver?"
+            ),
+            reply_markup=menu_botones(["DS 277", "DS 288", "DS 299"]),
+            parse_mode="Markdown"
+        )
+        est["fase"] = "esperando_video_referencia"
+        return
+
+    # 🔥 6) Si estaba esperando que elija un video
+    if est.get("fase") == "esperando_video_referencia":
+        await enviar_video_referencia(cid, ctx, txt)
+        est["fase"] = "inicio"
+        return
+
+
+
+    # 🔥 4) Detección automática de referencia (modelo o referencia de 3-4 dígitos)
+    m_ref = re.search(r"(?:referencia|modelo)?\s*(\d{3,4})", txt)
+    if m_ref:
+        referencia = m_ref.group(1)
+        productos = [
+            it for it in inv
+            if referencia in normalize(it.get("modelo", "")) and disponible(it)
+        ]
+
+        if productos:
+            from collections import defaultdict
+            agrupados = defaultdict(set)
+            for it in productos:
+                key = (
+                    it.get('modelo', 'desconocido'),
+                    it.get('color', 'varios colores'),
+                    it.get('precio', 'No disponible')
+                )
+                agrupados[key].add(str(it.get('talla', '')))
+
+            respuesta_final = ""
+            for (modelo, color, precio), tallas in agrupados.items():
+                tallas_ordenadas = sorted(tallas, key=lambda t: int(t) if t.isdigit() else t)
+                tallas_str = ", ".join(tallas_ordenadas)
+                respuesta_final += (
+                    f"👟 *{modelo}* ({color})\n"
+                    f"💲 Precio: *{precio}*\n"
+                    f"Tallas disponibles: {tallas_str}\n\n"
+                )
+
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
+                    f"{respuesta_final}"
+                    "¿Te gustaría proseguir con la compra?"
+                ),
+                parse_mode="Markdown",
+                reply_markup=menu_botones(["Sí, quiero comprar", "No, gracias"])
+            )
+
+            est["fase"] = "confirmar_compra"
+            return
+
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=f"😕 No encontré la referencia {referencia}. ¿Quieres intentar con otra?",
+                reply_markup=menu_botones(["Volver al menú"])
+            )
+            return
+
+    # 🔥 5) Procesar imágenes (cuando el usuario menciona "imagen")
+    if menciona_imagen(txt):
+        if est.get("fase") != "esperando_imagen":
+            est["fase"] = "esperando_imagen"
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=CLIP_INSTRUCTIONS,
+                reply_markup=ReplyKeyboardRemove(),
+                parse_mode="Markdown"
+            )
+        return
+
+
+    # 🔥 6) Identificar modelo a partir de la foto recibida
+    if est.get("fase") == "esperando_imagen" and update.message.photo:
+        f = await update.message.photo[-1].get_file()
+        tmp = os.path.join("temp", f"{cid}.jpg")
+        os.makedirs("temp", exist_ok=True)
+        await f.download_to_drive(tmp)
+
+        ref_detectada = identify_model_from_stream(tmp)
+        os.remove(tmp)
+
+        if ref_detectada:
+            marca, modelo, color = ref_detectada.split('_')
+            est.update({
+                "marca": marca,
+                "modelo": modelo,
+                "color": color,
+                "fase": "imagen_detectada"
+            })
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=f"La imagen coincide con {marca} {modelo} color {color}. ¿Continuamos? (SI/NO)",
+                reply_markup=menu_botones(["SI", "NO"]),
+            )
+        else:
+            reset_estado(cid)
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="😕 No reconocí el modelo en la imagen. ¿Puedes intentar otra imagen o escribir /start?",
+                parse_mode="Markdown"
+            )
+        return
+
+    # 🔥 7) Solicitud explícita de precios usando helper manejar_precio
+    if await manejar_precio(update, ctx, inventario):
+        return
+
+    # 🔥 8) Detección de marca escrita por el usuario
+    marcas = obtener_marcas_unicas(inventario)
+    elegida = next((m for m in marcas if any(t in txt for t in normalize(m).split())), None)
+
+    if not elegida:
+        tokens = txt.split()
+        for m in marcas:
+            for tok in normalize(m).split():
+                if difflib.get_close_matches(tok, tokens, n=1, cutoff=0.6):
+                    elegida = m
+                    break
+            if elegida:
+                break
+
+    if elegida:
+        est["marca"] = elegida
+        est["fase"] = "esperando_modelo"
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=f"¡Genial! Veo que buscas {elegida}. ¿Qué modelo de {elegida} te interesa?",
+            reply_markup=menu_botones(obtener_modelos_por_marca(inventario, elegida)),
+        )
+        return
+
+
+
+
+     # ——— Hasta aquí llega todo el flujo normal del bot ———
+
+    # 🔥 Fallback inteligente CORREGIDO con 4 espacios
+
+    # 1) Detectar palabras típicas primero (antes que IA)
     palabras_clave_flujo = [
         "catalogo", "catálogo", "ver catálogo", "ver catalogo",
         "imagen", "foto", "enviar imagen", "ver tallas",
@@ -1470,18 +1441,42 @@ async def fallback_inteligente(txt, update):
     if any(palabra in txt for palabra in palabras_clave_flujo):
         await ctx.bot.send_message(
             chat_id=cid,
-            text="📋 Parece que quieres hacer un pedido o consultar el catálogo. Por favor usa las opciones disponibles para continuar. 😉",
+            text="📋 Parece que quieres hacer un pedido o consultar el catálogo. Usa las opciones disponibles 😉",
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
         )
         return
 
-    # 🔥 3) Fallback final: usar IA real GPT-4 si no coincidió nada antes
-    respuesta = await responder_con_openai(txt_raw)
-    await ctx.bot.send_message(
-        chat_id=cid,
-        text=respuesta,
-        reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
-    )
+    # 2) NO usar IA si estamos en una fase crítica (proteger cierre de venta)
+    fases_criticas = [
+        "esperando_talla", "esperando_color", "esperando_nombre", "esperando_correo",
+        "esperando_telefono", "esperando_ciudad", "esperando_provincia", "esperando_direccion",
+        "esperando_pago", "esperando_comprobante", "imagen_detectada",
+        "esperando_video_referencia", "esperando_numero_rastreo",
+        "esperando_numero_devolucion", "esperando_motivo_devolucion"
+    ]
+
+    if est.get("fase") in fases_criticas:
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="✏️ Por favor completa primero el proceso en el que estás. ¿Te ayudo a terminarlo?",
+            reply_markup=menu_botones(["Volver al menú"])
+        )
+        return
+
+    # 3) Ahora sí, usar IA si no entendimos nada
+    respuesta_fallback = await consultar_ia_fallback(txt_raw)
+    if respuesta_fallback:
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=respuesta_fallback,
+            reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
+        )
+    else:
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="😅 No logré entender tu solicitud. ¿Quieres ver el catálogo o realizar un pedido?",
+            reply_markup=menu_botones(["Hacer pedido", "Ver catálogo"])
+        )
     return
 
 
