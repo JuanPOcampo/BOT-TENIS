@@ -598,7 +598,7 @@ def generate_sale_id() -> str:
 # --------------------------------------------------------------------------------------------------
 
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    cid = update.effective_chat.id            # ← se define de primeras
+    cid = update.effective_chat.id
 
     # 1) Primer contacto: saludo y se queda en esperando_comando
     if cid not in estado_usuario:
@@ -610,10 +610,29 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "Rastrear pedido", "Realizar cambio"
             ])
         )
-        return                                 # ← esperamos el siguiente mensaje
+        return
 
-    est = estado_usuario[cid]                  # ← ya existe
-    inv = obtener_inventario()                 # ← cache de inventario
+    # 2) Estado e inventario
+    est = estado_usuario[cid]
+    inv = obtener_inventario()
+
+    # 3) Captura y normaliza el texto SIN else
+
+    txt_raw = update.message.text or ""
+    txt = normalize(txt_raw)
+
+
+    # 3) Reinicio explícito (/start, inicio, etc.) ────────────────
+    if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
+        reset_estado(cid)
+        await update.message.reply_text(
+            WELCOME_TEXT,
+            reply_markup=menu_botones([
+                "Hacer pedido", "Enviar imagen", "Ver catálogo",
+                "Rastrear pedido", "Realizar cambio"
+            ])
+        )
+        return
     # 🔥 Pregunta 1: ¿cuánto se demora el envío?
     if any(frase in txt for frase in (
         "cuanto demora", "cuánto demora", "cuanto tarda", "cuánto tarda",
@@ -939,22 +958,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 reply_markup=ReplyKeyboardRemove()
             )
             return
-    else:
-        txt_raw = update.message.text or ""
-
-    txt = normalize(txt_raw)
-
-    # 3) Reinicio explícito (/start, inicio, etc.) ────────────────
-    if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
-        reset_estado(cid)
-        await update.message.reply_text(
-            WELCOME_TEXT,
-            reply_markup=menu_botones([
-                "Hacer pedido", "Enviar imagen", "Ver catálogo",
-                "Rastrear pedido", "Realizar cambio"
-            ])
-        )
-        return
 
     # 4) Intención global de enviar imagen (en cualquier fase) ────
     if menciona_imagen(txt):
