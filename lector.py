@@ -1325,9 +1325,33 @@ async def procesar_wa(cid: str, body: str) -> dict:
 
     # 1) Preguntas frecuentes (FAQ)
     if any(frase in txt for frase in (
-        "cuánto cuesta", "precio", "garantía", "en qué ciudad están", "pago contra entrega", "envío rápido"
+        "cuánto cuesta", "precio", "garantía", "en qué ciudad están", 
+        "pago contra entrega", "envío rápido"
     )):
-        # Agregar aquí respuestas a preguntas frecuentes
+        if "precio" in txt:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="💰 El precio depende del modelo y la talla. ¿Qué modelo te interesa?",
+                reply_markup=menu_botones(["Ver catálogo", "Hacer pedido"])
+            )
+            return
+
+        if "garantía" in txt:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="🛡️ Todos nuestros productos tienen una garantía de 60 días por defectos de fabricación.",
+                reply_markup=menu_botones(["Hacer pedido", "Ver catálogo"])
+            )
+            return
+
+        if "envío rápido" in txt:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="🚚 El tiempo de entrega es generalmente de 2 días hábiles, pero podemos enviarlo más rápido si es necesario.",
+                reply_markup=menu_botones(["Hacer pedido", "Ver catálogo"])
+            )
+            return
+
     # 🔥 Pregunta 1: ¿cuánto se demora el envío?
     if any(frase in txt for frase in (
         "cuanto demora", "cuánto demora", "cuanto tarda", "cuánto tarda",
@@ -1383,6 +1407,7 @@ async def procesar_wa(cid: str, body: str) -> dict:
             parse_mode="Markdown"
         )
         return
+
 
     # 🔥 Pregunta 4: ¿cómo sé que no me van a robar?
     if any(frase in txt for frase in (
