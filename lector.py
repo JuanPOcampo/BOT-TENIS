@@ -208,8 +208,6 @@ CLIP_INSTRUCTIONS = (
 CATALOG_LINK    = "https://wa.me/c/573007607245🔝"
 CATALOG_MESSAGE = f"Aquí tienes el catálogo: {CATALOG_LINK}"
 
-client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-
 def enviar_correo(dest, subj, body):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}")
 
