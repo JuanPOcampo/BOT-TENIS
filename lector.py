@@ -1532,28 +1532,40 @@ async def procesar_wa(cid: str, body: str) -> dict:
         send_video=lambda chat_id, video, caption=None, **kw: asyncio.create_task(ctx.bot_send_video(chat_id, video, caption=caption))
     ))
 
-    if any(palabra in texto for palabra in palabras_genericas):
-        class DummyMsg(SimpleNamespace):
-            def __init__(self, text, ctx, photo=None, voice=None, audio=None):
-                self.text = text
-                self.photo = photo
-                self.voice = voice
-                self.audio = audio
-                self._ctx = ctx
+    class DummyMsg(SimpleNamespace):
+        def __init__(self, text, ctx, photo=None, voice=None, audio=None):
+            self.text = text
+            self.photo = photo
+            self.voice = voice
+            self.audio = audio
+            self._ctx = ctx
 
-            async def reply_text(self, text, **kw):
-                self._ctx.resp.append(text)
+        async def reply_text(self, text, **kw):
+            self._ctx.resp.append(text)
 
-        dummy_msg = DummyMsg(text=body, ctx=ctx, photo=None, voice=None, audio=None)
-        dummy_update = SimpleNamespace(
-            message=dummy_msg,
-            effective_chat=SimpleNamespace(id=cid)
-        )
+    dummy_msg = DummyMsg(text=body, ctx=ctx, photo=None, voice=None, audio=None)
+    dummy_update = SimpleNamespace(
+        message=dummy_msg,
+        effective_chat=SimpleNamespace(id=cid)
+    )
 
+    # 🔥 Aseguramos que el estado exista
+    if cid not in estado_usuario:
+        reset_estado(cid)
+
+    try:
+        # 🔥 Intenta responder con el flujo normal del BOT
         await responder(dummy_update, ctx)
-        return {"type": "text", "text": "\n".join(ctx.resp)}
 
-    else:
+        if ctx.resp:
+            return {"type": "text", "text": "\n".join(ctx.resp)}
+        else:
+            # 🔥 Si el bot no respondió nada, ahí sí usa IA
+            respuesta_ia = await responder_con_openai(body)
+            return {"type": "text", "text": respuesta_ia}
+
+    except Exception as e:
+        print(f"🔥 Error en procesar_wa: {e}")
         respuesta_ia = await responder_con_openai(body)
         return {"type": "text", "text": respuesta_ia}
 
