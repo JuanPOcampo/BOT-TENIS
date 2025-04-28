@@ -1521,26 +1521,34 @@ async def procesar_wa(cid: str, body: str) -> dict:
         "hacer pedido", "enviar imagen", "rastrear pedido", "realizar cambio"
     ]
 
+    class DummyCtx(SimpleNamespace):
+        async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
+        async def bot_send_chat_action(self, chat_id, action, **kw): pass
+        async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ''}")
+
+    ctx = DummyCtx(resp=[], bot=SimpleNamespace(
+        send_message=lambda chat_id, text, **kw: asyncio.create_task(ctx.bot_send(chat_id, text)),
+        send_chat_action=lambda chat_id, action, **kw: asyncio.create_task(ctx.bot_send_chat_action(chat_id, action)),
+        send_video=lambda chat_id, video, caption=None, **kw: asyncio.create_task(ctx.bot_send_video(chat_id, video, caption=caption))
+    ))
+
     if any(palabra in texto for palabra in palabras_genericas):
         class DummyMsg(SimpleNamespace):
-            async def reply_text(self, text, **kw): self._ctx.resp.append(text)
+            def __init__(self, text, ctx, photo=None, voice=None, audio=None):
+                self.text = text
+                self.photo = photo
+                self.voice = voice
+                self.audio = audio
+                self._ctx = ctx
 
-        dummy_msg = DummyMsg(text=body, photo=None, voice=None, audio=None)
+            async def reply_text(self, text, **kw):
+                self._ctx.resp.append(text)
+
+        dummy_msg = DummyMsg(text=body, ctx=ctx, photo=None, voice=None, audio=None)
         dummy_update = SimpleNamespace(
             message=dummy_msg,
             effective_chat=SimpleNamespace(id=cid)
         )
-
-        class DummyCtx(SimpleNamespace):
-            async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
-            async def bot_send_chat_action(self, chat_id, action, **kw): pass
-            async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ''}")
-
-        ctx = DummyCtx(resp=[], bot=SimpleNamespace(
-            send_message=lambda chat_id, text, **kw: asyncio.create_task(ctx.bot_send(chat_id, text)),
-            send_chat_action=lambda chat_id, action, **kw: asyncio.create_task(ctx.bot_send_chat_action(chat_id, action)),
-            send_video=lambda chat_id, video, caption=None, **kw: asyncio.create_task(ctx.bot_send_video(chat_id, video, caption=caption))
-        ))
 
         await responder(dummy_update, ctx)
         return {"type": "text", "text": "\n".join(ctx.resp)}
@@ -1548,7 +1556,6 @@ async def procesar_wa(cid: str, body: str) -> dict:
     else:
         respuesta_ia = await responder_con_openai(body)
         return {"type": "text", "text": respuesta_ia}
-
 
 # 4. Webhook para WhatsApp (usado por Venom)
 # ---------- VENOM WEBHOOK ----------
