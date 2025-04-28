@@ -813,6 +813,207 @@ async def manejar_precio(update, ctx, inventario):
             return True
     return False
 
+    # 🔥 Pregunta 1: ¿cuánto se demora el envío?
+    if any(frase in txt for frase in (
+        "cuanto demora", "cuánto demora", "cuanto tarda", "cuánto tarda",
+        "cuanto se demora", "cuánto se demora", "en cuanto llega", "en cuánto llega",
+        "me llega rapido", "llegan rapido"
+    )):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                "🚚 El tiempo de entrega depende de la ciudad de destino, "
+                "pero generalmente tardan *2 días hábiles* en llegar a la puerta de tu casa.\n\n"
+                "Si los necesitas para *mañana mismo*, podemos enviarlos para reclamar en el "
+                "terminal de transporte de tu ciudad y mañana, después de las 2 p. m., ya los puedes recoger. "
+                "Para esta modalidad de envío solo aplica el *pago anticipado* porque las empresas de buses "
+                "no tienen convenio de pago contra entrega."
+            ),
+            parse_mode="Markdown"
+        )
+        return
+
+    # 🔥 Pregunta 2: ¿tienen pago contra entrega?
+    if any(frase in txt for frase in (
+        "pago contra entrega", "contraentrega", "contra entrega",
+        "pagan al recibir", "puedo pagar al recibir", "tienen contra entrega"
+    )):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                "📦 Por supuesto que tenemos *pago contra entrega*.\n\n"
+                "Para esta modalidad pedimos un *anticipo de $35 000*, que cubre el flete. "
+                "Ese valor se descuenta del precio total.\n\n"
+                "Ejemplo: si las zapatillas cuestan *$219 900* y haces el anticipo, "
+                "cuando lleguen solo le pagas a la transportadora *$184 900*.\n\n"
+                "Solicitamos el anticipo porque, en el pasado, algunos pedidos no se recogían "
+                "y la transportadora nos devolvía las zapatillas, generando pérdidas de envío."
+            ),
+            parse_mode="Markdown"
+        )
+        return
+
+    # 🔥 Pregunta 3: ¿tienen garantía?
+    if any(frase in txt for frase in (
+        "tienen garantia", "tienen garantía", "hay garantía", "hay garantia",
+        "garantía", "garantia", "tienen garantia de fabrica"
+    )):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                "🛡️ ¡Claro que sí! Todos nuestros productos tienen *garantía de 60 días* "
+                "por *pegue* o *defectos de fábrica*.\n\n"
+                "Si llegas a tener algún inconveniente, contáctanos y te ayudaremos a solucionarlo."
+            ),
+            parse_mode="Markdown"
+        )
+        return
+
+    # 🔥 Pregunta 4: ¿cómo sé que no me van a robar?
+    if any(frase in txt for frase in (
+        "no me van a robar", "me van a robar", "es seguro",
+        "como se que es seguro", "no es estafa", "es confiable",
+        "me estafan", "roban por internet", "es real", "desconfío",
+        "no me da confianza", "no confío", "dudas"
+    )):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                "🤝 Entendemos que la confianza es muy importante. "
+                "Te compartimos este breve video para que conozcas más sobre nuestra empresa y puedas comprar tranquilo:"
+            ),
+            parse_mode="Markdown"
+        )
+        video_url = "https://tudominio.com/videos/video_confianza.mp4"
+        await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
+        await ctx.bot.send_video(
+            chat_id=cid,
+            video=video_url,
+            caption="¡Estamos aquí para ayudarte en lo que necesites! 👟✨"
+        )
+        return
+
+    # 🔥 Pregunta 5: ¿dónde están ubicados?
+    if any(frase in txt for frase in (
+        "donde estan ubicados", "donde queda", "ubicacion", "ubicación",
+        "direccion", "dirección", "donde estan", "donde es la tienda",
+        "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
+    )):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                "📍 Estamos en *Bucaramanga, Santander* 💛💚.\n\n"
+                "🏡 *Barrio San Miguel, CLL 52 # 16-74* 🔥💋\n\n"
+                "🚚 Enviamos a *todo el país* con *Servientrega*.\n\n"
+                "Google Maps → https://maps.google.com/?q=7.109500,-73.121597"
+            ),
+            parse_mode="Markdown"
+        )
+        return
+
+    # 🔥 Pregunta 6: ¿son nacionales o importados?
+    if any(frase in txt for frase in (
+        "son nacionales", "son importados", "es nacional o importado",
+        "nacionales o importados", "hecho en colombia", "fabricados en colombia",
+        "son de aqui", "es de colombia", "fabricacion colombiana"
+    )):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                "🇨🇴 Nuestra marca es *100 % colombiana* y las zapatillas "
+                "se elaboran con orgullo en *Bucaramanga* por artesanos locales."
+            ),
+            parse_mode="Markdown"
+        )
+        return
+
+
+    # 🔥 Pregunta 7: ¿son originales?
+    if any(frase in txt for frase in (
+        "son originales", "es original", "originales",
+        "es copia", "son copia", "son replica", "réplica", "imitacion"
+    )):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="✅ ¡Claro! Son *originales*. Somos *X100*, marca 100 % colombiana reconocida por su calidad y diseño.",
+            parse_mode="Markdown"
+        )
+        return
+
+    # 🔥 Pregunta 8: ¿de qué calidad son?
+    if any(frase in txt for frase in (
+        "que calidad son", "de que calidad son", "son buena calidad", "son de buena calidad",
+        "son de mala calidad", "que calidad manejan", "que calidad tienen", "calidad de las zapatillas"
+    )):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="✨ Nuestras zapatillas están elaboradas con *materiales de alta calidad*.\n\n"
+                 "Cada par es fabricado cuidadosamente para asegurar que sean de *calidad AAA* 👟🔝, "
+                 "garantizando comodidad, durabilidad y un excelente acabado.",
+            parse_mode="Markdown"
+        )
+        return
+
+    # 🔥 Pregunta 9: ¿hay descuento si compro 2 pares?
+    if any(frase in txt for frase in (
+        "si compro 2 pares", "dos pares descuento", "descuento por 2 pares",
+        "descuento por dos pares", "me descuentan si compro dos", "descuento si compro dos",
+        "hay descuento por dos", "promocion dos pares", "descuento en 2 pares"
+    )):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="🎉 ¡Claro que sí! Si compras *2 pares* te damos un *10% de descuento adicional* sobre el total.\n\n"
+                 "Aprovecha esta oportunidad para estrenar más y pagar menos 🔥👟👟.",
+            parse_mode="Markdown"
+        )
+        return
+
+    # 🔥 Pregunta 10: ¿manejan precios para mayoristas?
+    if any(frase in txt for frase in (
+        "precio mayorista", "precios para mayoristas", "mayorista", "quiero vender",
+        "puedo venderlos", "descuento para revender", "revender", "comprar para vender",
+        "manejan precios para mayoristas", "mayoreo", "venta al por mayor"
+    )):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="🛍️ ¡Claro que sí! Manejamos *precios para mayoristas* en pedidos de *6 pares en adelante*, "
+                 "sin importar talla ni referencia.\n\n"
+                 "La única condición es que debes venderlos *mínimo al mismo precio* que nosotros para "
+                 "cuidar el mercado y asegurar que tengas un buen margen de utilidad.",
+            parse_mode="Markdown"
+        )
+        return
+
+    # 🔥 Pregunta 11: ¿las tallas son normales o grandes?
+    if any(frase in txt for frase in (
+        "las tallas son normales", "horma normal", "talla normal",
+        "horma grande", "horma pequeña", "tallas grandes", "tallas pequeñas",
+        "las tallas son grandes", "las tallas son pequeñas", "como son las tallas"
+    )):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="👟 Nuestra horma es *normal*. Si calzas talla *40* nacional, te queda bien la *40* de nosotros.\n\n"
+                 "Para mayor seguridad, te recomendamos enviarnos una foto de la *etiqueta interna* de tus tenis actuales "
+                 "(en la lengüeta o costado interno), donde aparece el equivalente en *centímetros*. "
+                 "Así podemos confirmar mejor la talla correcta para ti. 📏✨",
+            parse_mode="Markdown"
+        )
+        return
+
+    # 🔥 Pregunta 12: ¿cuál es la talla más grande que manejan?
+    if any(frase in txt for frase in (
+        "talla mas grande", "talla más grande", "cual es la talla mas grande",
+        "hasta que talla llegan", "mayor talla", "talla maxima", "talla máxima"
+    )):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="📏 La talla más grande que manejamos es:\n\n"
+                 "• *45 Nacional* 🇨🇴\n"
+                 "• *47 Europeo* 🇪🇺\n\n"
+                 "Así que si usas tallas grandes, también tenemos opciones para ti 👟✨.",
+            parse_mode="Markdown"
+        )
+        return
 
 
     # 🔥 NUEVO: Envío de video automático cuando el cliente muestra desconfianza
@@ -1323,271 +1524,56 @@ async def procesar_wa(cid: str, body: str) -> dict:
     # Asegurándonos de que 'txt' siempre tenga algo
     txt = texto if texto else ""  # Si texto es nulo o vacío, asigna vacío a 'txt'
 
-    # 1) Preguntas frecuentes (FAQ)
-    if any(frase in txt for frase in (
-        "cuánto cuesta", "precio", "garantía", "en qué ciudad están", 
-        "pago contra entrega", "envío rápido"
-    )):
-        if "precio" in txt:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="💰 El precio depende del modelo y la talla. ¿Qué modelo te interesa?",
-                reply_markup=menu_botones(["Ver catálogo", "Hacer pedido"])
-            )
-            return
+    class DummyCtx(SimpleNamespace):
+        async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
+        async def bot_send_chat_action(self, chat_id, action, **kw): pass
+        async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ''}")
 
-        if "garantía" in txt:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="🛡️ Todos nuestros productos tienen una garantía de 60 días por defectos de fabricación.",
-                reply_markup=menu_botones(["Hacer pedido", "Ver catálogo"])
-            )
-            return
+    ctx = DummyCtx(resp=[], bot=SimpleNamespace(
+        send_message=lambda chat_id, text, **kw: asyncio.create_task(ctx.bot_send(chat_id, text)),
+        send_chat_action=lambda chat_id, action, **kw: asyncio.create_task(ctx.bot_send_chat_action(chat_id, action)),
+        send_video=lambda chat_id, video, caption=None, **kw: asyncio.create_task(ctx.bot_send_video(chat_id, video, caption=caption))
+    ))
 
-        if "envío rápido" in txt:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="🚚 El tiempo de entrega es generalmente de 2 días hábiles, pero podemos enviarlo más rápido si es necesario.",
-                reply_markup=menu_botones(["Hacer pedido", "Ver catálogo"])
-            )
-            return
+    class DummyMsg(SimpleNamespace):
+        def __init__(self, text, ctx, photo=None, voice=None, audio=None):
+            self.text = text
+            self.photo = photo
+            self.voice = voice
+            self.audio = audio
+            self._ctx = ctx
 
-    # 🔥 Pregunta 1: ¿cuánto se demora el envío?
-    if any(frase in txt for frase in (
-        "cuanto demora", "cuánto demora", "cuanto tarda", "cuánto tarda",
-        "cuanto se demora", "cuánto se demora", "en cuanto llega", "en cuánto llega",
-        "me llega rapido", "llegan rapido"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "🚚 El tiempo de entrega depende de la ciudad de destino, "
-                "pero generalmente tardan *2 días hábiles* en llegar a la puerta de tu casa.\n\n"
-                "Si los necesitas para *mañana mismo*, podemos enviarlos para reclamar en el "
-                "terminal de transporte de tu ciudad y mañana, después de las 2 p. m., ya los puedes recoger. "
-                "Para esta modalidad de envío solo aplica el *pago anticipado* porque las empresas de buses "
-                "no tienen convenio de pago contra entrega."
-            ),
-            parse_mode="Markdown"
-        )
-        return
+        async def reply_text(self, text, **kw):
+            self._ctx.resp.append(text)
 
-    # 🔥 Pregunta 2: ¿tienen pago contra entrega?
-    if any(frase in txt for frase in (
-        "pago contra entrega", "contraentrega", "contra entrega",
-        "pagan al recibir", "puedo pagar al recibir", "tienen contra entrega"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "📦 Por supuesto que tenemos *pago contra entrega*.\n\n"
-                "Para esta modalidad pedimos un *anticipo de $35 000*, que cubre el flete. "
-                "Ese valor se descuenta del precio total.\n\n"
-                "Ejemplo: si las zapatillas cuestan *$219 900* y haces el anticipo, "
-                "cuando lleguen solo le pagas a la transportadora *$184 900*.\n\n"
-                "Solicitamos el anticipo porque, en el pasado, algunos pedidos no se recogían "
-                "y la transportadora nos devolvía las zapatillas, generando pérdidas de envío."
-            ),
-            parse_mode="Markdown"
-        )
-        return
+    dummy_msg = DummyMsg(text=body, ctx=ctx, photo=None, voice=None, audio=None)
+    dummy_update = SimpleNamespace(
+        message=dummy_msg,
+        effective_chat=SimpleNamespace(id=cid)
+    )
 
-    # 🔥 Pregunta 3: ¿tienen garantía?
-    if any(frase in txt for frase in (
-        "tienen garantia", "tienen garantía", "hay garantía", "hay garantia",
-        "garantía", "garantia", "tienen garantia de fabrica"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "🛡️ ¡Claro que sí! Todos nuestros productos tienen *garantía de 60 días* "
-                "por *pegue* o *defectos de fábrica*.\n\n"
-                "Si llegas a tener algún inconveniente, contáctanos y te ayudaremos a solucionarlo."
-            ),
-            parse_mode="Markdown"
-        )
-        return
-
-
-    # 🔥 Pregunta 4: ¿cómo sé que no me van a robar?
-    if any(frase in txt for frase in (
-        "no me van a robar", "me van a robar", "es seguro",
-        "como se que es seguro", "no es estafa", "es confiable",
-        "me estafan", "roban por internet", "es real", "desconfío",
-        "no me da confianza", "no confío", "dudas"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "🤝 Entendemos que la confianza es muy importante. "
-                "Te compartimos este breve video para que conozcas más sobre nuestra empresa y puedas comprar tranquilo:"
-            ),
-            parse_mode="Markdown"
-        )
-        video_url = "https://tudominio.com/videos/video_confianza.mp4"
-        await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
-        await ctx.bot.send_video(
-            chat_id=cid,
-            video=video_url,
-            caption="¡Estamos aquí para ayudarte en lo que necesites! 👟✨"
-        )
-        return
-
-    # 🔥 Pregunta 5: ¿dónde están ubicados?
-    if any(frase in txt for frase in (
-        "donde estan ubicados", "donde queda", "ubicacion", "ubicación",
-        "direccion", "dirección", "donde estan", "donde es la tienda",
-        "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "📍 Estamos en *Bucaramanga, Santander* 💛💚.\n\n"
-                "🏡 *Barrio San Miguel, CLL 52 # 16-74* 🔥💋\n\n"
-                "🚚 Enviamos a *todo el país* con *Servientrega*.\n\n"
-                "Google Maps → https://maps.google.com/?q=7.109500,-73.121597"
-            ),
-            parse_mode="Markdown"
-        )
-        return
-
-    # 🔥 Pregunta 6: ¿son nacionales o importados?
-    if any(frase in txt for frase in (
-        "son nacionales", "son importados", "es nacional o importado",
-        "nacionales o importados", "hecho en colombia", "fabricados en colombia",
-        "son de aqui", "es de colombia", "fabricacion colombiana"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "🇨🇴 Nuestra marca es *100 % colombiana* y las zapatillas "
-                "se elaboran con orgullo en *Bucaramanga* por artesanos locales."
-            ),
-            parse_mode="Markdown"
-        )
-        return
-
-
-    # 🔥 Pregunta 7: ¿son originales?
-    if any(frase in txt for frase in (
-        "son originales", "es original", "originales",
-        "es copia", "son copia", "son replica", "réplica", "imitacion"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="✅ ¡Claro! Son *originales*. Somos *X100*, marca 100 % colombiana reconocida por su calidad y diseño.",
-            parse_mode="Markdown"
-        )
-        return
-
-    # 🔥 Pregunta 8: ¿de qué calidad son?
-    if any(frase in txt for frase in (
-        "que calidad son", "de que calidad son", "son buena calidad", "son de buena calidad",
-        "son de mala calidad", "que calidad manejan", "que calidad tienen", "calidad de las zapatillas"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="✨ Nuestras zapatillas están elaboradas con *materiales de alta calidad*.\n\n"
-                 "Cada par es fabricado cuidadosamente para asegurar que sean de *calidad AAA* 👟🔝, "
-                 "garantizando comodidad, durabilidad y un excelente acabado.",
-            parse_mode="Markdown"
-        )
-        return
-
-    # 🔥 Pregunta 9: ¿hay descuento si compro 2 pares?
-    if any(frase in txt for frase in (
-        "si compro 2 pares", "dos pares descuento", "descuento por 2 pares",
-        "descuento por dos pares", "me descuentan si compro dos", "descuento si compro dos",
-        "hay descuento por dos", "promocion dos pares", "descuento en 2 pares"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="🎉 ¡Claro que sí! Si compras *2 pares* te damos un *10% de descuento adicional* sobre el total.\n\n"
-                 "Aprovecha esta oportunidad para estrenar más y pagar menos 🔥👟👟.",
-            parse_mode="Markdown"
-        )
-        return
-
-    # 🔥 Pregunta 10: ¿manejan precios para mayoristas?
-    if any(frase in txt for frase in (
-        "precio mayorista", "precios para mayoristas", "mayorista", "quiero vender",
-        "puedo venderlos", "descuento para revender", "revender", "comprar para vender",
-        "manejan precios para mayoristas", "mayoreo", "venta al por mayor"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="🛍️ ¡Claro que sí! Manejamos *precios para mayoristas* en pedidos de *6 pares en adelante*, "
-                 "sin importar talla ni referencia.\n\n"
-                 "La única condición es que debes venderlos *mínimo al mismo precio* que nosotros para "
-                 "cuidar el mercado y asegurar que tengas un buen margen de utilidad.",
-            parse_mode="Markdown"
-        )
-        return
-
-    # 🔥 Pregunta 11: ¿las tallas son normales o grandes?
-    if any(frase in txt for frase in (
-        "las tallas son normales", "horma normal", "talla normal",
-        "horma grande", "horma pequeña", "tallas grandes", "tallas pequeñas",
-        "las tallas son grandes", "las tallas son pequeñas", "como son las tallas"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="👟 Nuestra horma es *normal*. Si calzas talla *40* nacional, te queda bien la *40* de nosotros.\n\n"
-                 "Para mayor seguridad, te recomendamos enviarnos una foto de la *etiqueta interna* de tus tenis actuales "
-                 "(en la lengüeta o costado interno), donde aparece el equivalente en *centímetros*. "
-                 "Así podemos confirmar mejor la talla correcta para ti. 📏✨",
-            parse_mode="Markdown"
-        )
-        return
-
-    # 🔥 Pregunta 12: ¿cuál es la talla más grande que manejan?
-    if any(frase in txt for frase in (
-        "talla mas grande", "talla más grande", "cual es la talla mas grande",
-        "hasta que talla llegan", "mayor talla", "talla maxima", "talla máxima"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="📏 La talla más grande que manejamos es:\n\n"
-                 "• *45 Nacional* 🇨🇴\n"
-                 "• *47 Europeo* 🇪🇺\n\n"
-                 "Así que si usas tallas grandes, también tenemos opciones para ti 👟✨.",
-            parse_mode="Markdown"
-        )
-        return
-
-    # 2) Procesamiento de imagen
-    if menciona_imagen(txt):
-        if est["fase"] != "esperando_imagen":
-            est["fase"] = "esperando_imagen"
-            await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
-        return
-
-    # 3) Reinicio explícito primero
-    if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
+    # 🔥 Aseguramos que el estado exista
+    if cid not in estado_usuario:
         reset_estado(cid)
-        await saludo_bienvenida(update, ctx)
-        return
 
-    # 4) Continuar con otros flujos del bot
-    # Lógica existente para referencias, imágenes, precios, etc.
-    if await manejar_precio(update, ctx, inventario):
-        return
+    try:
+        # 🔥 Intenta responder con el flujo normal del BOT
+        await responder(dummy_update, ctx)
 
-    # Fallback de IA si no se encuentra una coincidencia
-    respuesta_fallback = await consultar_ia_fallback(txt_raw)
-    if respuesta_fallback:
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=respuesta_fallback,
-            reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"]),
-        )
-    else:
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="😅 No logré entender tu solicitud. ¿Quieres volver al menú?",
-            reply_markup=menu_botones(["Volver al menú"]),
-        )
-    return
+        if ctx.resp:
+            print(f"[DEBUG] BOT respondió correctamente: {ctx.resp}")
+            return {"type": "text", "text": "\n".join(ctx.resp)}
+        else:
+            print(f"[DEBUG] BOT no respondió nada, se usará IA para el mensaje: {body}")
+            respuesta_ia = await responder_con_openai(body)
+            return {"type": "text", "text": respuesta_ia}
+
+    except Exception as e:
+        print(f"🔥 Error interno en procesar_wa(): {e}")
+        print(f"[DEBUG] Usando IA como fallback por error de bot en mensaje: {body}")
+        respuesta_ia = await responder_con_openai(body)
+        return {"type": "text", "text": respuesta_ia}
+
 # 4. Webhook para WhatsApp (usado por Venom)
 # ---------- VENOM WEBHOOK ----------
 @api.post("/venom")
