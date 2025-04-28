@@ -1551,21 +1551,24 @@ async def procesar_wa(cid: str, body: str) -> dict:
 
     # 🔥 Aseguramos que el estado exista
     if cid not in estado_usuario:
+        print(f"[DEBUG] Nuevo usuario, reseteando estado para {cid}.")
         reset_estado(cid)
 
     try:
-        # 🔥 Intenta responder con el flujo normal del BOT
+        print(f"[DEBUG] Intentando responder como BOT al mensaje: {body}")
         await responder(dummy_update, ctx)
 
         if ctx.resp:
+            print(f"[DEBUG] BOT respondió correctamente: {ctx.resp}")
             return {"type": "text", "text": "\n".join(ctx.resp)}
         else:
-            # 🔥 Si el bot no respondió nada, ahí sí usa IA
+            print(f"[DEBUG] BOT no respondió nada, se usará IA para el mensaje: {body}")
             respuesta_ia = await responder_con_openai(body)
             return {"type": "text", "text": respuesta_ia}
 
     except Exception as e:
-        print(f"🔥 Error en procesar_wa: {e}")
+        print(f"🔥 Error interno en procesar_wa(): {e}")
+        print(f"[DEBUG] Usando IA como fallback por error de bot en mensaje: {body}")
         respuesta_ia = await responder_con_openai(body)
         return {"type": "text", "text": respuesta_ia}
 
