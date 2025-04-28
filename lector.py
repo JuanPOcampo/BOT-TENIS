@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from PIL import Image
 import imagehash
 from fastapi import FastAPI, Request
-from openai import AsyncOpenAI
+import openai
 
 # Google Drive
 from google.oauth2 import service_account
