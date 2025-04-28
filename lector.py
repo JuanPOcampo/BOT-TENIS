@@ -601,7 +601,7 @@ def generate_sale_id() -> str:
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
 
-    # 1) Primer contacto: saludo y se queda en esperando_comando
+    # 1) Primer contacto: saludo inicial y creación de estado
     if cid not in estado_usuario:
         reset_estado(cid)
         await update.message.reply_text(
@@ -613,17 +613,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 2) Estado e inventario
+    # 2) Estado actual e inventario
     est = estado_usuario[cid]
     inv = obtener_inventario()
 
-    # 3) Captura y normaliza el texto SIN else
-
+    # 3) Captura y normaliza texto del usuario
     txt_raw = update.message.text or ""
     txt = normalize(txt_raw)
 
-
-    # 3) Reinicio explícito (/start, inicio, etc.) ────────────────
+    # 4) Reinicio explícito si escribe /start o similares
     if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
         reset_estado(cid)
         await update.message.reply_text(
@@ -634,7 +632,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ])
         )
         return
-    # 🔥 Pregunta 1: ¿cuánto se demora el envío?
+
+    # ─────────── Preguntas frecuentes (FAQ) ───────────
+
+    # FAQ 1: ¿Cuánto demora el envío?
     if any(frase in txt for frase in (
         "cuanto demora", "cuánto demora", "cuanto tarda", "cuánto tarda",
         "cuanto se demora", "cuánto se demora", "en cuanto llega", "en cuánto llega",
@@ -644,17 +645,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             chat_id=cid,
             text=(
                 "🚚 El tiempo de entrega depende de la ciudad de destino, "
-                "pero generalmente tardan *2 días hábiles* en llegar a la puerta de tu casa.\n\n"
-                "Si los necesitas para *mañana mismo*, podemos enviarlos para reclamar en el "
-                "terminal de transporte de tu ciudad y mañana, después de las 2 p. m., ya los puedes recoger. "
-                "Para esta modalidad de envío solo aplica el *pago anticipado* porque las empresas de buses "
-                "no tienen convenio de pago contra entrega."
+                "pero generalmente tarda *2 días hábiles* en llegar.\n\n"
+                "Si lo necesitas para *mañana mismo*, podemos enviarlo al terminal de transporte. "
+                "En ese caso aplica *pago anticipado* (no contra entrega)."
             ),
             parse_mode="Markdown"
         )
         return
 
-    # 🔥 Pregunta 2: ¿tienen pago contra entrega?
+    # FAQ 2: ¿Tienen pago contra entrega?
     if any(frase in txt for frase in (
         "pago contra entrega", "contraentrega", "contra entrega",
         "pagan al recibir", "puedo pagar al recibir", "tienen contra entrega"
@@ -662,19 +661,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(
             chat_id=cid,
             text=(
-                "📦 Por supuesto que tenemos *pago contra entrega*.\n\n"
-                "Para esta modalidad pedimos un *anticipo de $35 000*, que cubre el flete. "
-                "Ese valor se descuenta del precio total.\n\n"
-                "Ejemplo: si las zapatillas cuestan *$219 900* y haces el anticipo, "
-                "cuando lleguen solo le pagas a la transportadora *$184 900*.\n\n"
-                "Solicitamos el anticipo porque, en el pasado, algunos pedidos no se recogían "
-                "y la transportadora nos devolvía las zapatillas, generando pérdidas de envío."
+                "📦 ¡Claro que sí! Tenemos *pago contra entrega*.\n\n"
+                "Pedimos un *anticipo de $35 000* que cubre el envío. "
+                "Ese valor se descuenta del precio total cuando recibes el pedido."
             ),
             parse_mode="Markdown"
         )
         return
 
-    # 🔥 Pregunta 3: ¿tienen garantía?
+    # FAQ 3: ¿Tienen garantía?
     if any(frase in txt for frase in (
         "tienen garantia", "tienen garantía", "hay garantía", "hay garantia",
         "garantía", "garantia", "tienen garantia de fabrica"
@@ -682,30 +677,30 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(
             chat_id=cid,
             text=(
-                "🛡️ ¡Claro que sí! Todos nuestros productos tienen *garantía de 60 días* "
-                "por *pegue* o *defectos de fábrica*.\n\n"
-                "Si llegas a tener algún inconveniente, contáctanos y te ayudaremos a solucionarlo."
+                "🛡️ Todos nuestros productos tienen *garantía de 60 días* "
+                "por defectos de fábrica o problemas de pegado.\n\n"
+                "Cualquier inconveniente, estamos para ayudarte."
             ),
             parse_mode="Markdown"
         )
         return
 
-    # 🔥 Pregunta 4: ¿cómo sé que no me van a robar?
+    # FAQ 4: ¿Cómo sé que no me van a robar?
     if any(frase in txt for frase in (
         "no me van a robar", "me van a robar", "es seguro",
         "como se que es seguro", "no es estafa", "es confiable",
         "me estafan", "roban por internet", "es real", "desconfío",
         "no me da confianza", "no confío", "dudas"
     )):
+        video_url = "https://tudominio.com/videos/video_confianza.mp4"
         await ctx.bot.send_message(
             chat_id=cid,
             text=(
-                "🤝 Entendemos que la confianza es muy importante. "
-                "Te compartimos este breve video para que conozcas más sobre nuestra empresa y puedas comprar tranquilo:"
+                "🤝 Entendemos tu preocupación. "
+                "Te compartimos este video para que veas que somos una tienda real y seria."
             ),
             parse_mode="Markdown"
         )
-        video_url = "https://tudominio.com/videos/video_confianza.mp4"
         await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
         await ctx.bot.send_video(
             chat_id=cid,
@@ -714,7 +709,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🔥 Pregunta 5: ¿dónde están ubicados?
+    # FAQ 5: ¿Dónde están ubicados?
     if any(frase in txt for frase in (
         "donde estan ubicados", "donde queda", "ubicacion", "ubicación",
         "direccion", "dirección", "donde estan", "donde es la tienda",
@@ -723,16 +718,16 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(
             chat_id=cid,
             text=(
-                "📍 Estamos en *Bucaramanga, Santander* 💛💚.\n\n"
-                "🏡 *Barrio San Miguel, CLL 52 # 16-74* 🔥💋\n\n"
-                "🚚 Enviamos a *todo el país* con *Servientrega*.\n\n"
-                "Google Maps → https://maps.google.com/?q=7.109500,-73.121597"
+                "📍 Estamos en *Bucaramanga, Santander*.\n\n"
+                "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
+                "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
+                "Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
             ),
             parse_mode="Markdown"
         )
         return
 
-    # 🔥 Pregunta 6: ¿son nacionales o importados?
+    # FAQ 6: ¿Son nacionales o importados?
     if any(frase in txt for frase in (
         "son nacionales", "son importados", "es nacional o importado",
         "nacionales o importados", "hecho en colombia", "fabricados en colombia",
@@ -748,8 +743,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-
-    # 🔥 Pregunta 7: ¿son originales?
+    # FAQ 7: ¿Son originales?
     if any(frase in txt for frase in (
         "son originales", "es original", "originales",
         "es copia", "son copia", "son replica", "réplica", "imitacion"
@@ -761,21 +755,23 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🔥 Pregunta 8: ¿de qué calidad son?
+    # FAQ 8: ¿De qué calidad son?
     if any(frase in txt for frase in (
         "que calidad son", "de que calidad son", "son buena calidad", "son de buena calidad",
         "son de mala calidad", "que calidad manejan", "que calidad tienen", "calidad de las zapatillas"
     )):
         await ctx.bot.send_message(
             chat_id=cid,
-            text="✨ Nuestras zapatillas están elaboradas con *materiales de alta calidad*.\n\n"
-                 "Cada par es fabricado cuidadosamente para asegurar que sean de *calidad AAA* 👟🔝, "
-                 "garantizando comodidad, durabilidad y un excelente acabado.",
+            text=(
+                "✨ Nuestras zapatillas están elaboradas con *materiales de alta calidad*.\n\n"
+                "Cada par se fabrica cuidadosamente para asegurar *calidad AAA* 👟🔝, "
+                "garantizando comodidad, durabilidad y excelente acabado."
+            ),
             parse_mode="Markdown"
         )
         return
 
-    # 🔥 Pregunta 9: ¿hay descuento si compro 2 pares?
+    # FAQ 9: ¿Hay descuento si compro 2 pares?
     if any(frase in txt for frase in (
         "si compro 2 pares", "dos pares descuento", "descuento por 2 pares",
         "descuento por dos pares", "me descuentan si compro dos", "descuento si compro dos",
@@ -783,13 +779,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )):
         await ctx.bot.send_message(
             chat_id=cid,
-            text="🎉 ¡Claro que sí! Si compras *2 pares* te damos un *10% de descuento adicional* sobre el total.\n\n"
-                 "Aprovecha esta oportunidad para estrenar más y pagar menos 🔥👟👟.",
+            text=(
+                "🎉 ¡Sí! Si compras *2 pares* te damos un *10% de descuento adicional* sobre el total.\n\n"
+                "¡Aprovecha para estrenar más y pagar menos! 🔥👟👟"
+            ),
             parse_mode="Markdown"
         )
         return
 
-    # 🔥 Pregunta 10: ¿manejan precios para mayoristas?
+    # FAQ 10: ¿Manejan precios para mayoristas?
     if any(frase in txt for frase in (
         "precio mayorista", "precios para mayoristas", "mayorista", "quiero vender",
         "puedo venderlos", "descuento para revender", "revender", "comprar para vender",
@@ -797,15 +795,16 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )):
         await ctx.bot.send_message(
             chat_id=cid,
-            text="🛍️ ¡Claro que sí! Manejamos *precios para mayoristas* en pedidos de *6 pares en adelante*, "
-                 "sin importar talla ni referencia.\n\n"
-                 "La única condición es que debes venderlos *mínimo al mismo precio* que nosotros para "
-                 "cuidar el mercado y asegurar que tengas un buen margen de utilidad.",
+            text=(
+                "🛍️ ¡Claro! Manejamos *precios para mayoristas* en pedidos de *6 pares en adelante*, "
+                "sin importar tallas ni referencias.\n\n"
+                "Condición: vender mínimo al mismo precio que nosotros para cuidar el mercado."
+            ),
             parse_mode="Markdown"
         )
         return
 
-    # 🔥 Pregunta 11: ¿las tallas son normales o grandes?
+    # FAQ 11: ¿Las tallas son normales o grandes?
     if any(frase in txt for frase in (
         "las tallas son normales", "horma normal", "talla normal",
         "horma grande", "horma pequeña", "tallas grandes", "tallas pequeñas",
@@ -813,44 +812,42 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )):
         await ctx.bot.send_message(
             chat_id=cid,
-            text="👟 Nuestra horma es *normal*. Si calzas talla *40* nacional, te queda bien la *40* de nosotros.\n\n"
-                 "Para mayor seguridad, te recomendamos enviarnos una foto de la *etiqueta interna* de tus tenis actuales "
-                 "(en la lengüeta o costado interno), donde aparece el equivalente en *centímetros*. "
-                 "Así podemos confirmar mejor la talla correcta para ti. 📏✨",
+            text=(
+                "👟 Nuestra horma es *normal*. Si calzas talla *40* nacional, te queda bien la *40* de nosotros.\n\n"
+                "Para mayor seguridad, puedes enviarnos una foto de la *etiqueta interna* de tus tenis actuales 📏✨."
+            ),
             parse_mode="Markdown"
         )
         return
 
-    # 🔥 Pregunta 12: ¿cuál es la talla más grande que manejan?
+    # FAQ 12: ¿Cuál es la talla más grande que manejan?
     if any(frase in txt for frase in (
         "talla mas grande", "talla más grande", "cual es la talla mas grande",
         "hasta que talla llegan", "mayor talla", "talla maxima", "talla máxima"
     )):
         await ctx.bot.send_message(
             chat_id=cid,
-            text="📏 La talla más grande que manejamos es:\n\n"
-                 "• *45 Nacional* 🇨🇴\n"
-                 "• *47 Europeo* 🇪🇺\n\n"
-                 "Así que si usas tallas grandes, también tenemos opciones para ti 👟✨.",
+            text=(
+                "📏 La talla más grande que manejamos es:\n\n"
+                "• *45 Nacional* 🇨🇴\n"
+                "• *47 Europeo* 🇪🇺\n\n"
+                "¡También tenemos opciones para pies grandes! 👟✨"
+            ),
             parse_mode="Markdown"
         )
         return
 
-    if update.message.photo:                   # ← ¡Ahora sí bien!
-        # 1) Descarga la foto a disco
+    # 📷 Si el usuario envía una foto (detectamos modelo automáticamente)
+    if update.message.photo:
         f = await update.message.photo[-1].get_file()
         tmp = os.path.join("temp", f"{cid}.jpg")
         os.makedirs("temp", exist_ok=True)
         await f.download_to_drive(tmp)
 
-
-        # 2) Identifica modelo desde Drive
         ref = identify_model_from_stream(tmp)
         os.remove(tmp)
 
-        # 3) Desempaqueta directamente MARCA_MODELO_COLOR
         if ref:
-            # ref viene como "DS_277_TATATA"
             marca, modelo, color = ref.split('_')
             est.update({
                 "marca": marca,
@@ -867,14 +864,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reset_estado(cid)
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="No reconocí el modelo. /start para reiniciar.",
+                text="😕 No reconocí el modelo. Escribe /start para reiniciar.",
                 parse_mode="Markdown"
             )
         return
 
-
-     # Confirmación imagen
-    if est["fase"] == "imagen_detectada":
+    # 📷 Confirmación si la imagen detectada fue correcta
+    if est.get("fase") == "imagen_detectada":
         if txt in ("si", "s"):
             est["fase"] = "esperando_talla"
             await ctx.bot.send_message(
@@ -885,16 +881,16 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ),
             )
         else:
+            reset_estado(cid)
             await ctx.bot.send_message(
                 chat_id=cid,
                 text="Cancelado. /start para reiniciar.",
                 parse_mode="Markdown"
             )
-            reset_estado(cid)
         return
 
-    # Selección manual de modelo/color/talla
-    if est["fase"] == "esperando_modelo":
+    # 🛒 Flujo manual si está buscando modelo
+    if est.get("fase") == "esperando_modelo":
         modelos = obtener_modelos_por_marca(inv, est["marca"])
         if txt in map(normalize, modelos):
             est["modelo"] = next(m for m in modelos if normalize(m) == txt)
@@ -914,7 +910,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    if est["fase"] == "esperando_color":
+    # 🎨 Elegir color del modelo
+    if est.get("fase") == "esperando_color":
         colores = obtener_colores_por_modelo(inv, est["marca"], est["modelo"])
         if txt in map(normalize, colores):
             est["color"] = next(c for c in colores if normalize(c) == txt)
@@ -943,60 +940,59 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 reply_markup=menu_botones(colores),
             )
         return
-    # Datos del usuario y pago
-    if est["fase"] == "esperando_talla":
+    # 👟 Elegir talla
+    if est.get("fase") == "esperando_talla":
         tallas = obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
         talla_detectada = detectar_talla(txt_raw, tallas)
-        
+
         if talla_detectada:
             est["talla"] = talla_detectada
             est["fase"] = "esperando_nombre"
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="¿Tu nombre?",
+                text="¿Tu nombre completo? 👤",
                 parse_mode="Markdown"
             )
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text=f"Las tallas disponibles para {est['modelo']} color {est['color']} son: {', '.join(tallas)}",
-                parse_mode="Markdown"
-            )
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="Elige una talla válida.",
+                text=f"⚠️ Las tallas disponibles para {est['modelo']} color {est['color']} son:\n{', '.join(tallas)}",
+                parse_mode="Markdown",
                 reply_markup=menu_botones(tallas),
             )
         return
 
-    if est["fase"] == "esperando_nombre":
+    # ✏️ Nombre del cliente
+    if est.get("fase") == "esperando_nombre":
         est["nombre"] = txt_raw
         est["fase"] = "esperando_correo"
         await ctx.bot.send_message(
             chat_id=cid,
-            text="¿Tu correo? 📧",
+            text="¿Cuál es tu correo electrónico? 📧",
             parse_mode="Markdown"
         )
         return
 
-    if est["fase"] == "esperando_correo":
+    # 📧 Correo del cliente
+    if est.get("fase") == "esperando_correo":
         if re.match(r"[^@]+@[^@]+\.[^@]+", txt_raw):
             est["correo"] = txt_raw
             est["fase"] = "esperando_telefono"
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="¿Tu teléfono? 📱",
+                text="¿Tu número de teléfono? 📱",
                 parse_mode="Markdown"
             )
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="Correo inválido. 📧 Intenta de nuevo.",
+                text="⚠️ Correo inválido. Intenta de nuevo.",
                 parse_mode="Markdown"
             )
         return
 
-    if est["fase"] == "esperando_telefono":
+    # 📞 Teléfono del cliente
+    if est.get("fase") == "esperando_telefono":
         if re.match(r"^\+?\d{7,15}$", txt_raw):
             est["telefono"] = txt_raw
             est["fase"] = "esperando_ciudad"
@@ -1008,32 +1004,35 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="Teléfono inválido. 📱 Intenta de nuevo.",
+                text="⚠️ Teléfono inválido. Intenta de nuevo.",
                 parse_mode="Markdown"
             )
         return
 
-    if est["fase"] == "esperando_ciudad":
+    # 🌆 Ciudad del cliente
+    if est.get("fase") == "esperando_ciudad":
         est["ciudad"] = txt_raw
         est["fase"] = "esperando_provincia"
         await ctx.bot.send_message(
             chat_id=cid,
-            text="¿Provincia o departamento? 🏞️",
+            text="¿En qué departamento o provincia estás? 🏞️",
             parse_mode="Markdown"
         )
         return
 
-    if est["fase"] == "esperando_provincia":
+    # 🏞️ Provincia del cliente
+    if est.get("fase") == "esperando_provincia":
         est["provincia"] = txt_raw
         est["fase"] = "esperando_direccion"
         await ctx.bot.send_message(
             chat_id=cid,
-            text="¿Dirección de envío? 🏡",
+            text="¿Dirección exacta de envío? 🏡",
             parse_mode="Markdown"
         )
         return
 
-    if est["fase"] == "esperando_direccion":
+    # 🏡 Dirección de envío
+    if est.get("fase") == "esperando_direccion":
         est["direccion"] = txt_raw
         precio = next((i["precio"] for i in inv
                        if normalize(i["marca"]) == normalize(est["marca"])
@@ -1070,43 +1069,30 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "esperando_pago"
         return
 
-    if est["fase"] == "esperando_pago":
+    # 💳 Método de pago
+    if est.get("fase") == "esperando_pago":
         opt = normalize(txt_raw.replace(" ", ""))
         resumen = est["resumen"]
+
         if opt == "transferencia":
             est["fase"] = "esperando_comprobante"
             resumen["Pago"] = "Transferencia"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="Envía la foto de tu comprobante. 📸",
-                parse_mode="Markdown"
-            )
+            await ctx.bot.send_message(chat_id=cid, text="Envía la foto de tu comprobante. 📸")
         elif opt == "qr":
             est["fase"] = "esperando_comprobante"
             resumen["Pago"] = "QR"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="Escanea el QR y envía la foto. 📸",
-                parse_mode="Markdown"
-            )
+            await ctx.bot.send_message(chat_id=cid, text="Escanea el QR y envía la foto. 📸")
         elif opt == "contraentrega":
             resumen["Pago"] = "Contra entrega"
             registrar_orden(resumen)
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="✅ Pedido registrado para *Contra entrega*. ¡Gracias!",
-                parse_mode="Markdown"
-            )
+            await ctx.bot.send_message(chat_id=cid, text="✅ Pedido registrado para *Contra entrega*. ¡Gracias!", parse_mode="Markdown")
             reset_estado(cid)
         else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="Método de pago inválido. Elige uno correcto.",
-                parse_mode="Markdown"
-            )
+            await ctx.bot.send_message(chat_id=cid, text="⚠️ Método de pago inválido. Elige uno correcto.")
         return
 
-    if est["fase"] == "esperando_comprobante" and update.message.photo:
+    # 📸 Recibir comprobante de pago
+    if est.get("fase") == "esperando_comprobante" and update.message.photo:
         f = await update.message.photo[-1].get_file()
         tmp = os.path.join("temp", f"{cid}_proof.jpg")
         os.makedirs("temp", exist_ok=True)
@@ -1125,24 +1111,24 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         reset_estado(cid)
         return
-    # ——— Rastrear pedido ———
+
+    # 🚚 Rastrear pedido
     if est.get("fase") == "esperando_numero_rastreo":
         await ctx.bot.send_message(
             chat_id=cid,
-            text="Guía para rastrear: https://www.instagram.com/juanp_ocampo/",
+            text="📦 Puedes rastrear tu pedido aquí:\nhttps://www.instagram.com/juanp_ocampo/",
             parse_mode="Markdown"
         )
         reset_estado(cid)
         return
 
-
-    # ——— Devolución ———
+    # 🔄 Solicitud de devolución
     if est.get("fase") == "esperando_numero_devolucion":
         est["referencia"] = txt_raw.strip()
         est["fase"] = "esperando_motivo_devolucion"
         await ctx.bot.send_message(
             chat_id=cid,
-            text="Motivo de devolución:",
+            text="📝 ¿Cuál es el motivo de la devolución?",
             parse_mode="Markdown"
         )
         return
@@ -1150,18 +1136,18 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if est.get("fase") == "esperando_motivo_devolucion":
         enviar_correo(
             EMAIL_DEVOLUCIONES,
-            f"Devolución {NOMBRE_NEGOCIO}",
+            f"Solicitud de Devolución {NOMBRE_NEGOCIO}",
             f"Venta: {est['referencia']}\nMotivo: {txt_raw}"
         )
         await ctx.bot.send_message(
             chat_id=cid,
-            text="Solicitud enviada exitosamente. ✅",
+            text="✅ Solicitud de devolución enviada exitosamente.",
             parse_mode="Markdown"
         )
         reset_estado(cid)
         return
 
-    # 2) Procesamos audio o texto plano ───────────────────────────
+    # 🎙️ Procesar audio
     if update.message.voice or update.message.audio:
         fobj = update.message.voice or update.message.audio
         tg_file = await fobj.get_file()
@@ -1169,79 +1155,32 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await tg_file.download_to_drive(local_path)
         txt_raw = await transcribe_audio(local_path)
         os.remove(local_path)
+
         if not txt_raw:
             await update.message.reply_text(
                 "Ese audio se escucha muy mal 😕. ¿Podrías enviarlo de nuevo o escribir tu mensaje?",
                 reply_markup=ReplyKeyboardRemove()
             )
             return
+        txt = normalize(txt_raw)
 
-    # 4) Intención global de enviar imagen (en cualquier fase) ────
+    # 🖼️ Intención global de imagen
     if menciona_imagen(txt):
-        if est["fase"] != "esperando_imagen":
+        if est.get("fase") != "esperando_imagen":
             est["fase"] = "esperando_imagen"
             await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
         return
 
-    # 5) Manejar precio por referencia ────────────────────────────
+    # 💬 Manejar precio por referencia
     if await manejar_precio(update, ctx, inv):
         return
 
-# Función para manejar la solicitud de precio por referencia
-PALABRAS_PRECIO = ['precio', 'vale', 'cuesta', 'valor', 'coste', 'precios', 'cuánto']
-
-async def manejar_precio(update, ctx, inventario):
-    cid = update.effective_chat.id
-    mensaje = (update.message.text or "").lower()
-
-    # Busca números en el mensaje (referencias numéricas)
-    numeros = re.findall(r"\b\d+\b", mensaje)
-
-    if numeros:
-        referencia = numeros[0]  # toma solo la primera referencia detectada
-        referencia_normalizada = normalize(referencia)
-
-        # Busca el modelo en inventario
-        modelos_encontrados = [
-            item for item in inventario
-            if referencia_normalizada in normalize(item.get("modelo", "")) and disponible(item)
-        ]
-
-        if modelos_encontrados:
-            respuestas = []
-            for modelo in modelos_encontrados:
-                marca = modelo.get('marca', 'desconocida')
-                modelo_nombre = modelo.get('modelo', 'desconocido')
-                color = modelo.get('color', 'varios colores')
-                precio = modelo.get('precio', 'No disponible')
-                respuestas.append(f"✅ {marca} {modelo_nombre} ({color}) cuesta {precio}.")
-
-            respuesta_final = "\n".join(respuestas)
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=respuesta_final,
-                reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"]),
-                parse_mode="Markdown"
-            )
-            return True
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=f"No encontré productos con la referencia '{referencia}'. ¿Quieres revisar el catálogo?",
-                reply_markup=menu_botones(["Ver catálogo", "Volver al menú"]),
-                parse_mode="Markdown"
-            )
-            return True
-    return False
-
-
-
-    # 🔥 NUEVO: Envío de video automático cuando el cliente muestra desconfianza
+    # 🔒 Video de confianza si desconfía
     if any(frase in txt for frase in (
         "no me fio", "no confio", "es seguro", "como se que no me roban",
         "como se que no me estafan", "desconfio", "no creo", "estafa", "miedo a comprar"
     )):
-        VIDEO_DRIVE_ID = "TU_ID_DEL_VIDEO_DE_CONFIANZA"  # ← recuerda poner el ID real
+        VIDEO_DRIVE_ID = "TU_ID_DEL_VIDEO_DE_CONFIANZA"
         video_url = f"https://drive.google.com/uc?id={VIDEO_DRIVE_ID}"
 
         await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
@@ -1256,23 +1195,7 @@ async def manejar_precio(update, ctx, inventario):
         )
         return
 
-    # 🔥 Validar si realmente se extrajo texto
-    if not txt_raw:
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="❗ No recibí un mensaje válido. ¿Puedes enviarme texto o un audio claro?",
-            reply_markup=ReplyKeyboardRemove(),
-            parse_mode="Markdown"
-        )
-        return
-
-    # 🔥 Reinicio explícito primero
-    if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
-        reset_estado(cid)
-        await saludo_bienvenida(update, ctx)
-        return
-
-    # 🔥 5) Ofrecer videos si los pidió
+    # 🎬 Si pide videos normales
     if any(frase in txt for frase in ("videos", "quiero videos", "ver videos")):
         await ctx.bot.send_message(
             chat_id=cid,
@@ -1289,15 +1212,13 @@ async def manejar_precio(update, ctx, inventario):
         est["fase"] = "esperando_video_referencia"
         return
 
-    # 🔥 6) Si estaba esperando que elija un video
+    # 🎬 Esperar selección de video
     if est.get("fase") == "esperando_video_referencia":
         await enviar_video_referencia(cid, ctx, txt)
         est["fase"] = "inicio"
         return
 
-
-
-    # 🔥 4) Detección automática de referencia (modelo o referencia de 3-4 dígitos)
+    # 🔎 Buscar referencia modelo numérico
     m_ref = re.search(r"(?:referencia|modelo)?\s*(\d{3,4})", txt)
     if m_ref:
         referencia = m_ref.group(1)
@@ -1305,42 +1226,23 @@ async def manejar_precio(update, ctx, inventario):
             it for it in inv
             if referencia in normalize(it.get("modelo", "")) and disponible(it)
         ]
-
         if productos:
-            from collections import defaultdict
-            agrupados = defaultdict(set)
-            for it in productos:
-                key = (
-                    it.get('modelo', 'desconocido'),
-                    it.get('color', 'varios colores'),
-                    it.get('precio', 'No disponible')
-                )
-                agrupados[key].add(str(it.get('talla', '')))
-
             respuesta_final = ""
             for (modelo, color, precio), tallas in agrupados.items():
-                tallas_ordenadas = sorted(tallas, key=lambda t: int(t) if t.isdigit() else t)
-                tallas_str = ", ".join(tallas_ordenadas)
                 respuesta_final += (
                     f"👟 *{modelo}* ({color})\n"
                     f"💲 Precio: *{precio}*\n"
-                    f"Tallas disponibles: {tallas_str}\n\n"
+                    f"Tallas disponibles: {', '.join(sorted(tallas))}\n\n"
                 )
 
             await ctx.bot.send_message(
                 chat_id=cid,
-                text=(
-                    f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
-                    f"{respuesta_final}"
-                    "¿Te gustaría proseguir con la compra?"
-                ),
-                parse_mode="Markdown",
-                reply_markup=menu_botones(["Sí, quiero comprar", "No, gracias"])
+                text=(f"Veo que estás interesado en *{referencia}*:\n\n" + respuesta_final),
+                reply_markup=menu_botones(["Sí, quiero comprar", "No, gracias"]),
+                parse_mode="Markdown"
             )
-
             est["fase"] = "confirmar_compra"
             return
-
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -1349,20 +1251,7 @@ async def manejar_precio(update, ctx, inventario):
             )
             return
 
-    # 🔥 5) Procesar imágenes (cuando el usuario menciona "imagen")
-    if menciona_imagen(txt):
-        if est.get("fase") != "esperando_imagen":
-            est["fase"] = "esperando_imagen"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=CLIP_INSTRUCTIONS,
-                reply_markup=ReplyKeyboardRemove(),
-                parse_mode="Markdown"
-            )
-        return
-
-
-    # 🔥 6) Identificar modelo a partir de la foto recibida
+    # 🖼️ Procesar imagen subida si estaba esperando
     if est.get("fase") == "esperando_imagen" and update.message.photo:
         f = await update.message.photo[-1].get_file()
         tmp = os.path.join("temp", f"{cid}.jpg")
@@ -1394,12 +1283,8 @@ async def manejar_precio(update, ctx, inventario):
             )
         return
 
-    # 🔥 7) Solicitud explícita de precios usando helper manejar_precio
-    if await manejar_precio(update, ctx, inventario):
-        return
-
-    # 🔥 8) Detección de marca escrita por el usuario
-    marcas = obtener_marcas_unicas(inventario)
+    # 🛍️ Detectar marca escrita
+    marcas = obtener_marcas_unicas(inv)
     elegida = next((m for m in marcas if any(t in txt for t in normalize(m).split())), None)
 
     if not elegida:
@@ -1418,7 +1303,7 @@ async def manejar_precio(update, ctx, inventario):
         await ctx.bot.send_message(
             chat_id=cid,
             text=f"¡Genial! Veo que buscas {elegida}. ¿Qué modelo de {elegida} te interesa?",
-            reply_markup=menu_botones(obtener_modelos_por_marca(inventario, elegida)),
+            reply_markup=menu_botones(obtener_modelos_por_marca(inv, elegida)),
         )
         return
 
@@ -1478,6 +1363,56 @@ async def manejar_precio(update, ctx, inventario):
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo"])
         )
     return
+
+# Función para manejar la solicitud de precio por referencia
+PALABRAS_PRECIO = ['precio', 'vale', 'cuesta', 'valor', 'coste', 'precios', 'cuánto']
+
+async def manejar_precio(update, ctx, inventario):
+    cid = update.effective_chat.id
+    mensaje = (update.message.text or "").lower()
+
+    # Busca números en el mensaje (referencias numéricas)
+    numeros = re.findall(r"\b\d+\b", mensaje)
+
+    if numeros:
+        referencia = numeros[0]  # toma solo la primera referencia detectada
+        referencia_normalizada = normalize(referencia)
+
+        # Busca el modelo en inventario
+        modelos_encontrados = [
+            item for item in inventario
+            if referencia_normalizada in normalize(item.get("modelo", "")) and disponible(item)
+        ]
+
+        if modelos_encontrados:
+            respuestas = []
+            for modelo in modelos_encontrados:
+                marca = modelo.get('marca', 'desconocida')
+                modelo_nombre = modelo.get('modelo', 'desconocido')
+                color = modelo.get('color', 'varios colores')
+                precio = modelo.get('precio', 'No disponible')
+                respuestas.append(f"✅ {marca} {modelo_nombre} ({color}) cuesta {precio}.")
+
+            respuesta_final = "\n".join(respuestas)
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=respuesta_final,
+                reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"]),
+                parse_mode="Markdown"
+            )
+            return True
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=f"No encontré productos con la referencia '{referencia}'. ¿Quieres revisar el catálogo?",
+                reply_markup=menu_botones(["Ver catálogo", "Volver al menú"]),
+                parse_mode="Markdown"
+            )
+            return True
+    return False
+
+
+
 
 
    
