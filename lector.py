@@ -1,3 +1,4 @@
+# ——— Librerías estándar de Python ———
 import os
 import io
 import base64
@@ -12,12 +13,15 @@ import unicodedata
 import difflib
 import asyncio
 from types import SimpleNamespace
+
+# ——— Librerías externas ———
 from dotenv import load_dotenv
 from PIL import Image
 import imagehash
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
+import nest_asyncio
 import openai
-
 # Google Drive
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -590,27 +594,182 @@ def generate_sale_id() -> str:
     rnd = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
     return f"VEN-{ts}-{rnd}"
 
-# ——— HANDLERS —————————————————————————————————————————————————————
 
-async def saludo_bienvenida(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await ctx.bot.send_message(
-    chat_id=update.effective_chat.id,
-    text=WELCOME_TEXT,
-        reply_markup=menu_botones([
-            "Hacer pedido", "Enviar imagen", "Ver catálogo", "Rastrear pedido", "Realizar cambio"
-        ],
-)
-)
+# --------------------------------------------------------------------------------------------------
 
-async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    cid = update.effective_chat.id
-    reset_estado(cid)
-    await saludo_bienvenida(update, ctx)
-    estado_usuario[cid]["fase"] = "esperando_comando"
+async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    cid = update.effective_chat.id            # ← se define de primeras
+
+    # 1) Primer contacto: saludo y se queda en esperando_comando
+    if cid not in estado_usuario:
+        reset_estado(cid)
+        await update.message.reply_text(
+            WELCOME_TEXT,
+            reply_markup=menu_botones([
+                "Hacer pedido", "Enviar imagen", "Ver catálogo",
+                "Rastrear pedido", "Realizar cambio"
+            ])
+        )
+        return                                 # ← esperamos el siguiente mensaje
+
+    est = estado_usuario[cid]                  # ← ya existe
+    inv = obtener_inventario()                 # ← cache de inventario
+
+    if update.message.photo:                   # ← ¡Ahora sí bien!
+        # 1) Descarga la foto a disco
+        f = await update.message.photo[-1].get_file()
+        tmp = os.path.join("temp", f"{cid}.jpg")
+        os.makedirs("temp", exist_ok=True)
+        await f.download_to_drive(tmp)
+
+
+        # 2) Identifica modelo desde Drive
+        ref = identify_model_from_stream(tmp)
+        os.remove(tmp)
+
+        # 3) Desempaqueta directamente MARCA_MODELO_COLOR
+        if ref:
+            # ref viene como "DS_277_TATATA"
+            marca, modelo, color = ref.split('_')
+            est.update({
+                "marca": marca,
+                "modelo": modelo,
+                "color": color,
+                "fase": "imagen_detectada"
+            })
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=f"La imagen coincide con {marca} {modelo} color {color}. ¿Continuamos? (SI/NO)",
+                reply_markup=menu_botones(["SI", "NO"]),
+            )
+        else:
+            reset_estado(cid)
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="No reconocí el modelo. /start para reiniciar.",
+                parse_mode="Markdown"
+            )
+        return
+
+
+     # Confirmación imagen
+    if est["fase"] == "imagen_detectada":
+        if txt in ("si", "s"):
+            est["fase"] = "esperando_talla"
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="¿Qué talla deseas?",
+                reply_markup=menu_botones(
+                    obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
+                ),
+            )
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="Cancelado. /start para reiniciar.",
+                parse_mode="Markdown"
+            )
+            reset_estado(cid)
+        return
+
+    # Selección manual de modelo/color/talla
+    if est["fase"] == "esperando_modelo":
+        modelos = obtener_modelos_por_marca(inv, est["marca"])
+        if txt in map(normalize, modelos):
+            est["modelo"] = next(m for m in modelos if normalize(m) == txt)
+            est["fase"] = "esperando_color"
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="¿Qué color deseas?",
+                reply_markup=menu_botones(
+                    obtener_colores_por_modelo(inv, est["marca"], est["modelo"])
+                ),
+            )
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="Elige un modelo válido.",
+                reply_markup=menu_botones(modelos),
+            )
+        return
+
+    if est["fase"] == "esperando_color":
+        colores = obtener_colores_por_modelo(inv, est["marca"], est["modelo"])
+        if txt in map(normalize, colores):
+            est["color"] = next(c for c in colores if normalize(c) == txt)
+            est["fase"] = "esperando_talla"
+            tallas = obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=f"Las tallas disponibles para {est['modelo']} color {est['color']} son: {', '.join(tallas)}",
+                parse_mode="Markdown"
+            )
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="¿Qué talla deseas?",
+                reply_markup=menu_botones(tallas),
+            )
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=f"Los colores disponibles para {est['modelo']} son:\n" +
+                     "\n".join(f"- {c}" for c in colores),
+                parse_mode="Markdown"
+            )
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="¿Cuál color te interesa?",
+                reply_markup=menu_botones(colores),
+            )
+        return
+
+    # 2) Procesamos audio o texto plano ───────────────────────────
+    txt_raw = ""
+    if update.message.voice or update.message.audio:
+        fobj = update.message.voice or update.message.audio
+        tg_file = await fobj.get_file()
+        local_path = os.path.join(TEMP_AUDIO_DIR, f"{cid}_{tg_file.file_id}.ogg")
+        await tg_file.download_to_drive(local_path)
+        txt_raw = await transcribe_audio(local_path)
+        os.remove(local_path)
+        if not txt_raw:
+            await update.message.reply_text(
+                "Ese audio se escucha muy mal 😕. ¿Podrías enviarlo de nuevo o escribir tu mensaje?",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+    else:
+        txt_raw = update.message.text or ""
+
+    txt = normalize(txt_raw)
+
+    # 3) Reinicio explícito (/start, inicio, etc.) ────────────────
+    if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
+        reset_estado(cid)
+        await update.message.reply_text(
+            WELCOME_TEXT,
+            reply_markup=menu_botones([
+                "Hacer pedido", "Enviar imagen", "Ver catálogo",
+                "Rastrear pedido", "Realizar cambio"
+            ])
+        )
+        return
+
+    # 4) Intención global de enviar imagen (en cualquier fase) ────
+    if menciona_imagen(txt):
+        if est["fase"] != "esperando_imagen":
+            est["fase"] = "esperando_imagen"
+            await update.message.reply_text(CLIP_INSTRUCTIONS, reply_markup=ReplyKeyboardRemove())
+        return
+
+    # 5) Manejar precio por referencia ────────────────────────────
+    if await manejar_precio(update, ctx, inv):
+        return
+
 # Función para manejar la solicitud de precio por referencia
 PALABRAS_PRECIO = ['precio', 'vale', 'cuesta', 'valor', 'coste', 'precios', 'cuánto']
 
-async def manejar_precio(update, context, inventario):
+async def manejar_precio(update, ctx, inventario):
     cid = update.effective_chat.id
     mensaje = (update.message.text or "").lower()
 
@@ -638,57 +797,21 @@ async def manejar_precio(update, context, inventario):
 
             respuesta_final = "\n".join(respuestas)
             await ctx.bot.send_message(
-    chat_id=update.effective_chat.id,
-    text=respuesta_final,
-                reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"],
-)
-)
+                chat_id=cid,
+                text=respuesta_final,
+                reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"]),
+                parse_mode="Markdown"
+            )
+            return True
         else:
             await ctx.bot.send_message(
-    chat_id=update.effective_chat.id,
-    text=f"No encontré productos con la referencia '{referencia}'. ¿Quieres revisar el catálogo?",
-                reply_markup=menu_botones(["Ver catálogo", "Volver al menú"],
-)
-)
-        return True  # Indica que se procesó el mensaje
-    return False  # Indica que no se encontró referencia numérica
-
-
-
-
-async def fallback_inteligente(txt, update):
-    respuesta_ia = await consultar_ia_fallback(txt)
-    if respuesta_ia:
-        await ctx.bot.send_message(
-    chat_id=update.effective_chat.id,
-    text=respuesta_ia,
-            reply_markup=menu_botones(["Ver catálogo", "Hacer pedido", "Enviar imagen"],
-)
-)
-    else:
-        await ctx.bot.send_message(
-    chat_id=update.effective_chat.id,
-    text="😔 No logré entenderte bien. ¿Quieres volver al inicio?",
-            reply_markup=menu_botones(["Volver al menú"],
-    parse_mode="Markdown"
-)
-)
-
-
-# --------------------------------------------------------------------------------------------------
-
-async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    cid = update.effective_chat.id
-
-    if cid not in estado_usuario:
-        reset_estado(cid)
-        await saludo_bienvenida(update, ctx)
-        return
-
-    est = estado_usuario[cid]
-    inv = obtener_inventario()
-    txt_raw = update.message.text or ""
-    txt = normalize(txt_raw)
+                chat_id=cid,
+                text=f"No encontré productos con la referencia '{referencia}'. ¿Quieres revisar el catálogo?",
+                reply_markup=menu_botones(["Ver catálogo", "Volver al menú"]),
+                parse_mode="Markdown"
+            )
+            return True
+    return False
 
     # 🔥 Pregunta 1: ¿cuánto se demora el envío?
     if any(frase in txt for frase in (
@@ -932,45 +1055,6 @@ async def fallback_inteligente(txt, update):
 )
 )
 
-
-    # 🔥 BLOQUE: Transcripción automática de audios con Whisper
-    txt_raw = ""
-
-    if update.message:
-        if update.message.voice or update.message.audio:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="🎧 Estoy escuchando tu audio... dame un momento.",
-                parse_mode="Markdown"
-            )
-
-            fobj = update.message.voice or update.message.audio
-            tg_file = await fobj.get_file()
-
-            local_path = os.path.join(TEMP_AUDIO_DIR, f"{cid}_{tg_file.file_id}.ogg")
-            os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
-            await tg_file.download_to_drive(local_path)
-
-            txt_raw = await transcribe_audio(local_path)
-            os.remove(local_path)
-
-            if txt_raw:
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text=f"🎙️ Entendí: «{txt_raw}»",
-                    parse_mode="Markdown"
-                )
-            else:
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text="😕 Ese audio no se escuchó claro. ¿Puedes intentarlo nuevamente o escribir tu mensaje?",
-                    reply_markup=ReplyKeyboardRemove(),
-                    parse_mode="Markdown"
-                )
-                return
-        else:
-            txt_raw = update.message.text or ""
-
     # 🔥 Validar si realmente se extrajo texto
     if not txt_raw:
         await ctx.bot.send_message(
@@ -1130,21 +1214,6 @@ async def fallback_inteligente(txt, update):
         )
         return
 
-    # 🔥 9) Fallback Inteligente si no entendimos nada
-    respuesta_fallback = await consultar_ia_fallback(txt_raw)
-    if respuesta_fallback:
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=respuesta_fallback,
-            reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"]),
-        )
-    else:
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="😅 No logré entender tu solicitud. ¿Quieres volver al menú?",
-            reply_markup=menu_botones(["Volver al menú"]),
-        )
-    return
 
     # ——— Rastrear pedido ———
     if est.get("fase") == "esperando_numero_rastreo":
@@ -1181,115 +1250,6 @@ async def fallback_inteligente(txt, update):
         )
         reset_estado(cid)
         return
-
-    # ——— Imagen enviada ———
-    if est["fase"] == "esperando_imagen" and update.message.photo:
-        # 1) Descarga la foto a disco
-        f = await update.message.photo[-1].get_file()
-        tmp = os.path.join("temp", f"{cid}.jpg")
-        os.makedirs("temp", exist_ok=True)
-        await f.download_to_drive(tmp)
-
-        # 2) Identifica modelo desde Drive
-        ref = identify_model_from_stream(tmp)
-        os.remove(tmp)
-
-        # 3) Desempaqueta directamente MARCA_MODELO_COLOR
-        if ref:
-            # ref viene como "DS_277_TATATA"
-            marca, modelo, color = ref.split('_')
-            est.update({
-                "marca": marca,
-                "modelo": modelo,
-                "color": color,
-                "fase": "imagen_detectada"
-            })
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=f"La imagen coincide con {marca} {modelo} color {color}. ¿Continuamos? (SI/NO)",
-                reply_markup=menu_botones(["SI", "NO"]),
-            )
-        else:
-            reset_estado(cid)
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="No reconocí el modelo. /start para reiniciar.",
-                parse_mode="Markdown"
-            )
-        return
-
-
-     # Confirmación imagen
-    if est["fase"] == "imagen_detectada":
-        if txt in ("si", "s"):
-            est["fase"] = "esperando_talla"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="¿Qué talla deseas?",
-                reply_markup=menu_botones(
-                    obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
-                ),
-            )
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="Cancelado. /start para reiniciar.",
-                parse_mode="Markdown"
-            )
-            reset_estado(cid)
-        return
-
-    # Selección manual de modelo/color/talla
-    if est["fase"] == "esperando_modelo":
-        modelos = obtener_modelos_por_marca(inv, est["marca"])
-        if txt in map(normalize, modelos):
-            est["modelo"] = next(m for m in modelos if normalize(m) == txt)
-            est["fase"] = "esperando_color"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="¿Qué color deseas?",
-                reply_markup=menu_botones(
-                    obtener_colores_por_modelo(inv, est["marca"], est["modelo"])
-                ),
-            )
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="Elige un modelo válido.",
-                reply_markup=menu_botones(modelos),
-            )
-        return
-
-    if est["fase"] == "esperando_color":
-        colores = obtener_colores_por_modelo(inv, est["marca"], est["modelo"])
-        if txt in map(normalize, colores):
-            est["color"] = next(c for c in colores if normalize(c) == txt)
-            est["fase"] = "esperando_talla"
-            tallas = obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=f"Las tallas disponibles para {est['modelo']} color {est['color']} son: {', '.join(tallas)}",
-                parse_mode="Markdown"
-            )
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="¿Qué talla deseas?",
-                reply_markup=menu_botones(tallas),
-            )
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=f"Los colores disponibles para {est['modelo']} son:\n" +
-                     "\n".join(f"- {c}" for c in colores),
-                parse_mode="Markdown"
-            )
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="¿Cuál color te interesa?",
-                reply_markup=menu_botones(colores),
-            )
-        return
-
 
     # Datos del usuario y pago
     if est["fase"] == "esperando_talla":
@@ -1474,7 +1434,19 @@ async def fallback_inteligente(txt, update):
         reset_estado(cid)
         return
 
-    # 🔥 Fallback Final: usar IA GPT-4 si no coincidió nada antes
+    # ——— Hasta aquí llega todo el flujo normal del bot ———
+
+    # 🔥 1) Fallback inteligente rápido
+    respuesta_fallback = await consultar_ia_fallback(txt_raw)
+    if respuesta_fallback:
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=respuesta_fallback,
+            reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
+        )
+        return
+
+    # 🔥 2) Detección de palabras clave típicas para guiar al menú
     palabras_clave_flujo = [
         "catalogo", "catálogo", "ver catálogo", "ver catalogo",
         "imagen", "foto", "enviar imagen", "ver tallas",
@@ -1484,37 +1456,25 @@ async def fallback_inteligente(txt, update):
     ]
 
     if any(palabra in txt for palabra in palabras_clave_flujo):
-        # 🔵 Si detectamos palabras clave del flujo, guiamos al cliente al menú
         await ctx.bot.send_message(
             chat_id=cid,
             text="📋 Parece que quieres hacer un pedido o consultar el catálogo. Por favor usa las opciones disponibles para continuar. 😉",
-            reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"]),
+            reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
         )
         return
-    else:
-        # 🧠 Si no reconocimos nada, usamos GPT-4 real para ayudar al cliente
-        respuesta = await responder_con_openai(txt_raw)
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=respuesta,
-            reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"]),
-        )
-        return
+
+    # 🔥 3) Fallback final: usar IA real GPT-4 si no coincidió nada antes
+    respuesta = await responder_con_openai(txt_raw)
+    await ctx.bot.send_message(
+        chat_id=cid,
+        text=respuesta,
+        reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
+    )
+    return
 
 
    
 # --------------------------------------------------------------------
-import base64, io
-from PIL import Image
-import imagehash
-from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
-import nest_asyncio
-import asyncio
-import logging
-import os
-import re
-from types import SimpleNamespace
 
 nest_asyncio.apply()
 
@@ -1524,9 +1484,6 @@ api = FastAPI(title="AYA Bot – WhatsApp")
 # 2. Conversión de número WhatsApp
 def wa_chat_id(wa_from: str) -> str:
     return re.sub(r"\D", "", wa_from)
-
-# 3. OpenAI conexión
-import openai
 
 async def responder_con_openai(mensaje_usuario):
     openai.api_key = os.getenv("OPENAI_API_KEY")  # o fija la clave aquí si prefieres
