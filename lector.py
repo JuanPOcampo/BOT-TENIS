@@ -599,7 +599,6 @@ async def saludo_bienvenida(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         reply_markup=menu_botones([
             "Hacer pedido", "Enviar imagen", "Ver catálogo", "Rastrear pedido", "Realizar cambio"
         ],
-    parse_mode="Markdown"
 )
 )
 
@@ -642,7 +641,6 @@ async def manejar_precio(update, context, inventario):
     chat_id=update.effective_chat.id,
     text=respuesta_final,
                 reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"],
-    parse_mode="Markdown"
 )
 )
         else:
@@ -666,7 +664,6 @@ async def fallback_inteligente(txt, update):
     chat_id=update.effective_chat.id,
     text=respuesta_ia,
             reply_markup=menu_botones(["Ver catálogo", "Hacer pedido", "Enviar imagen"],
-    parse_mode="Markdown"
 )
 )
     else:
@@ -925,7 +922,6 @@ async def fallback_inteligente(txt, update):
     chat_id=update.effective_chat.id,
     text=respuesta_ia,
             reply_markup=menu_botones(["Ver catálogo", "Hacer pedido", "Enviar imagen"],
-    parse_mode="Markdown"
 )
 )
     else:
@@ -1050,7 +1046,6 @@ async def fallback_inteligente(txt, update):
     chat_id=update.effective_chat.id,
     text=respuesta,
                 reply_markup=menu_botones(["Sí, quiero pedir", "Volver al menú"],
-    parse_mode="Markdown"
 )
 )
             est["fase"] = "inicio"
@@ -1060,7 +1055,6 @@ async def fallback_inteligente(txt, update):
     chat_id=update.effective_chat.id,
     text=f"😕 No encontré la referencia {referencia}. ¿Quieres intentar con otra?",
                 reply_markup=menu_botones(["Volver al menú"],
-    parse_mode="Markdown"
 )
 )
             return
@@ -1099,7 +1093,6 @@ async def fallback_inteligente(txt, update):
                 chat_id=cid,
                 text=f"La imagen coincide con {marca} {modelo} color {color}. ¿Continuamos? (SI/NO)",
                 reply_markup=menu_botones(["SI", "NO"]),
-                parse_mode="Markdown"
             )
         else:
             reset_estado(cid)
@@ -1135,7 +1128,6 @@ async def fallback_inteligente(txt, update):
             chat_id=cid,
             text=f"¡Genial! Veo que buscas {elegida}. ¿Qué modelo de {elegida} te interesa?",
             reply_markup=menu_botones(obtener_modelos_por_marca(inventario, elegida)),
-            parse_mode="Markdown"
         )
         return
 
@@ -1146,14 +1138,12 @@ async def fallback_inteligente(txt, update):
             chat_id=cid,
             text=respuesta_fallback,
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"]),
-            parse_mode="Markdown"
         )
     else:
         await ctx.bot.send_message(
             chat_id=cid,
             text="😅 No logré entender tu solicitud. ¿Quieres volver al menú?",
             reply_markup=menu_botones(["Volver al menú"]),
-            parse_mode="Markdown"
         )
     return
 
@@ -1219,7 +1209,6 @@ async def fallback_inteligente(txt, update):
                 chat_id=cid,
                 text=f"La imagen coincide con {marca} {modelo} color {color}. ¿Continuamos? (SI/NO)",
                 reply_markup=menu_botones(["SI", "NO"]),
-                parse_mode="Markdown"
             )
         else:
             reset_estado(cid)
@@ -1241,7 +1230,6 @@ async def fallback_inteligente(txt, update):
                 reply_markup=menu_botones(
                     obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
                 ),
-                parse_mode="Markdown"
             )
         else:
             await ctx.bot.send_message(
@@ -1264,14 +1252,12 @@ async def fallback_inteligente(txt, update):
                 reply_markup=menu_botones(
                     obtener_colores_por_modelo(inv, est["marca"], est["modelo"])
                 ),
-                parse_mode="Markdown"
             )
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
                 text="Elige un modelo válido.",
                 reply_markup=menu_botones(modelos),
-                parse_mode="Markdown"
             )
         return
 
@@ -1290,7 +1276,6 @@ async def fallback_inteligente(txt, update):
                 chat_id=cid,
                 text="¿Qué talla deseas?",
                 reply_markup=menu_botones(tallas),
-                parse_mode="Markdown"
             )
         else:
             await ctx.bot.send_message(
@@ -1303,7 +1288,6 @@ async def fallback_inteligente(txt, update):
                 chat_id=cid,
                 text="¿Cuál color te interesa?",
                 reply_markup=menu_botones(colores),
-                parse_mode="Markdown"
             )
         return
 
@@ -1331,7 +1315,6 @@ async def fallback_inteligente(txt, update):
                 chat_id=cid,
                 text="Elige una talla válida.",
                 reply_markup=menu_botones(tallas),
-                parse_mode="Markdown"
             )
         return
 
@@ -1432,7 +1415,6 @@ async def fallback_inteligente(txt, update):
             chat_id=cid,
             text=text_res,
             reply_markup=menu_botones(["TRANSFERENCIA", "QR", "CONTRA ENTREGA"]),
-            parse_mode="Markdown"
         )
         est["fase"] = "esperando_pago"
         return
@@ -1508,7 +1490,6 @@ async def fallback_inteligente(txt, update):
             chat_id=cid,
             text="📋 Parece que quieres hacer un pedido o consultar el catálogo. Por favor usa las opciones disponibles para continuar. 😉",
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"]),
-            parse_mode="Markdown"
         )
         return
     else:
@@ -1518,7 +1499,6 @@ async def fallback_inteligente(txt, update):
             chat_id=cid,
             text=respuesta,
             reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"]),
-            parse_mode="Markdown"
         )
         return
 
@@ -1556,7 +1536,17 @@ async def responder_con_openai(mensaje_usuario):
         respuesta = await openai.ChatCompletion.acreate(
             model="gpt-4-1106-preview",
             messages=[
-                {"role": "system", "content": "Eres un asistente de ventas experto en una tienda de zapatos. Responde de forma amable, clara y breve a las preguntas de los clientes sobre productos, precios, envíos, tallas y detalles."},
+                {
+                    "role": "system",
+                    "content": (
+                        "Eres un asesor de ventas experto en una tienda de zapatos. "
+                        "Responde de forma AMABLE, DIRECTA y en MENOS DE 3 LÍNEAS. "
+                        "No repitas demasiado la pregunta del cliente. "
+                        "Sé breve y concreto. "
+                        "Cuando puedas, invita al cliente a elegir talla o color. "
+                        "Habla como un vendedor amigable que quiere cerrar la venta rápido."
+                    )
+                },
                 {"role": "user", "content": mensaje_usuario}
             ],
             temperature=0.5,
