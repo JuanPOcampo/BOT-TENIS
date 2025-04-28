@@ -648,7 +648,6 @@ async def manejar_precio(update, context, inventario):
     chat_id=update.effective_chat.id,
     text=f"No encontré productos con la referencia '{referencia}'. ¿Quieres revisar el catálogo?",
                 reply_markup=menu_botones(["Ver catálogo", "Volver al menú"],
-    parse_mode="Markdown"
 )
 )
         return True  # Indica que se procesó el mensaje
