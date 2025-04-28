@@ -12,5 +12,5 @@ pydub
 ffmpeg-python
 pillow
 numpy
-openai
+openai==0.28
 ImageHash
