@@ -419,8 +419,12 @@ async def manejar_pqrs(update, ctx) -> bool:
 
     for palabra, respuesta in faq_respuestas.items():
         if palabra in txt:
-            await update.message.reply_text(respuesta, parse_mode="Markdown")
-            return True
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=respuesta, parse_mode="Markdown",
+    parse_mode="Markdown"
+)
+return True
 
     return False
 
@@ -452,21 +456,28 @@ async def manejar_imagen(update, ctx):
             "fase": "imagen_detectada"
         })
 
-        await update.message.reply_text(
-            f"📸 La imagen coincide con:\n"
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=f"📸 La imagen coincide con:\n"
             f"*Marca:* {marca}\n"
             f"*Modelo:* {modelo}\n"
             f"*Color:* {color}\n\n"
-            "¿Deseas continuar tu compra con este modelo? (SI/NO)",
+            "¿Deseas continuar tu compra con este modelo? (SI/NO,
+    parse_mode="Markdown"
+)
+",
             parse_mode="Markdown",
             reply_markup=menu_botones(["SI", "NO"])
         )
     else:
         reset_estado(cid)
-        await update.message.reply_text(
-            "😔 No pude reconocer el modelo de la imagen. ¿Quieres intentar otra vez?",
-            reply_markup=menu_botones(["Enviar otra imagen", "Ver catálogo"])
-        )
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="😔 No pude reconocer el modelo de la imagen. ¿Quieres intentar otra vez?",
+            reply_markup=menu_botones(["Enviar otra imagen", "Ver catálogo"],
+    parse_mode="Markdown"
+)
+)
 
 async def mostrar_imagenes_modelo(cid, ctx, marca, tipo_modelo):
     sku = f"{marca.replace(' ','_')}_{tipo_modelo}"
@@ -559,12 +570,15 @@ def generate_sale_id() -> str:
 # ——— HANDLERS —————————————————————————————————————————————————————
 
 async def saludo_bienvenida(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        WELCOME_TEXT,
+    await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=WELCOME_TEXT,
         reply_markup=menu_botones([
             "Hacer pedido", "Enviar imagen", "Ver catálogo", "Rastrear pedido", "Realizar cambio"
-        ])
-    )
+        ],
+    parse_mode="Markdown"
+)
+)
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
@@ -601,15 +615,21 @@ async def manejar_precio(update, context, inventario):
                 respuestas.append(f"✅ {marca} {modelo_nombre} ({color}) cuesta {precio}.")
 
             respuesta_final = "\n".join(respuestas)
-            await update.message.reply_text(
-                respuesta_final,
-                reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
-            )
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=respuesta_final,
+                reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"],
+    parse_mode="Markdown"
+)
+)
         else:
-            await update.message.reply_text(
-                f"No encontré productos con la referencia '{referencia}'. ¿Quieres revisar el catálogo?",
-                reply_markup=menu_botones(["Ver catálogo", "Volver al menú"])
-            )
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=f"No encontré productos con la referencia '{referencia}'. ¿Quieres revisar el catálogo?",
+                reply_markup=menu_botones(["Ver catálogo", "Volver al menú"],
+    parse_mode="Markdown"
+)
+)
         return True  # Indica que se procesó el mensaje
     return False  # Indica que no se encontró referencia numérica
 
@@ -619,15 +639,21 @@ async def manejar_precio(update, context, inventario):
 async def fallback_inteligente(txt, update):
     respuesta_ia = await consultar_ia_fallback(txt)
     if respuesta_ia:
-        await update.message.reply_text(
-            respuesta_ia,
-            reply_markup=menu_botones(["Ver catálogo", "Hacer pedido", "Enviar imagen"])
-        )
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=respuesta_ia,
+            reply_markup=menu_botones(["Ver catálogo", "Hacer pedido", "Enviar imagen"],
+    parse_mode="Markdown"
+)
+)
     else:
-        await update.message.reply_text(
-            "😔 No logré entenderte bien. ¿Quieres volver al inicio?",
-            reply_markup=menu_botones(["Volver al menú"])
-        )
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="😔 No logré entenderte bien. ¿Quieres volver al inicio?",
+            reply_markup=menu_botones(["Volver al menú"],
+    parse_mode="Markdown"
+)
+)
 
 
 # --------------------------------------------------------------------------------------------------
@@ -653,31 +679,35 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "en cuanto llega", "en cuánto llega",
         "me llega rapido", "llegan rapido"
     )):
-        await update.message.reply_text(
-            "🚚 El tiempo de entrega depende de la ciudad de destino, "
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="🚚 El tiempo de entrega depende de la ciudad de destino, "
             "pero generalmente tardan *2 días hábiles* en llegar a la puerta de tu casa.\n\n"
             "Si los necesitas para *mañana mismo*, podemos enviarlos para reclamar en el "
             "terminal de transporte de tu ciudad y mañana, después de las 2 p. m., ya los puedes recoger. "
             "Para esta modalidad de envío solo aplica el *pago anticipado* porque las empresas de buses "
-            "no tienen convenio de pago contra entrega."
-        )
-        return
+            "no tienen convenio de pago contra entrega.",
+    parse_mode="Markdown"
+)
+return
 
     # 🔥 Pregunta 2: ¿tienen pago contra entrega?
     if any(frase in txt for frase in (
         "pago contra entrega", "contraentrega", "contra entrega",
         "pagan al recibir", "puedo pagar al recibir", "tienen contra entrega"
     )):
-        await update.message.reply_text(
-            "📦 Por supuesto que tenemos *pago contra entrega*.\n\n"
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="📦 Por supuesto que tenemos *pago contra entrega*.\n\n"
             "Para esta modalidad pedimos un *anticipo de $35 000*, que cubre el flete. "
             "Ese valor se descuenta del precio total.\n\n"
             "Ejemplo: si las zapatillas cuestan *$219 900* y haces el anticipo, "
             "cuando lleguen solo le pagas a la transportadora *$184 900*.\n\n"
             "Solicitamos el anticipo porque, en el pasado, algunos pedidos no se recogían y la "
-            "transportadora nos devolvía las zapatillas, generando pérdidas de envío."
-        )
-        return
+            "transportadora nos devolvía las zapatillas, generando pérdidas de envío.",
+    parse_mode="Markdown"
+)
+return
 
     # 🔥 Pregunta 3: ¿tienen garantía?
     if any(frase in txt for frase in (
@@ -685,12 +715,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "hay garantía", "hay garantia",
         "garantía", "garantia", "tienen garantia de fabrica"
     )):
-        await update.message.reply_text(
-            "🛡️ ¡Claro que sí! Todos nuestros productos tienen *garantía de 60 días* "
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="🛡️ ¡Claro que sí! Todos nuestros productos tienen *garantía de 60 días* "
             "por *pegue* o *defectos de fábrica*.\n\n"
-            "Si llegas a tener algún inconveniente, contáctanos y te ayudaremos a solucionarlo."
-        )
-        return
+            "Si llegas a tener algún inconveniente, contáctanos y te ayudaremos a solucionarlo.",
+    parse_mode="Markdown"
+)
+return
 
     # 🔥 Pregunta 4: ¿cómo sé que no me van a robar?
     if any(frase in txt for frase in (
@@ -699,11 +731,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "me estafan", "roban por internet", "es real", "desconfío",
         "no me da confianza", "no confío", "dudas"
     )):
-        await update.message.reply_text(
-            "🤝 Entendemos que la confianza es muy importante. "
-            "Te compartimos este breve video para que conozcas más sobre nuestra empresa y puedas comprar tranquilo:"
-        )
-        video_url = "https://tudominio.com/videos/video_confianza.mp4"
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="🤝 Entendemos que la confianza es muy importante. "
+            "Te compartimos este breve video para que conozcas más sobre nuestra empresa y puedas comprar tranquilo:",
+    parse_mode="Markdown"
+)
+video_url = "https://tudominio.com/videos/video_confianza.mp4"
         await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
         await ctx.bot.send_video(
             chat_id=cid,
@@ -718,13 +752,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "direccion", "dirección", "donde estan", "donde es la tienda",
         "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
     )):
-        await update.message.reply_text(
-            "📍 Estamos en *Bucaramanga, Santander* 💛💚.\n\n"
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="📍 Estamos en *Bucaramanga, Santander* 💛💚.\n\n"
             "🏡 *Barrio San Miguel, CLL 52 # 16-74* 🔥💋\n\n"
             "🚚 Enviamos a *todo el país* con *Servientrega*.\n\n"
-            "Google Maps → https://maps.google.com/?q=7.109500,-73.121597"
-        )
-        return
+            "Google Maps → https://maps.google.com/?q=7.109500,-73.121597",
+    parse_mode="Markdown"
+)
+return
 
     # 🔥 Pregunta 6: ¿son nacionales o importados?
     if any(frase in txt for frase in (
@@ -732,34 +768,40 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "nacionales o importados", "hecho en colombia", "fabricados en colombia",
         "son de aqui", "es de colombia", "fabricacion colombiana"
     )):
-        await update.message.reply_text(
-            "🇨🇴 Nuestra marca es *100 % colombiana* y las zapatillas "
-            "se elaboran con orgullo en *Bucaramanga* por artesanos locales."
-        )
-        return
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="🇨🇴 Nuestra marca es *100 % colombiana* y las zapatillas "
+            "se elaboran con orgullo en *Bucaramanga* por artesanos locales.",
+    parse_mode="Markdown"
+)
+return
 
     # 🔥 Pregunta 7: ¿son originales?
     if any(frase in txt for frase in (
         "son originales", "es original", "originales",
         "es copia", "son copia", "son replica", "réplica", "imitacion"
     )):
-        await update.message.reply_text(
-            "✅ ¡Claro! Son *originales*. Somos *X100*, marca 100 % colombiana "
-            "reconocida por su calidad y diseño."
-        )
-        return
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="✅ ¡Claro! Son *originales*. Somos *X100*, marca 100 % colombiana "
+            "reconocida por su calidad y diseño.",
+    parse_mode="Markdown"
+)
+return
 
     # 🔥 Pregunta 8: ¿de qué calidad son?
     if any(frase in txt for frase in (
         "que calidad son", "de que calidad son", "son buena calidad", "son de buena calidad",
         "son de mala calidad", "que calidad manejan", "que calidad tienen", "calidad de las zapatillas"
     )):
-        await update.message.reply_text(
-            "✨ Nuestras zapatillas están elaboradas con *materiales de alta calidad*.\n\n"
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="✨ Nuestras zapatillas están elaboradas con *materiales de alta calidad*.\n\n"
             "Cada par es fabricado cuidadosamente para asegurar que sean de *calidad AAA* 👟🔝, "
-            "garantizando comodidad, durabilidad y un excelente acabado."
-        )
-        return
+            "garantizando comodidad, durabilidad y un excelente acabado.",
+    parse_mode="Markdown"
+)
+return
 
     # 🔥 Pregunta 9: ¿hay descuento si compro 2 pares?
     if any(frase in txt for frase in (
@@ -767,11 +809,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "descuento por dos pares", "me descuentan si compro dos", "descuento si compro dos",
         "hay descuento por dos", "promocion dos pares", "descuento en 2 pares"
     )):
-        await update.message.reply_text(
-            "🎉 ¡Claro que sí! Si compras *2 pares* te damos un *10% de descuento adicional* sobre el total.\n\n"
-            "Aprovecha esta oportunidad para estrenar más y pagar menos 🔥👟👟."
-        )
-        return
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="🎉 ¡Claro que sí! Si compras *2 pares* te damos un *10% de descuento adicional* sobre el total.\n\n"
+            "Aprovecha esta oportunidad para estrenar más y pagar menos 🔥👟👟.",
+    parse_mode="Markdown"
+)
+return
 
     # 🔥 Pregunta 10: ¿manejan precios para mayoristas?
     if any(frase in txt for frase in (
@@ -779,13 +823,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "puedo venderlos", "descuento para revender", "revender", "comprar para vender",
         "manejan precios para mayoristas", "mayoreo", "venta al por mayor"
     )):
-        await update.message.reply_text(
-            "🛍️ ¡Claro que sí! Manejamos *precios para mayoristas* en pedidos de *6 pares en adelante*, "
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="🛍️ ¡Claro que sí! Manejamos *precios para mayoristas* en pedidos de *6 pares en adelante*, "
             "sin importar talla ni referencia.\n\n"
             "La única condición es que debes venderlos *mínimo al mismo precio* que nosotros para "
-            "cuidar el mercado y asegurar que tengas un buen margen de utilidad."
-        )
-        return
+            "cuidar el mercado y asegurar que tengas un buen margen de utilidad.",
+    parse_mode="Markdown"
+)
+return
 
     # 🔥 Pregunta 11: ¿las tallas son normales o grandes?
     if any(frase in txt for frase in (
@@ -793,10 +839,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "horma grande", "horma pequeña", "tallas grandes", "tallas pequeñas",
         "las tallas son grandes", "las tallas son pequeñas", "como son las tallas"
     )):
-        await update.message.reply_text(
-            "👟 Nuestra horma es *normal*. Si calzas talla *40* nacional, te queda bien la *40* de nosotros.\n\n"
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="👟 Nuestra horma es *normal*. Si calzas talla *40* nacional, te queda bien la *40* de nosotros.\n\n"
             "Para mayor seguridad, te recomendamos enviarnos una foto de la *etiqueta interna* de tus tenis actuales "
-            "(en la lengüeta o costado interno), donde aparece el equivalente en *centímetros*. "
+            "(en la lengüeta o costado interno,
+    parse_mode="Markdown"
+)
+, donde aparece el equivalente en *centímetros*. "
             "Así podemos confirmar mejor la talla correcta para ti. 📏✨"
         )
         return
@@ -806,13 +856,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "talla mas grande", "talla más grande", "cual es la talla mas grande",
         "hasta que talla llegan", "mayor talla", "talla maxima", "talla máxima"
     )):
-        await update.message.reply_text(
-            "📏 La talla más grande que manejamos es:\n\n"
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="📏 La talla más grande que manejamos es:\n\n"
             "• *45 Nacional* 🇨🇴\n"
             "• *47 Europeo* 🇪🇺\n\n"
-            "Así que si usas tallas grandes, también tenemos opciones para ti 👟✨."
-        )
-        return
+            "Así que si usas tallas grandes, también tenemos opciones para ti 👟✨.",
+    parse_mode="Markdown"
+)
+return
 
     # 🔥 NUEVO: Envío de video automático cuando el cliente muestra desconfianza
     if any(frase in txt for frase in (
@@ -838,15 +890,21 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def fallback_inteligente(txt, update):
     respuesta_ia = await consultar_ia_fallback(txt)
     if respuesta_ia:
-        await update.message.reply_text(
-            respuesta_ia,
-            reply_markup=menu_botones(["Ver catálogo", "Hacer pedido", "Enviar imagen"])
-        )
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=respuesta_ia,
+            reply_markup=menu_botones(["Ver catálogo", "Hacer pedido", "Enviar imagen"],
+    parse_mode="Markdown"
+)
+)
     else:
-        await update.message.reply_text(
-            "😔 No logré entenderte bien. ¿Quieres volver al inicio?",
-            reply_markup=menu_botones(["Volver al menú"])
-        )
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="😔 No logré entenderte bien. ¿Quieres volver al inicio?",
+            reply_markup=menu_botones(["Volver al menú"],
+    parse_mode="Markdown"
+)
+)
 
 
     # 🔥 BLOQUE: Transcripción automática de audios con Whisper
@@ -854,9 +912,12 @@ async def fallback_inteligente(txt, update):
 
     if update.message:
         if update.message.voice or update.message.audio:
-            await update.message.reply_text("🎧 Estoy escuchando tu audio... dame un momento.")
-
-            fobj = update.message.voice or update.message.audio
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="🎧 Estoy escuchando tu audio... dame un momento.",
+    parse_mode="Markdown"
+)
+fobj = update.message.voice or update.message.audio
             tg_file = await fobj.get_file()
 
             local_path = os.path.join(TEMP_AUDIO_DIR, f"{cid}_{tg_file.file_id}.ogg")
@@ -867,22 +928,32 @@ async def fallback_inteligente(txt, update):
             os.remove(local_path)
 
             if txt_raw:
-                await update.message.reply_text(f"🎙️ Entendí: «{txt_raw}»")
-            else:
-                await update.message.reply_text(
-                    "😕 Ese audio no se escuchó claro. ¿Puedes intentarlo nuevamente o escribir tu mensaje?",
-                    reply_markup=ReplyKeyboardRemove()
-                )
+                await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=f"🎙️ Entendí: «{txt_raw}»",
+    parse_mode="Markdown"
+)
+else:
+                await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="😕 Ese audio no se escuchó claro. ¿Puedes intentarlo nuevamente o escribir tu mensaje?",
+                    reply_markup=ReplyKeyboardRemove(,
+    parse_mode="Markdown"
+)
+)
                 return
         else:
             txt_raw = update.message.text or ""
 
     # 🔥 Validar si realmente se extrajo texto
     if not txt_raw:
-        await update.message.reply_text(
-            "❗ No recibí un mensaje válido. ¿Puedes enviarme texto o un audio claro?",
-            reply_markup=ReplyKeyboardRemove()
-        )
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="❗ No recibí un mensaje válido. ¿Puedes enviarme texto o un audio claro?",
+            reply_markup=ReplyKeyboardRemove(,
+    parse_mode="Markdown"
+)
+)
         return
 
     txt = normalize(txt_raw)
@@ -904,14 +975,17 @@ async def fallback_inteligente(txt, update):
         "videos", "tienen videos", "muéstrame videos", "videos de referencia",
         "ver videos", "quiero videos", "puedes mandarme videos"
     )):
-        await update.message.reply_text(
-            "🎬 ¡Claro! Tengo videos de nuestras referencias más populares:\n\n"
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="🎬 ¡Claro! Tengo videos de nuestras referencias más populares:\n\n"
             "• DS 277\n"
             "• DS 288\n"
             "• DS 299\n\n"
             "Dime cuál te gustaría ver o escribe directamente la referencia.",
-            reply_markup=menu_botones(["DS 277", "DS 288", "DS 299"])
-        )
+            reply_markup=menu_botones(["DS 277", "DS 288", "DS 299"],
+    parse_mode="Markdown"
+)
+)
         est["fase"] = "esperando_video_referencia"
         return
 
@@ -942,27 +1016,36 @@ async def fallback_inteligente(txt, update):
                 )
 
             respuesta += "¿Quieres pedir alguno de estos modelos?"
-            await update.message.reply_text(
-                respuesta,
-                reply_markup=menu_botones(["Sí, quiero pedir", "Volver al menú"])
-            )
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=respuesta,
+                reply_markup=menu_botones(["Sí, quiero pedir", "Volver al menú"],
+    parse_mode="Markdown"
+)
+)
             est["fase"] = "inicio"
             return
         else:
-            await update.message.reply_text(
-                f"😕 No encontré la referencia {referencia}. ¿Quieres intentar con otra?",
-                reply_markup=menu_botones(["Volver al menú"])
-            )
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=f"😕 No encontré la referencia {referencia}. ¿Quieres intentar con otra?",
+                reply_markup=menu_botones(["Volver al menú"],
+    parse_mode="Markdown"
+)
+)
             return
 
     # 🔥 5) Procesar imágenes (cuando el usuario menciona "imagen")
     if menciona_imagen(txt):
         if est.get("fase") != "esperando_imagen":
             est["fase"] = "esperando_imagen"
-            await update.message.reply_text(
-                CLIP_INSTRUCTIONS,
-                reply_markup=ReplyKeyboardRemove()
-            )
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=CLIP_INSTRUCTIONS,
+                reply_markup=ReplyKeyboardRemove(,
+    parse_mode="Markdown"
+)
+)
         return
 
      # 🔥 6) Identificar modelo a partir de la foto recibida
@@ -983,16 +1066,22 @@ async def fallback_inteligente(txt, update):
                 "color": color,
                 "fase": "imagen_detectada"
             })
-            await update.message.reply_text(
-                f"La imagen coincide con {marca} {modelo} color {color}. ¿Continuamos? (SI/NO)",
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=f"La imagen coincide con {marca} {modelo} color {color}. ¿Continuamos? (SI/NO,
+    parse_mode="Markdown"
+)
+",
                 reply_markup=menu_botones(["SI", "NO"])
             )
         else:
             reset_estado(cid)
-            await update.message.reply_text(
-                "😕 No reconocí el modelo en la imagen. ¿Puedes intentar otra imagen o escribir /start?"
-            )
-        return
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="😕 No reconocí el modelo en la imagen. ¿Puedes intentar otra imagen o escribir /start?",
+    parse_mode="Markdown"
+)
+return
 
     # 🔥 7) Solicitud explícita de precios usando helper manejar_precio
     if await manejar_precio(update, ctx, inventario):
@@ -1015,40 +1104,56 @@ async def fallback_inteligente(txt, update):
     if elegida:
         est["marca"] = elegida
         est["fase"] = "esperando_modelo"
-        await update.message.reply_text(
-            f"¡Genial! Veo que buscas {elegida}. ¿Qué modelo de {elegida} te interesa?",
-            reply_markup=menu_botones(obtener_modelos_por_marca(inventario, elegida))
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=f"¡Genial! Veo que buscas {elegida}. ¿Qué modelo de {elegida} te interesa?",
+            reply_markup=menu_botones(obtener_modelos_por_marca(inventario, elegida,
+    parse_mode="Markdown"
+)
+)
         )
         return
 
     # 🔥 9) Fallback Inteligente si no entendimos nada
     respuesta_fallback = await consultar_ia_fallback(txt_raw)
     if respuesta_fallback:
-        await update.message.reply_text(
-            respuesta_fallback,
-            reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
-        )
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=respuesta_fallback,
+            reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"],
+    parse_mode="Markdown"
+)
+)
     else:
-        await update.message.reply_text(
-            "😅 No logré entender tu solicitud. ¿Quieres volver al menú?",
-            reply_markup=menu_botones(["Volver al menú"])
-        )
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="😅 No logré entender tu solicitud. ¿Quieres volver al menú?",
+            reply_markup=menu_botones(["Volver al menú"],
+    parse_mode="Markdown"
+)
+)
     return
 
     # ——— Rastrear pedido ———
     if est.get("fase") == "esperando_numero_rastreo":
-        await update.message.reply_text(
-            "Guía para rastrear: https://www.instagram.com/juanp_ocampo/"
-        )
-        reset_estado(cid)
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="Guía para rastrear: https://www.instagram.com/juanp_ocampo/",
+    parse_mode="Markdown"
+)
+reset_estado(cid)
         return
 
     # ——— Devolución ———
     if est.get("fase") == "esperando_numero_devolucion":
         est["referencia"] = txt_raw.strip()
         est["fase"] = "esperando_motivo_devolucion"
-        await update.message.reply_text("Motivo de devolución:")
-        return
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="Motivo de devolución:",
+    parse_mode="Markdown"
+)
+return
 
     if est.get("fase") == "esperando_motivo_devolucion":
         enviar_correo(
@@ -1056,8 +1161,12 @@ async def fallback_inteligente(txt, update):
             f"Devolución {NOMBRE_NEGOCIO}",
             f"Venta: {est['referencia']}\nMotivo: {txt_raw}"
         )
-        await update.message.reply_text("Solicitud enviada exitosamente. ✅")
-        reset_estado(cid)
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="Solicitud enviada exitosamente. ✅",
+    parse_mode="Markdown"
+)
+reset_estado(cid)
         return
 
 
@@ -1084,26 +1193,42 @@ async def fallback_inteligente(txt, update):
                 "color": color,
                 "fase": "imagen_detectada"
             })
-            await update.message.reply_text(
-                f"La imagen coincide con {marca} {modelo} color {color}. ¿Continuamos? (SI/NO)",
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=f"La imagen coincide con {marca} {modelo} color {color}. ¿Continuamos? (SI/NO,
+    parse_mode="Markdown"
+)
+",
                 reply_markup=menu_botones(["SI", "NO"])
             )
         else:
             reset_estado(cid)
-            await update.message.reply_text("No reconocí el modelo. /start para reiniciar.")
-        return
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="No reconocí el modelo. /start para reiniciar.",
+    parse_mode="Markdown"
+)
+return
 
     # Confirmación imagen
     if est["fase"] == "imagen_detectada":
         if txt in ("si", "s"):
             est["fase"] = "esperando_talla"
-            await update.message.reply_text(
-                "¿Qué talla deseas?",
-                reply_markup=menu_botones(obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"]))
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="¿Qué talla deseas?",
+                reply_markup=menu_botones(obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"],
+    parse_mode="Markdown"
+)
+)
             )
         else:
-            await update.message.reply_text("Cancelado. /start para reiniciar.")
-            reset_estado(cid)
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="Cancelado. /start para reiniciar.",
+    parse_mode="Markdown"
+)
+reset_estado(cid)
         return
 
     # Selección manual de modelo/color/talla
@@ -1112,12 +1237,21 @@ async def fallback_inteligente(txt, update):
         if txt in map(normalize, modelos):
             est["modelo"] = next(m for m in modelos if normalize(m)==txt)
             est["fase"] = "esperando_color"
-            await update.message.reply_text(
-                "¿Que color desea?",
-                reply_markup=menu_botones(obtener_colores_por_modelo(inv, est["marca"], est["modelo"]))
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="¿Que color desea?",
+                reply_markup=menu_botones(obtener_colores_por_modelo(inv, est["marca"], est["modelo"],
+    parse_mode="Markdown"
+)
+)
             )
         else:
-            await update.message.reply_text("Elige un modelo válido.", reply_markup=menu_botones(modelos))
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="Elige un modelo válido.", reply_markup=menu_botones(modelos,
+    parse_mode="Markdown"
+)
+)
         return
 
     if est["fase"] == "esperando_color":
@@ -1126,22 +1260,35 @@ async def fallback_inteligente(txt, update):
             est["color"] = next(c for c in colores if normalize(c) == txt)
             est["fase"] = "esperando_talla"
             tallas = obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
-            await update.message.reply_text(
-                f"Las tallas disponibles para {est['modelo']} color {est['color']} son: {', '.join(tallas)}"
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=f"Las tallas disponibles para {est['modelo']} color {est['color']} son: {', '.join(tallas,
+    parse_mode="Markdown"
+)
+}"
             )
-            await update.message.reply_text(
-                "¿Qué talla deseas?",
-                reply_markup=menu_botones(tallas)
-            )
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="¿Qué talla deseas?",
+                reply_markup=menu_botones(tallas,
+    parse_mode="Markdown"
+)
+)
         else:
-            await update.message.reply_text(
-                f"Los colores disponibles para {est['modelo']} son:\n" +
-                "\n".join(f"- {c}" for c in colores)
-            )
-            await update.message.reply_text(
-                "¿Cuál color te interesa?",
-                reply_markup=menu_botones(colores)
-            )
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=f"Los colores disponibles para {est['modelo']} son:\n" +
+                "\n".join(f"- {c}" for c in colores,
+    parse_mode="Markdown"
+)
+)
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="¿Cuál color te interesa?",
+                reply_markup=menu_botones(colores,
+    parse_mode="Markdown"
+)
+)
         return
 
     # Datos del usuario y pago
@@ -1152,49 +1299,90 @@ async def fallback_inteligente(txt, update):
         if talla_detectada:
             est["talla"] = talla_detectada
             est["fase"] = "esperando_nombre"
-            await update.message.reply_text("¿Tu nombre?")
-        else:
-            await update.message.reply_text(
-                f"Las tallas disponibles para {est['modelo']} color {est['color']} son: {', '.join(tallas)}"
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="¿Tu nombre?",
+    parse_mode="Markdown"
+)
+else:
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=f"Las tallas disponibles para {est['modelo']} color {est['color']} son: {', '.join(tallas,
+    parse_mode="Markdown"
+)
+}"
             )
-            await update.message.reply_text("Elige una talla válida.", reply_markup=menu_botones(tallas))
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="Elige una talla válida.", reply_markup=menu_botones(tallas,
+    parse_mode="Markdown"
+)
+)
         return
 
     if est["fase"] == "esperando_nombre":
         est["nombre"] = txt_raw
         est["fase"] = "esperando_correo"
-        await update.message.reply_text("¿Tu correo? 📧")
-        return
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="¿Tu correo? 📧",
+    parse_mode="Markdown"
+)
+return
 
     if est["fase"] == "esperando_correo":
         if re.match(r"[^@]+@[^@]+\.[^@]+", txt_raw):
             est["correo"] = txt_raw
             est["fase"] = "esperando_telefono"
-            await update.message.reply_text("¿Tu teléfono? 📱")
-        else:
-            await update.message.reply_text("Correo inválido.")
-        return
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="¿Tu teléfono? 📱",
+    parse_mode="Markdown"
+)
+else:
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="Correo inválido.",
+    parse_mode="Markdown"
+)
+return
 
     if est["fase"] == "esperando_telefono":
         if re.match(r"^\+?\d{7,15}$", txt_raw):
             est["telefono"] = txt_raw
             est["fase"] = "esperando_ciudad"
-            await update.message.reply_text("¿Ciudad?")
-        else:
-            await update.message.reply_text("Teléfono inválido.")
-        return
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="¿Ciudad?",
+    parse_mode="Markdown"
+)
+else:
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="Teléfono inválido.",
+    parse_mode="Markdown"
+)
+return
 
     if est["fase"] == "esperando_ciudad":
         est["ciudad"] = txt_raw
         est["fase"] = "esperando_provincia"
-        await update.message.reply_text("¿Provincia/departamento?")
-        return
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="¿Provincia/departamento?",
+    parse_mode="Markdown"
+)
+return
 
     if est["fase"] == "esperando_provincia":
         est["provincia"] = txt_raw
         est["fase"] = "esperando_direccion"
-        await update.message.reply_text("¿Dirección de envío?")
-        return
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="¿Dirección de envío?",
+    parse_mode="Markdown"
+)
+return
 
     if est["fase"] == "esperando_direccion":
         est["direccion"] = txt_raw
@@ -1226,7 +1414,12 @@ async def fallback_inteligente(txt, update):
             "Elige método de pago: TRANSFERENCIA, QR o CONTRA ENTREGA"
         )
         est["fase"] = "esperando_pago"
-        await update.message.reply_text(text_res, reply_markup=menu_botones(["TRANSFERENCIA","QR","CONTRA ENTREGA"]))
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=text_res, reply_markup=menu_botones(["TRANSFERENCIA","QR","CONTRA ENTREGA"],
+    parse_mode="Markdown"
+)
+)
         return
 
     if est["fase"] == "esperando_pago":
@@ -1235,19 +1428,35 @@ async def fallback_inteligente(txt, update):
         if opt == "transferencia":
             est["fase"] = "esperando_comprobante"
             resumen["Pago"] = "Transferencia"
-            await update.message.reply_text("Envía la foto de tu comprobante.")
-        elif opt == "qr":
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="Envía la foto de tu comprobante.",
+    parse_mode="Markdown"
+)
+elif opt == "qr":
             est["fase"] = "esperando_comprobante"
             resumen["Pago"] = "QR"
-            await update.message.reply_text("Escanea el QR y envía la foto.")
-        elif opt == "contraentrega":
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="Escanea el QR y envía la foto.",
+    parse_mode="Markdown"
+)
+elif opt == "contraentrega":
             resumen["Pago"] = "Contra entrega"
             registrar_orden(resumen)
-            await update.message.reply_text("Pedido registrado para contra entrega. ¡Gracias!")
-            reset_estado(cid)
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="Pedido registrado para contra entrega. ¡Gracias!",
+    parse_mode="Markdown"
+)
+reset_estado(cid)
         else:
-            await update.message.reply_text("Método inválido.")
-        return
+            await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="Método inválido.",
+    parse_mode="Markdown"
+)
+return
 
     if est["fase"] == "esperando_comprobante" and update.message.photo:
         f = await update.message.photo[-1].get_file()
@@ -1259,23 +1468,33 @@ async def fallback_inteligente(txt, update):
         enviar_correo(est["correo"], f"Pago recibido {resumen['Número Venta']}", json.dumps(resumen, indent=2))
         enviar_correo_con_adjunto(EMAIL_JEFE, f"Comprobante {resumen['Número Venta']}", json.dumps(resumen, indent=2), tmp)
         os.remove(tmp)
-        await update.message.reply_text("✅ ¡Pago registrado! Tu pedido está en proceso.")
-        reset_estado(cid)
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="✅ ¡Pago registrado! Tu pedido está en proceso.",
+    parse_mode="Markdown"
+)
+reset_estado(cid)
         return
 
     # ——— Fallback Inteligente con IA 4.1 Mini ———
     respuesta = await consultar_ia_fallback(txt_raw)
 
     if respuesta:
-        await update.message.reply_text(
-            respuesta,
-            reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"])
-        )
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text=respuesta,
+            reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"],
+    parse_mode="Markdown"
+)
+)
     else:
-        await update.message.reply_text(
-            "😅 No logré entender tu solicitud. ¿Quieres volver al menú?",
-            reply_markup=menu_botones(["Volver al menú"])
-        )
+        await ctx.bot.send_message(
+    chat_id=update.effective_chat.id,
+    text="😅 No logré entender tu solicitud. ¿Quieres volver al menú?",
+            reply_markup=menu_botones(["Volver al menú"],
+    parse_mode="Markdown"
+)
+)
 
    
 # --------------------------------------------------------------------
