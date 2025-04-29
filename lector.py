@@ -915,7 +915,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if txt in map(normalize, colores):
             est["color"] = next(c for c in colores if normalize(c) == txt)
             est["fase"] = "esperando_talla"
-            tallas = obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
+            tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=f"Las tallas disponibles para {est['modelo']} color {est['color']} son: {', '.join(tallas)}",
@@ -941,7 +941,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     # 👟 Elegir talla
     if est.get("fase") == "esperando_talla":
-        tallas = obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
+        tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
         talla_detectada = detectar_talla(txt_raw, tallas)
 
         if talla_detectada:
