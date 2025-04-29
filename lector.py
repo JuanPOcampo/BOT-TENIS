@@ -1432,64 +1432,76 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 PALABRAS_PRECIO = ['precio', 'vale', 'cuesta', 'valor', 'coste', 'precios', 'cuánto']
 
 async def manejar_precio(update, ctx, inventario):
+    import logging
     cid = update.effective_chat.id
     mensaje = (update.message.text or "").lower()
     txt = normalize(mensaje)
+    logging.debug(f"[manejar_precio] Mensaje recibido: {mensaje}")
 
-    # Detectar referencia de 3 o 4 dígitos (ej. "modelo 277" o "referencia 288")
+    # Detectar referencia de 3 o 4 dígitos
     m_ref = re.search(r"(?:referencia|modelo)?\s*(\d{3,4})", txt)
     if not m_ref:
+        logging.debug("[manejar_precio] No se detectó referencia en el mensaje.")
         return False
 
     referencia = m_ref.group(1)
+    logging.debug(f"[manejar_precio] Referencia detectada: {referencia}")
 
-    # Filtra productos que coincidan con esa referencia y tengan stock
+    # Buscar productos que coincidan
     productos = [
         item for item in inventario
         if referencia in normalize(item.get("modelo", "")) and disponible(item)
     ]
+    logging.debug(f"[manejar_precio] Productos encontrados con stock: {len(productos)}")
 
     if productos:
         from collections import defaultdict
         agrupados = defaultdict(set)
 
         for item in productos:
-            # Limpia precio y lo convierte en COP bien formateado
-            precio_raw = str(item.get("precio", "0")).replace(".", "").replace("COP", "").strip()
             try:
+                precio_raw = str(item.get("precio", "0")).replace(".", "").replace("COP", "").strip()
                 precio_formateado = f"{int(precio_raw):,}COP"
-            except ValueError:
+            except Exception as e:
+                logging.error(f"[manejar_precio] Error formateando precio: {e}")
                 precio_formateado = "No disponible"
 
-            key = (
-                item.get("modelo", "desconocido"),
-                item.get("color", "varios colores"),
-                precio_formateado
-            )
-            agrupados[key].add(str(item.get("talla", "")))
-
+            try:
+                key = (
+                    item.get("modelo", "desconocido"),
+                    item.get("color", "varios colores"),
+                    precio_formateado
+                )
+                agrupados[key].add(str(item.get("talla", "")))
+            except Exception as e:
+                logging.error(f"[manejar_precio] Error agrupando tallas: {e}")
+        
         respuesta_final = ""
         primer_producto = productos[0]
 
         for (modelo, color, precio), tallas in agrupados.items():
-            # Asegurar que tallas es iterable
-            if not isinstance(tallas, (set, list, tuple)):
-                tallas = [str(tallas)]
+            try:
+                if not isinstance(tallas, (set, list, tuple)):
+                    tallas = [str(tallas)]
 
-            tallas_ordenadas = sorted(tallas, key=lambda t: int(t) if t.isdigit() else t)
-            tallas_str = ", ".join(tallas_ordenadas)
+                tallas_ordenadas = sorted(tallas, key=lambda t: int(t) if t.isdigit() else t)
+                tallas_str = ", ".join(tallas_ordenadas)
 
-            respuesta_final += (
-                f"👟 *{modelo}* ({color})\n"
-                f"💲 Precio: *{precio}*\n"
-                f"Tallas disponibles: {tallas_str}\n\n"
-            )
+                respuesta_final += (
+                    f"👟 *{modelo}* ({color})\n"
+                    f"💲 Precio: *{precio}*\n"
+                    f"Tallas disponibles: {tallas_str}\n\n"
+                )
+            except Exception as e:
+                logging.error(f"[manejar_precio] Error formateando tallas: {e}")
 
-        # Guardar para el flujo
+        # Guardar estado
         estado_usuario[cid]["fase"] = "confirmar_compra"
         estado_usuario[cid]["modelo_confirmado"] = primer_producto["modelo"]
         estado_usuario[cid]["color_confirmado"] = primer_producto["color"]
         estado_usuario[cid]["marca"] = primer_producto.get("marca", "sin marca")
+
+        logging.debug(f"[manejar_precio] Guardado modelo: {primer_producto['modelo']}, color: {primer_producto['color']}")
 
         await ctx.bot.send_message(
             chat_id=cid,
@@ -1504,6 +1516,7 @@ async def manejar_precio(update, ctx, inventario):
         return True
 
     else:
+        logging.debug("[manejar_precio] No se encontraron productos con esa referencia.")
         await ctx.bot.send_message(
             chat_id=cid,
             text=(
