@@ -344,11 +344,13 @@ def obtener_colores_por_modelo(inv: list[dict], modelo: str) -> list[str]:
                    and disponible(i)})
 
 def obtener_tallas_por_color(inv: list[dict], modelo: str, color: str) -> list[str]:
-    return sorted({str(i.get("talla", "")).strip()
-                   for i in inv
-                   if normalize(i.get("modelo")) == normalize(modelo)
-                   and normalize(i.get("color")) == normalize(color)
-                   and disponible(i)})
+    return sorted({
+        str(i.get("talla", "")).strip()
+        for i in inv
+        if normalize(i.get("modelo", "")) == normalize(modelo)
+        and normalize(i.get("color", "")) == normalize(color)
+        and disponible(i)
+    })
 
 #  TRANSCRIPCIÓN DE AUDIO (WHISPER)
 # ───────────────────────────────────────────────────────────────
@@ -1215,7 +1217,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="No hay problema. Si deseas, puedes ver nuestro catálogo completo 📋.\n\n👉 Opciones: Ver catálogo / Enviar imagen",
+                text="No hay problema. Si deseas, puedes ver nuestro catálogo completo 📋.\n\n👉 Catalogo: https://wa.me/c/573246666652",
                 parse_mode="Markdown"
             )
             reset_estado(cid)
@@ -1450,8 +1452,9 @@ async def manejar_precio(update, ctx, inventario):
     if productos:
         from collections import defaultdict
         agrupados = defaultdict(set)
+
         for item in productos:
-            # Limpia el precio sin importar si tiene puntos, "COP", etc.
+            # Limpia precio y lo convierte en COP bien formateado
             precio_raw = str(item.get("precio", "0")).replace(".", "").replace("COP", "").strip()
             try:
                 precio_formateado = f"{int(precio_raw):,}COP"
@@ -1467,16 +1470,22 @@ async def manejar_precio(update, ctx, inventario):
 
         respuesta_final = ""
         primer_producto = productos[0]
+
         for (modelo, color, precio), tallas in agrupados.items():
+            # Asegurar que tallas es iterable
+            if not isinstance(tallas, (set, list, tuple)):
+                tallas = [str(tallas)]
+
             tallas_ordenadas = sorted(tallas, key=lambda t: int(t) if t.isdigit() else t)
             tallas_str = ", ".join(tallas_ordenadas)
+
             respuesta_final += (
                 f"👟 *{modelo}* ({color})\n"
                 f"💲 Precio: *{precio}*\n"
                 f"Tallas disponibles: {tallas_str}\n\n"
             )
 
-        # Guardar datos confirmados para continuar el flujo
+        # Guardar para el flujo
         estado_usuario[cid]["fase"] = "confirmar_compra"
         estado_usuario[cid]["modelo_confirmado"] = primer_producto["modelo"]
         estado_usuario[cid]["color_confirmado"] = primer_producto["color"]
