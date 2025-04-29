@@ -198,10 +198,10 @@ EMAIL_PASSWORD        = os.environ.get("EMAIL_PASSWORD")
 
 WELCOME_TEXT = (
     f"¡Bienvenido a {NOMBRE_NEGOCIO}!\n\n"
-    "¿Si tienes una foto puedes enviarla\n"
+    "Si tienes una foto puedes enviarla\n"
     "Si tienes numero de referencia enviamelo\n"
     "Puedes enviarme la foto del pedido\n"
-    "Quieres unos videos de nuestas referencias?\n"
+    "Te gustaria ver unos videos de nuestras referencias?\n"
     "Cuéntame sin ningún problema 😀"
 )
 CLIP_INSTRUCTIONS = (
@@ -869,23 +869,24 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
-        if txt in ("si", "s"):
+        if any(frase in txt for frase in ("si", "sí", "s", "claro", "claro que sí", "quiero comprar", "continuar", "vamos")):
             est["fase"] = "esperando_talla"
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="¿Qué talla deseas?",
+                text="¡Perfecto! 🎯 ¿Qué talla deseas?",
                 reply_markup=menu_botones(
                     obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
                 ),
             )
+            return
         else:
-            reset_estado(cid)
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="Cancelado. /start para reiniciar.",
+                text="Cancelado. /start para reiniciar o cuéntame si quieres ver otra referencia. 📋",
                 parse_mode="Markdown"
             )
-        return
+            reset_estado(cid)
+            return
 
     # 🛒 Flujo manual si está buscando modelo
     if est.get("fase") == "esperando_modelo":
@@ -1172,6 +1173,26 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 💬 Manejar precio por referencia
     if await manejar_precio(update, ctx, inv):
         return
+    # 🛒 Confirmación para continuar con compra después de ver precios
+    if est.get("fase") == "confirmar_compra":
+        if txt in ("si", "sí", "si quiero comprar", "sí quiero comprar", "quiero comprar", "comprar", "dale", "SI", "De una", "claro",):
+            est["fase"] = "esperando_talla"
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="Perfecto 🎯 ¿Qué talla deseas?",
+                reply_markup=menu_botones(
+                    obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
+                ),
+            )
+            return
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="No hay problema. Si deseas, puedes ver nuestro catálogo completo 📋.",
+                reply_markup=menu_botones(["Ver catálogo", "Enviar imagen"]),
+            )
+            reset_estado(cid)
+            return
 
     # 🔒 Video de confianza si desconfía
     if any(frase in txt for frase in (
@@ -1429,9 +1450,8 @@ async def responder_con_openai(mensaje_usuario):
                         "Nuestros productos son 100% colombianos 🇨🇴 y hechos en Bucaramanga.\n\n"
                         "Tu objetivo principal es:\n"
                         "- Ayudar al cliente a consultar el catálogo 📋\n"
-                        "- Preguntar por marca, modelo, color y talla 🎯\n"
+                        "- Siempre que puedas pedir la referencia del teni\n"
                         "- Pedir que envíe una imagen del zapato que busca 📸\n"
-                        "- Confirmar la talla y cerrar la venta 🚀✨\n\n"
                         "Siempre que puedas, invita amablemente al cliente a enviarte el número de referencia o una imagen para agilizar el pedido.\n"
                         "Si el cliente pregunta por marcas externas, responde cálidamente explicando que solo manejamos X100.\n\n"
                         "Cuando no entiendas muy bien la intención, ofrece opciones como:\n"
