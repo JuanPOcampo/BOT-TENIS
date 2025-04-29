@@ -198,12 +198,10 @@ EMAIL_PASSWORD        = os.environ.get("EMAIL_PASSWORD")
 
 WELCOME_TEXT = (
     f"¡Bienvenido a {NOMBRE_NEGOCIO}!\n\n"
-    "¿Qué te gustaría hacer hoy?\n"
-    "– ¿Tienes alguna referencia en mente?\n"
-    "– ¿Puedes enviarme la foto del pedido?\n"
-    "– ¿Te gustaría ver el catálogo?\n"
-    "– ¿Te gustaría rastrear tu pedido?\n"
-    "– ¿Te gustaría realizar un cambio?\n"
+    "¿Si tienes una foto puedes enviarla\n"
+    "Si tienes numero de referencia enviamelo\n"
+    "Puedes enviarme la foto del pedido\n"
+    "Quieres unos videos de nuestas referencias?\n"
     "Cuéntame sin ningún problema 😀"
 )
 CLIP_INSTRUCTIONS = (
@@ -1218,38 +1216,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "inicio"
         return
 
-    # 🔎 Buscar referencia modelo numérico
-    m_ref = re.search(r"(?:referencia|modelo)?\s*(\d{3,4})", txt)
-    if m_ref:
-        referencia = m_ref.group(1)
-        productos = [
-            it for it in inv
-            if referencia in normalize(it.get("modelo", "")) and disponible(it)
-        ]
-        if productos:
-            respuesta_final = ""
-            for (modelo, color, precio), tallas in agrupados.items():
-                respuesta_final += (
-                    f"👟 *{modelo}* ({color})\n"
-                    f"💲 Precio: *{precio}*\n"
-                    f"Tallas disponibles: {', '.join(sorted(tallas))}\n\n"
-                )
-
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(f"Veo que estás interesado en *{referencia}*:\n\n" + respuesta_final),
-                reply_markup=menu_botones(["Sí, quiero comprar", "No, gracias"]),
-                parse_mode="Markdown"
-            )
-            est["fase"] = "confirmar_compra"
-            return
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=f"😕 No encontré la referencia {referencia}. ¿Quieres intentar con otra?",
-                reply_markup=menu_botones(["Volver al menú"])
-            )
-            return
+    if await manejar_precio(update, ctx, inv):
+        return
 
     # 🖼️ Procesar imagen subida si estaba esperando
     if est.get("fase") == "esperando_imagen" and update.message.photo:
@@ -1349,7 +1317,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     # 3) Ahora sí, usar IA si no entendimos nada
-    respuesta_fallback = await consultar_ia_fallback(txt_raw)
+    respuesta_fallback = await responder_con_openai(txt_raw)
     if respuesta_fallback:
         await ctx.bot.send_message(
             chat_id=cid,
@@ -1370,46 +1338,62 @@ PALABRAS_PRECIO = ['precio', 'vale', 'cuesta', 'valor', 'coste', 'precios', 'cu�
 async def manejar_precio(update, ctx, inventario):
     cid = update.effective_chat.id
     mensaje = (update.message.text or "").lower()
+    txt = normalize(mensaje)
 
-    # Busca números en el mensaje (referencias numéricas)
-    numeros = re.findall(r"\b\d+\b", mensaje)
+    # Detectar referencia de 3 o 4 dígitos (ej. "modelo 277" o "referencia 288")
+    m_ref = re.search(r"(?:referencia|modelo)?\s*(\d{3,4})", txt)
+    if not m_ref:
+        return False
 
-    if numeros:
-        referencia = numeros[0]  # toma solo la primera referencia detectada
-        referencia_normalizada = normalize(referencia)
+    referencia = m_ref.group(1)
 
-        # Busca el modelo en inventario
-        modelos_encontrados = [
-            item for item in inventario
-            if referencia_normalizada in normalize(item.get("modelo", "")) and disponible(item)
-        ]
+    # Filtra productos que coincidan con esa referencia y tengan stock
+    productos = [
+        item for item in inventario
+        if referencia in normalize(item.get("modelo", "")) and disponible(item)
+    ]
 
-        if modelos_encontrados:
-            respuestas = []
-            for modelo in modelos_encontrados:
-                marca = modelo.get('marca', 'desconocida')
-                modelo_nombre = modelo.get('modelo', 'desconocido')
-                color = modelo.get('color', 'varios colores')
-                precio = modelo.get('precio', 'No disponible')
-                respuestas.append(f"✅ {marca} {modelo_nombre} ({color}) cuesta {precio}.")
-
-            respuesta_final = "\n".join(respuestas)
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=respuesta_final,
-                reply_markup=menu_botones(["Hacer pedido", "Ver catálogo", "Enviar imagen"]),
-                parse_mode="Markdown"
+    if productos:
+        from collections import defaultdict
+        agrupados = defaultdict(set)
+        for item in productos:
+            key = (
+                item.get("modelo", "desconocido"),
+                item.get("color", "varios colores"),
+                item.get("precio", "No disponible")
             )
-            return True
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=f"No encontré productos con la referencia '{referencia}'. ¿Quieres revisar el catálogo?",
-                reply_markup=menu_botones(["Ver catálogo", "Volver al menú"]),
-                parse_mode="Markdown"
+            agrupados[key].add(str(item.get("talla", "")))
+
+        respuesta_final = ""
+        for (modelo, color, precio), tallas in agrupados.items():
+            tallas_ordenadas = sorted(tallas, key=lambda t: int(t) if t.isdigit() else t)
+            tallas_str = ", ".join(tallas_ordenadas)
+            respuesta_final += (
+                f"👟 *{modelo}* ({color})\n"
+                f"💲 Precio: *{precio}*\n"
+                f"Tallas disponibles: {tallas_str}\n\n"
             )
-            return True
-    return False
+
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
+                  f"{respuesta_final}"
+                  "¿Te gustaría proseguir con la compra?"),
+            parse_mode="Markdown",
+            reply_markup=menu_botones(["Sí, quiero comprar", "No, gracias"])
+        )
+
+        estado_usuario[cid]["fase"] = "confirmar_compra"
+        return True
+
+    else:
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=f"😕 No encontré la referencia {referencia}. ¿Quieres revisar el catálogo?",
+            reply_markup=menu_botones(["Ver catálogo", "Volver al menú"]),
+            parse_mode="Markdown"
+        )
+        return True
 
 
 
@@ -1436,14 +1420,27 @@ async def responder_con_openai(mensaje_usuario):
             messages=[
                 {
                     "role": "system",
-                    "content": (
-                        "Eres un asesor de ventas experto en una tienda de zapatos. "
-                        "Responde de forma AMABLE, DIRECTA y en MENOS DE 3 LÍNEAS. "
-                        "No repitas demasiado la pregunta del cliente. "
-                        "Sé breve y concreto. "
-                        "Cuando puedas, invita al cliente a elegir talla o color. "
-                        "Habla como un vendedor amigable que quiere cerrar la venta rápido."
-                    )
+"system": {
+    "content": (
+        "Eres un asesor de ventas para la tienda de zapatos deportivos 'X100🔥👟'.\n\n"
+        "Tu objetivo principal es ayudar al cliente a:\n"
+        "- Consultar el catálogo\n"
+        "- Preguntar por marca, modelo, color y talla\n"
+        "- Enviar una imagen del zapato que busca\n"
+        "- Confirmar talla y cerrar la venta.\n\n"
+        "El flujo del bot tiene las siguientes fases:\n"
+        "- hacer pedido\n"
+        "- enviar imagen\n"
+        "- ver catálogo\n"
+        "- rastrear pedido\n"
+        "- realizar cambio\n\n"
+        "Siempre que puedas, invita al usuario a continuar en alguna de estas fases.\n"
+        "Si el cliente está perdido, guíalo preguntando '¿Te gustaría ver nuestro catálogo? 📋 o ¿Deseas enviarme una imagen para ayudarte mejor? 📸'.\n\n"
+        "Responde de forma CÁLIDA, BREVE (máximo 2-3 líneas), usando emojis amistosos como 🎯👟🚀✨.\n"
+        "Habla como un vendedor que busca CERRAR una venta de forma rápida y amable.\n"
+        "Si no entiendes algo, responde de manera positiva y ofrece continuar el proceso de compra."
+    )
+}
                 },
                 {"role": "user", "content": mensaje_usuario}
             ],
