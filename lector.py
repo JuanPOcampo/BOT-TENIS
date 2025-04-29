@@ -1173,6 +1173,45 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 💬 Manejar precio por referencia
     if await manejar_precio(update, ctx, inv):
         return
+
+    # 🛒 Confirmación para continuar con compra después de ver precios
+    if est.get("fase") == "confirmar_compra":
+        if txt in ("si", "sí", "si quiero comprar", "sí quiero comprar", "quiero comprar", "comprar", "dale", "SI", "De una", "claro"):
+            modelo = est.get("modelo_confirmado")
+            color = est.get("color_confirmado")
+
+            if not modelo:
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text="❌ No encontré el modelo que seleccionaste. Vuelve a escribirlo o envíame una imagen.",
+                    parse_mode="Markdown"
+                )
+                est["fase"] = "inicio"
+                return
+
+            est["modelo"] = modelo
+            est["color"] = color
+            est["fase"] = "esperando_talla"
+
+            tallas = obtener_tallas_por_color(inv, modelo, color)
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=f"Perfecto 🎯 ¿Qué talla deseas para el modelo *{modelo}* color *{color}*?",
+                parse_mode="Markdown",
+                reply_markup=menu_botones(tallas),
+            )
+            return
+
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="No hay problema. Si deseas, puedes ver nuestro catálogo completo 📋.\n\n👉 Opciones: Ver catálogo / Enviar imagen",
+                parse_mode="Markdown"
+            )
+            reset_estado(cid)
+            return
+
+    # 🔄 Si el usuario dice “sí” antes de confirmar compra (por fuera del flujo)
     if "sí" in txt_raw or "claro" in txt_raw or "dale" in txt_raw or "quiero" in txt_raw:
         modelo = est.get("modelo_confirmado")
         if not modelo:
@@ -1213,42 +1252,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-# 🛒 Confirmación para continuar con compra después de ver precios
-if est.get("fase") == "confirmar_compra":
-    if txt in ("si", "sí", "si quiero comprar", "sí quiero comprar", "quiero comprar", "comprar", "dale", "SI", "De una", "claro"):
-        modelo = est.get("modelo_confirmado")
-        color = est.get("color_confirmado")
-
-        if not modelo:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="❌ No encontré el modelo que seleccionaste. Vuelve a escribirlo o envíame una imagen.",
-                parse_mode="Markdown"
-            )
-            est["fase"] = "inicio"
-            return
-
-        est["modelo"] = modelo
-        est["color"] = color
-        est["fase"] = "esperando_talla"
-
-        tallas = obtener_tallas_por_color(inv, modelo, color)
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=f"Perfecto 🎯 ¿Qué talla deseas para el modelo *{modelo}* color *{color}*?",
-            parse_mode="Markdown",
-            reply_markup=menu_botones(tallas),
-        )
-        return
-
-    else:
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="No hay problema. Si deseas, puedes ver nuestro catálogo completo 📋.\n\n👉 Opciones: Ver catálogo / Enviar imagen",
-            parse_mode="Markdown"
-        )
-        reset_estado(cid)
-        return
 
     # 🔒 Video de confianza si desconfía
     if any(frase in txt for frase in (
