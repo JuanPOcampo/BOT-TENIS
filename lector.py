@@ -1220,7 +1220,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if await manejar_catalogo(update, ctx):
-    return
+        return
 
     # 🖼️ Procesar imagen subida si estaba esperando
     if est.get("fase") == "esperando_imagen" and update.message.photo:
