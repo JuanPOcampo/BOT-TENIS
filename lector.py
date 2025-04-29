@@ -337,11 +337,10 @@ def obtener_modelos_por_marca(inv: list[dict], marca: str) -> list[str]:
                    for i in inv
                    if normalize(i.get("marca","")) == normalize(marca) and disponible(i)})
 
-def obtener_colores_por_modelo(inv: list[dict], marca: str, modelo: str) -> list[str]:
-    return sorted({i.get("color","").strip()
+def obtener_colores_por_modelo(inv: list[dict], modelo: str) -> list[str]:
+    return sorted({i.get("color", "").strip()
                    for i in inv
-                   if normalize(i.get("marca","")) == normalize(marca)
-                   and normalize(i.get("modelo","")) == normalize(modelo)
+                   if normalize(i.get("modelo", "")) == normalize(modelo)
                    and disponible(i)})
 
 def obtener_tallas_por_color(inv: list[dict], modelo: str, color: str) -> list[str]:
@@ -1188,7 +1187,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 return
 
             est["modelo"] = modelo
-            colores = obtener_colores_por_modelo(inv, modelo)
+            colores = obtener_colores_por_modelo(modelo, inv)
 
             # Solo un color disponible → pasar directo a talla
             if len(colores) == 1:
