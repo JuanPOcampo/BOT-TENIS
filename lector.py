@@ -1186,6 +1186,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if est.get("fase") == "confirmar_compra":
         if txt in ("si", "sí", "si quiero comprar", "sí quiero comprar", "quiero comprar", "comprar", "dale", "SI", "De una", "claro"):
             modelo = est.get("modelo_confirmado")
+            color_confirmado = est.get("color_confirmado")
 
             if not modelo:
                 await ctx.bot.send_message(
@@ -1197,29 +1198,40 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 return
 
             est["modelo"] = modelo
-            colores = obtener_colores_por_modelo(modelo, inv)
 
-            # Solo un color disponible → pasar directo a talla
+            # Obtener colores disponibles para el modelo
+            colores = obtener_colores_por_modelo(inv, modelo)
+            if isinstance(colores, (int, float, str)):
+                colores = [str(colores)]
+
             if len(colores) == 1:
                 est["color"] = colores[0]
                 est["fase"] = "esperando_talla"
+
                 tallas = obtener_tallas_por_color(inv, modelo, colores[0])
+                if isinstance(tallas, (int, float, str)):
+                    tallas = [str(tallas)]
+
                 await ctx.bot.send_message(
                     chat_id=cid,
-                    text=f"Perfecto 👌 ¿Qué talla deseas para el modelo *{modelo}* color *{colores[0]}*? 👟📏",
-                    parse_mode="Markdown",
-                    reply_markup=menu_botones(tallas),
+                    text=(
+                        f"Perfecto 🎯 ¿Qué talla deseas para el modelo *{modelo}* color *{colores[0]}*?\n\n"
+                        f"👉 Tallas disponibles: {', '.join(tallas)}"
+                    ),
+                    parse_mode="Markdown"
                 )
-                return
-
-            # Varios colores → preguntar
-            est["fase"] = "esperando_color"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=f"🎨 El modelo *{modelo}* está disponible en varios colores.\n\n👉 ¿Cuál te interesa?",
-                parse_mode="Markdown",
-                reply_markup=menu_botones(colores),
-            )
+            else:
+                est["fase"] = "esperando_color"
+                colores_str = "\n".join(f"- {c}" for c in colores)
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=(
+                        f"🎨 El modelo *{modelo}* está disponible en varios colores:\n\n"
+                        f"{colores_str}\n\n"
+                        "¿Cuál color te interesa?"
+                    ),
+                    parse_mode="Markdown"
+                )
             return
 
         else:
