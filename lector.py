@@ -1071,29 +1071,31 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Pago": None,
             "Estado": "PENDIENTE"
         }
-        est["resumen"] = resumen
-        text_res = (
-            f"✅ Pedido: {sale_id}\n"
-            f"👤 Nombre: {est['nombre']}\n"
-            f"📧 Correo: {est['correo']}\n"
-            f"📲 Celular: {est['telefono']}\n"
-            f"🏠 Dirección de envío: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
-            f"👟 Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
-            f"💰 Valor a pagar: {precio}\n\n"
-            "Elige método de pago:"
-        )
+    # 🧾 Mostrar resumen del pedido antes del pago
+    est["resumen"] = resumen
+    text_res = (
+        f"✅ Pedido: {sale_id}\n"
+        f"👤 Nombre: {est['nombre']}\n"
+        f"📧 Correo: {est['correo']}\n"
+        f"📲 Celular: {est['telefono']}\n"
+        f"🏠 Dirección de envío: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
+        f"👟 Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
+        f"💰 Valor a pagar: {precio}\n\n"
+        "Elige método de pago:"
+    )
 
-    # 💳 Mostrar opciones de pago (solo texto)
+    await ctx.bot.send_message(chat_id=cid, text=text_res)
+
     await ctx.bot.send_message(
         chat_id=cid,
         text=(
             "💳 *¿Cómo deseas hacer el pago?*\n\n"
             "🔸 *Contraentrega*\n"
-            "Deberás hacer un pago de *35.000 COP* para cubrir el envío. Este valor se descuenta del precio total cuando recibas los tenis en casa.\n\n"
+            "Deberás hacer un pago de *35.000 COP* para cubrir el envío. Este valor se descuenta del precio total cuando recibas los tenis.\n\n"
             "🔸 *Transferencia inmediata*\n"
             "¡Promoción del día! Si haces el pago completo hoy, recibes un *5% de descuento* en tus tenis.\n\n"
             "✉️ Escribe tu método de pago:\n"
-            "`Transferencia` o `Contraentrega`",
+            "`Transferencia`, `QR` o `Contraentrega`"
         ),
         parse_mode="Markdown"
     )
@@ -1104,120 +1106,38 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if est.get("fase") == "esperando_pago":
         opt = normalize(txt_raw.replace(" ", ""))
         resumen = est["resumen"]
-        precio_original = est.get("precio_total", 0)
+        precio_original = est.get("precio_total", precio)
 
         if opt == "transferencia":
             descuento = int(precio_original * 0.05)
             valor_final = precio_original - descuento
+            est["fase"] = "esperando_comprobante"
             resumen["Pago"] = "Transferencia"
             resumen["Descuento"] = f"-{descuento} COP"
             resumen["Valor Final"] = valor_final
-
-            est["fase"] = "esperando_comprobante"
-
-    # 💳 Mostrar opciones de pago (solo texto)
-    await ctx.bot.send_message(
-        chat_id=cid,
-        text=(
-            "💳 *¿Cómo deseas hacer el pago?*\n\n"
-            "🔸 *Contraentrega*\n"
-            "Deberás hacer un pago de *35.000 COP* para cubrir el envío. Este valor se descuenta del precio total cuando recibas los tenis en casa.\n\n"
-            "🔸 *Transferencia inmediata*\n"
-            "¡Promoción del día! Si haces el pago completo hoy, recibes un *5% de descuento* en tus tenis.\n\n"
-            "✉️ Escribe tu método de pago:\n"
-            "`Transferencia` o `Contraentrega`",
-        ),
-        parse_mode="Markdown"
-    )
-    est["fase"] = "esperando_pago"
-    return
-
-    # 💳 Método de pago
-    if est.get("fase") == "esperando_pago":
-        opt = normalize(txt_raw.replace(" ", ""))
-        resumen = est["resumen"]
-        precio_original = est.get("precio_total", 0)
-
-        if opt == "transferencia":
-            descuento = int(precio_original * 0.05)
-            valor_final = precio_original - descuento
-            resumen["Pago"] = "Transferencia"
-            resumen["Descuento"] = f"-{descuento} COP"
-            resumen["Valor Final"] = valor_final
-
-            est["fase"] = "esperando_comprobante"
 
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
-                    f"🟢 Perfecto, elegiste *Transferencia inmediata*.\n"
+                    f"🟢 Elegiste *Transferencia inmediata*.\n"
                     f"💰 Valor original: {precio_original} COP\n"
                     f"🎉 Descuento 5%: -{descuento} COP\n"
                     f"✅ *Total a pagar: {valor_final} COP*\n\n"
-                    "💳 Realiza el pago a cualquiera de estas cuentas:\n\n"
-                    "• Bancolombia: *30300002233* a nombre de *X100 sas*\n"
-                    "• Nequi: *3177171171* a nombre de *Car***Car***\n"
-                    "• Daviplata: *3004141021* a nombre de *Zul***Mar***\n\n"
-                    "📸 Cuando realices el pago, por favor envía la foto del comprobante."
+                    "💳 Realiza el pago a cualquiera de estas cuentas:\n"
+                    "• Bancolombia: *30300002233* (X100 sas)\n"
+                    "• Nequi: *3177171171* (Car***Car***)\n"
+                    "• Daviplata: *3004141021* (Zul***Mar***)\n\n"
+                    "📸 Envía el comprobante aquí cuando termines."
                 ),
                 parse_mode="Markdown"
             )
-        elif opt == "contraentrega":
-            resumen["Pago"] = "Contra entrega"
-            resumen["Valor Anticipo"] = 35000
+
+        elif opt == "qr":
             est["fase"] = "esperando_comprobante"
-
+            resumen["Pago"] = "QR"
             await ctx.bot.send_message(
                 chat_id=cid,
-                text=(
-                    "🟡 Elegiste *Contra entrega*.\n"
-                    "Debes realizar ahora un pago de *35.000 COP* para cubrir el envío (se descuenta del precio total cuando recibas los tenis).\n\n"
-                    "Los números de cuenta para pagar son:\n\n"
-                    "• Bancolombia: *30300002233* a nombre de *X100 sas*\n"
-                    "• Nequi: *3177171171* a nombre de *Car***Car***\n"
-                    "• Daviplata: *3004141021* a nombre de *Zul***Mar***\n\n"
-                    "📸 Envía el comprobante del pago cuando lo tengas listo."
-                ),
-                parse_mode="Markdown"
-            )
-
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="⚠️ Opción no válida. Por favor escribe *Transferencia* o *Contraentrega*.",
-                parse_mode="Markdown"
-            )
-        return
-
-    # 💳 Método de pago
-    if est.get("fase") == "esperando_pago":
-        opt = normalize(txt_raw.replace(" ", ""))
-        resumen = est["resumen"]
-        precio_original = est.get("precio_total", 0)
-
-        if opt == "transferencia":
-            resumen["Pago"] = "Transferencia"
-            descuento = int(precio_original * 0.05)
-            valor_final = precio_original - descuento
-
-            resumen["Descuento"] = f"-{descuento} COP"
-            resumen["Valor Final"] = valor_final
-            est["fase"] = "esperando_comprobante"
-
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    f"🟢 Perfecto, elegiste *Transferencia inmediata*.\n"
-                    f"💰 Valor original: {precio_original} COP\n"
-                    f"🎉 Descuento 5%: -{descuento} COP\n"
-                    f"✅ *Total a pagar: {valor_final} COP*\n\n"
-                    "💳 Realiza el pago a cualquiera de estas cuentas:\n\n"
-                    "• Bancolombia: *30300002233* a nombre de *X100 sas*\n"
-                    "• Nequi: *3177171171* a nombre de *Car***Car***\n"
-                    "• Daviplata: *3004141021* a nombre de *Zul***Mar***\n\n"
-                    "📸 Cuando realices el pago, por favor envía la foto del comprobante."
-                ),
-                parse_mode="Markdown"
+                text="🔲 Escanea el QR de pago y luego envía la foto del comprobante 📸"
             )
 
         elif opt == "contraentrega":
@@ -1229,12 +1149,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 chat_id=cid,
                 text=(
                     "🟡 Elegiste *Contra entrega*.\n"
-                    "Debes realizar ahora un pago de *35.000 COP* para cubrir el envío (se descuenta del precio total cuando recibas los tenis).\n\n"
-                    "Los números de cuenta para pagar son:\n\n"
-                    "• Bancolombia: *30300002233* a nombre de *X100 sas*\n"
-                    "• Nequi: *3177171171* a nombre de *Car***Car***\n"
-                    "• Daviplata: *3004141021* a nombre de *Zul***Mar***\n\n"
-                    "📸 Envía el comprobante del pago cuando lo tengas listo."
+                    "Debes pagar *35.000 COP* para cubrir el envío (se descuenta del total al recibir los tenis).\n\n"
+                    "Los números de cuenta para pagar son:\n"
+                    "• Bancolombia: *30300002233* (X100 sas)\n"
+                    "• Nequi: *3177171171* (Car***Car***)\n"
+                    "• Daviplata: *3004141021* (Zul***Mar***)\n\n"
+                    "📸 Envía aquí el comprobante cuando lo tengas listo."
                 ),
                 parse_mode="Markdown"
             )
@@ -1242,32 +1162,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="⚠️ Opción no válida. Por favor escribe *Transferencia* o *Contraentrega*.",
+                text="⚠️ Opción no válida. Por favor escribe *Transferencia*, *QR* o *Contraentrega*.",
                 parse_mode="Markdown"
             )
         return
-
-    # 📸 Recibir comprobante de pago
-    if est.get("fase") == "esperando_comprobante" and update.message.photo:
-        f = await update.message.photo[-1].get_file()
-        tmp = os.path.join("temp", f"{cid}_proof.jpg")
-        os.makedirs("temp", exist_ok=True)
-        await f.download_to_drive(tmp)
-
-        resumen = est["resumen"]
-        registrar_orden(resumen)
-        enviar_correo(est["correo"], f"Pago recibido {resumen['Número Venta']}", json.dumps(resumen, indent=2))
-        enviar_correo_con_adjunto(EMAIL_JEFE, f"Comprobante {resumen['Número Venta']}", json.dumps(resumen, indent=2), tmp)
-        os.remove(tmp)
-
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="✅ ¡Pago registrado exitosamente! Tu pedido está en proceso. 🚚",
-            parse_mode="Markdown"
-        )
-        reset_estado(cid)
-        return
-
 
     # 📸 Recibir comprobante de pago
     if est.get("fase") == "esperando_comprobante" and update.message.photo:
