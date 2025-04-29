@@ -1362,62 +1362,62 @@ PALABRAS_PRECIO = ['precio', 'vale', 'cuesta', 'valor', 'coste', 'precios', 'cu�
 async def manejar_precio(update, ctx, inventario):
     cid = update.effective_chat.id
     mensaje = (update.message.text or "").lower()
+    txt = normalize(mensaje)
 
-    # Buscar números (referencias)
-    numeros = re.findall(r"\b\d{3,4}\b", mensaje)
-    if not numeros:
+    # Detectar referencia de 3 o 4 dígitos (ej. "modelo 277" o "referencia 288")
+    m_ref = re.search(r"(?:referencia|modelo)?\s*(\d{3,4})", txt)
+    if not m_ref:
         return False
 
-    referencia = numeros[0]  # Solo la primera
-    referencia_normalizada = normalize(referencia)
+    referencia = m_ref.group(1)
 
-    # Buscar en el inventario
-    modelos_encontrados = [
+    # Filtra productos que coincidan con esa referencia y tengan stock
+    productos = [
         item for item in inventario
-        if referencia_normalizada in normalize(item.get("modelo", "")) and disponible(item)
+        if referencia in normalize(item.get("modelo", "")) and disponible(item)
     ]
 
-    if not modelos_encontrados:
+    if productos:
+        from collections import defaultdict
+        agrupados = defaultdict(set)
+        for item in productos:
+            key = (
+                item.get("modelo", "desconocido"),
+                item.get("color", "varios colores"),
+                item.get("precio", "No disponible")
+            )
+            agrupados[key].add(str(item.get("talla", "")))
+
+        respuesta_final = ""
+        for (modelo, color, precio), tallas in agrupados.items():
+            tallas_ordenadas = sorted(tallas, key=lambda t: int(t) if t.isdigit() else t)
+            tallas_str = ", ".join(tallas_ordenadas)
+            respuesta_final += (
+                f"👟 *{modelo}* ({color})\n"
+                f"💲 Precio: *{precio}*\n"
+                f"Tallas disponibles: {tallas_str}\n\n"
+            )
+
         await ctx.bot.send_message(
             chat_id=cid,
-            text=f"😕 No encontré productos con la referencia '{referencia}'. ¿Quieres revisar el catálogo?",
+            text=(f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
+                  f"{respuesta_final}"
+                  "¿Te gustaría proseguir con la compra?"),
+            parse_mode="Markdown",
+            reply_markup=menu_botones(["Sí, quiero comprar", "No, gracias"])
+        )
+
+        estado_usuario[cid]["fase"] = "confirmar_compra"
+        return True
+
+    else:
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=f"😕 No encontré la referencia {referencia}. ¿Quieres revisar el catálogo?",
             reply_markup=menu_botones(["Ver catálogo", "Volver al menú"]),
             parse_mode="Markdown"
         )
         return True
-
-    # Agrupar por modelo y color
-    from collections import defaultdict
-    agrupados = defaultdict(lambda: {"precio": None, "tallas": set()})
-
-    for item in modelos_encontrados:
-        modelo = item.get('modelo', 'desconocido')
-        color = item.get('color', 'varios colores')
-        precio = item.get('precio', 'No disponible')
-        talla = str(item.get('talla', ''))
-
-        agrupados[(modelo, color)]["precio"] = precio
-        agrupados[(modelo, color)]["tallas"].add(talla)
-
-    # Solo mostramos primero el modelo (no color ni talla todavía)
-    modelo_unico = next(iter(agrupados.keys()))[0]
-
-    est = estado_usuario.get(cid, {})
-    est["modelo"] = modelo_unico
-    est["fase"] = "esperando_color"
-    estado_usuario[cid] = est  # Actualiza el estado
-
-    # Preguntar por el color
-    colores_disponibles = list({color for (_, color) in agrupados.keys()})
-
-    await ctx.bot.send_message(
-        chat_id=cid,
-        text=f"🎯 Veo que estás interesado en la referencia *{modelo_unico}*.\n\n"
-             "¿Qué color deseas? 🎨",
-        parse_mode="Markdown",
-        reply_markup=menu_botones(colores_disponibles)
-    )
-    return True
 
 
 
