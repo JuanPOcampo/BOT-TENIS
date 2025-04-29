@@ -1213,26 +1213,42 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🛒 Confirmación para continuar con compra después de ver precios
-    if est.get("fase") == "confirmar_compra":
-        if txt in ("si", "sí", "si quiero comprar", "sí quiero comprar", "quiero comprar", "comprar", "dale", "SI", "De una", "claro",):
-            est["fase"] = "esperando_talla"
+# 🛒 Confirmación para continuar con compra después de ver precios
+if est.get("fase") == "confirmar_compra":
+    if txt in ("si", "sí", "si quiero comprar", "sí quiero comprar", "quiero comprar", "comprar", "dale", "SI", "De una", "claro"):
+        modelo = est.get("modelo_confirmado")
+        color = est.get("color_confirmado")
+
+        if not modelo:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="Perfecto 🎯 ¿Qué talla deseas?",
-                reply_markup=menu_botones(
-                    obtener_tallas_por_color(inv, est["marca"], est["modelo"], est["color"])
-                ),
+                text="❌ No encontré el modelo que seleccionaste. Vuelve a escribirlo o envíame una imagen.",
+                parse_mode="Markdown"
             )
+            est["fase"] = "inicio"
             return
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="No hay problema. Si deseas, puedes ver nuestro catálogo completo 📋.",
-                reply_markup=menu_botones(["Ver catálogo", "Enviar imagen"]),
-            )
-            reset_estado(cid)
-            return
+
+        est["modelo"] = modelo
+        est["color"] = color
+        est["fase"] = "esperando_talla"
+
+        tallas = obtener_tallas_por_color(inv, modelo, color)
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=f"Perfecto 🎯 ¿Qué talla deseas para el modelo *{modelo}* color *{color}*?",
+            parse_mode="Markdown",
+            reply_markup=menu_botones(tallas),
+        )
+        return
+
+    else:
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="No hay problema. Si deseas, puedes ver nuestro catálogo completo 📋.\n\n👉 Opciones: Ver catálogo / Enviar imagen",
+            parse_mode="Markdown"
+        )
+        reset_estado(cid)
+        return
 
     # 🔒 Video de confianza si desconfía
     if any(frase in txt for frase in (
@@ -1424,11 +1440,12 @@ async def manejar_precio(update, ctx, inventario):
             key = (
                 item.get("modelo", "desconocido"),
                 item.get("color", "varios colores"),
-                item.get("precio", "No disponible")
+                f"{int(item.get('precio', 0)):,}COP" if item.get("precio") else "No disponible"
             )
             agrupados[key].add(str(item.get("talla", "")))
 
         respuesta_final = ""
+        primer_producto = productos[0]
         for (modelo, color, precio), tallas in agrupados.items():
             tallas_ordenadas = sorted(tallas, key=lambda t: int(t) if t.isdigit() else t)
             tallas_str = ", ".join(tallas_ordenadas)
@@ -1438,23 +1455,32 @@ async def manejar_precio(update, ctx, inventario):
                 f"Tallas disponibles: {tallas_str}\n\n"
             )
 
+        # Guardar datos confirmados para continuar el flujo
+        estado_usuario[cid]["fase"] = "confirmar_compra"
+        estado_usuario[cid]["modelo_confirmado"] = primer_producto["modelo"]
+        estado_usuario[cid]["color_confirmado"] = primer_producto["color"]
+        estado_usuario[cid]["marca"] = primer_producto.get("marca", "sin marca")
+
         await ctx.bot.send_message(
             chat_id=cid,
-            text=(f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
-                  f"{respuesta_final}"
-                  "¿Te gustaría proseguir con la compra?"),
-            parse_mode="Markdown",
-            reply_markup=menu_botones(["Sí, quiero comprar", "No, gracias"])
+            text=(
+                f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
+                f"{respuesta_final}"
+                "¿Te gustaría proseguir con la compra?\n\n"
+                "👉 Escribe: *sí quiero comprar* o *no, gracias*"
+            ),
+            parse_mode="Markdown"
         )
-
-        estado_usuario[cid]["fase"] = "confirmar_compra"
         return True
 
     else:
         await ctx.bot.send_message(
             chat_id=cid,
-            text=f"😕 No encontré la referencia {referencia}. ¿Quieres revisar el catálogo?",
-            reply_markup=menu_botones(["Ver catálogo", "Volver al menú"]),
+            text=(
+                f"😕 No encontré la referencia {referencia}. "
+                "¿Quieres revisar el catálogo?\n\n"
+                "👉 Opciones: Ver catálogo / Volver al menú"
+            ),
             parse_mode="Markdown"
         )
         return True
