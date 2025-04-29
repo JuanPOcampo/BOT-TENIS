@@ -631,7 +631,11 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ─────────── Preguntas frecuentes (FAQ) ───────────
+# ─────────── Preguntas frecuentes (FAQ) ───────────
+
+    # 🛡️ Protección: no responder FAQs si está en flujo de pago o comprobante
+    if est.get("fase") in ("esperando_pago", "esperando_comprobante"):
+        return
 
     # FAQ 1: ¿Cuánto demora el envío?
     if any(frase in txt for frase in (
@@ -1064,7 +1068,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Fecha Venta": datetime.datetime.now().isoformat(),
             "Cliente": est["nombre"],
             "Teléfono": est["telefono"],
-            "Producto": f"{est['marca']} {est['modelo']}",
+            "Producto": f"{est['modelo']}",
             "Color": est["color"],
             "Talla": est["talla"],
             "Correo": est["correo"],
@@ -1084,7 +1088,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "🔸 *Contraentrega*: debes pagar *35.000 COP* ahora para cubrir el envío. Este valor se descuenta del total cuando recibas los tenis.\n\n"
             "🔸 *Transferencia inmediata*: si pagas el valor completo hoy, tienes un *5% de descuento* sobre el precio total.\n\n"
             "✉️ Escribe tu método de pago:\n"
-            "`Transferencia`, `QR` o `Contraentrega`"
+            "`Transferencia`, o `Contraentrega`"
         )
 
         await ctx.bot.send_message(
@@ -1095,13 +1099,18 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "esperando_pago"
         return
 
+
     # 💳 Método de pago
     if est.get("fase") == "esperando_pago":
         opt = normalize(txt_raw.replace(" ", ""))
         resumen = est["resumen"]
         precio_original = est.get("precio_total", precio)
 
-        if opt == "transferencia":
+        # Normalizaciones adicionales para detectar mejor "transferencia"
+        transfer_aliases = ("transferencia", "transferir", "pagoinmediato", "quierotransferir", "voyahacertransferencia")
+        contra_aliases = ("contraentrega", "contra", "contrapago")
+
+        if any(alias in opt for alias in transfer_aliases):
             est["fase"] = "esperando_comprobante"
             resumen["Pago"] = "Transferencia"
             descuento = int(precio_original * 0.05)
@@ -1120,20 +1129,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "• Bancolombia: *30300002233* (X100 sas)\n"
                     "• Nequi: *3177171171* (Car***Car***)\n"
                     "• Daviplata: *3004141021* (Zul***Mar***)\n\n"
-                    "📸 Envía la foto del comprobante aquí cuando lo tengas."
+                    "📸 Cuando realices el pago, por favor envía la foto del comprobante aquí."
                 ),
                 parse_mode="Markdown"
             )
 
-        elif opt == "qr":
-            est["fase"] = "esperando_comprobante"
-            resumen["Pago"] = "QR"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="🔲 Escanea el QR y luego envía la foto del comprobante aquí. 📸"
-            )
-
-        elif opt == "contraentrega":
+        elif any(alias in opt for alias in contra_aliases):
             resumen["Pago"] = "Contra entrega"
             resumen["Valor Anticipo"] = 35000
             est["fase"] = "esperando_comprobante"
@@ -1155,7 +1156,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="⚠️ Método de pago inválido. Escribe: *Transferencia*, *QR* o *Contraentrega*.",
+                text="⚠️ Opción no válida. Por favor escribe: *Transferencia* o *Contraentrega*.",
                 parse_mode="Markdown"
             )
         return
