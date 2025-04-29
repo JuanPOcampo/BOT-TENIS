@@ -909,57 +909,65 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # 🎨 Elegir color del modelo
-    if est.get("fase") == "esperando_color":
-        colores = obtener_colores_por_modelo(inv, est["marca"], est["modelo"])
-        if txt in map(normalize, colores):
-            est["color"] = next(c for c in colores if normalize(c) == txt)
-            est["fase"] = "esperando_talla"
-            tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=f"Las tallas disponibles para {est['modelo']} color {est['color']} son: {', '.join(tallas)}",
-                parse_mode="Markdown"
-            )
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="¿Qué talla deseas?",
-                reply_markup=menu_botones(tallas),
-            )
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=f"Los colores disponibles para {est['modelo']} son:\n" +
-                     "\n".join(f"- {c}" for c in colores),
-                parse_mode="Markdown"
-            )
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="¿Cuál color te interesa?",
-                reply_markup=menu_botones(colores),
-            )
-        return
-    # 👟 Elegir talla
-    if est.get("fase") == "esperando_talla":
-        tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
-        talla_detectada = detectar_talla(txt_raw, tallas)
+# 🎨 Elegir color del modelo
+if est.get("fase") == "esperando_color":
+    colores = obtener_colores_por_modelo(inv, est["marca"], est["modelo"])
+    if txt in map(normalize, colores):
+        est["color"] = next(c for c in colores if normalize(c) == txt)
+        est["fase"] = "esperando_talla"
 
-        if talla_detectada:
-            est["talla"] = talla_detectada
-            est["fase"] = "esperando_nombre"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="¿Tu nombre completo? 👤",
-                parse_mode="Markdown"
-            )
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=f"⚠️ Las tallas disponibles para {est['modelo']} color {est['color']} son:\n{', '.join(tallas)}",
-                parse_mode="Markdown",
-                reply_markup=menu_botones(tallas),
-            )
-        return
+        tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
+        if isinstance(tallas, (int, float, str)):
+            tallas = [str(tallas)]
+
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=f"Las tallas disponibles para {est['modelo']} color {est['color']} son: {', '.join(tallas)}",
+            parse_mode="Markdown"
+        )
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="¿Qué talla deseas?",
+            reply_markup=menu_botones(tallas),
+        )
+    else:
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=f"Los colores disponibles para {est['modelo']} son:\n" +
+                 "\n".join(f"- {c}" for c in colores),
+            parse_mode="Markdown"
+        )
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="¿Cuál color te interesa?",
+            reply_markup=menu_botones(colores),
+        )
+    return
+# 👟 Elegir talla
+if est.get("fase") == "esperando_talla":
+    tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
+    
+    if isinstance(tallas, (int, float, str)):
+        tallas = [str(tallas)]
+
+    talla_detectada = detectar_talla(txt_raw, tallas)
+
+    if talla_detectada:
+        est["talla"] = talla_detectada
+        est["fase"] = "esperando_nombre"
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="¿Tu nombre completo? 👤",
+            parse_mode="Markdown"
+        )
+    else:
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=f"⚠️ Las tallas disponibles para {est['modelo']} color {est['color']} son:\n{', '.join(tallas)}",
+            parse_mode="Markdown",
+            reply_markup=menu_botones(tallas),
+        )
+    return
 
     # ✏️ Nombre del cliente
     if est.get("fase") == "esperando_nombre":
