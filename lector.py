@@ -1440,10 +1440,17 @@ async def manejar_precio(update, ctx, inventario):
         from collections import defaultdict
         agrupados = defaultdict(set)
         for item in productos:
+            # Limpia el precio sin importar si tiene puntos, "COP", etc.
+            precio_raw = str(item.get("precio", "0")).replace(".", "").replace("COP", "").strip()
+            try:
+                precio_formateado = f"{int(precio_raw):,}COP"
+            except ValueError:
+                precio_formateado = "No disponible"
+
             key = (
                 item.get("modelo", "desconocido"),
                 item.get("color", "varios colores"),
-                f"{int(item.get('precio', 0)):,}COP" if item.get("precio") else "No disponible"
+                precio_formateado
             )
             agrupados[key].add(str(item.get("talla", "")))
 
