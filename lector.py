@@ -1074,43 +1074,200 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["resumen"] = resumen
         text_res = (
             f"✅ Pedido: {sale_id}\n"
-            f"👤 Nombre: {est['nombre']}  📧 {est['correo']}  📲 {est['telefono']}\n"
+            f"👤 Nombre: {est['nombre']}\n"
             f"📧 Correo: {est['correo']}\n"
             f"📲 Celular: {est['telefono']}\n"
             f"🏠 Dirección de envío: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
-            f"👟 Producto: {est['marca']} {est['modelo']} color {est['color']} talla {est['talla']}\n"
+            f"👟 Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
             f"💰 Valor a pagar: {precio}\n\n"
             "Elige método de pago:"
         )
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=text_res,
-            reply_markup=menu_botones(["TRANSFERENCIA", "QR", "CONTRA ENTREGA"]),
-        )
-        est["fase"] = "esperando_pago"
+
+    # 💳 Mostrar opciones de pago (solo texto)
+    await ctx.bot.send_message(
+        chat_id=cid,
+        text=(
+            "💳 *¿Cómo deseas hacer el pago?*\n\n"
+            "🔸 *Contraentrega*\n"
+            "Deberás hacer un pago de *35.000 COP* para cubrir el envío. Este valor se descuenta del precio total cuando recibas los tenis en casa.\n\n"
+            "🔸 *Transferencia inmediata*\n"
+            "¡Promoción del día! Si haces el pago completo hoy, recibes un *5% de descuento* en tus tenis.\n\n"
+            "✉️ Escribe tu método de pago:\n"
+            "`Transferencia` o `Contraentrega`",
+        ),
+        parse_mode="Markdown"
+    )
+    est["fase"] = "esperando_pago"
+    return
+
+    # 💳 Método de pago
+    if est.get("fase") == "esperando_pago":
+        opt = normalize(txt_raw.replace(" ", ""))
+        resumen = est["resumen"]
+        precio_original = est.get("precio_total", 0)
+
+        if opt == "transferencia":
+            descuento = int(precio_original * 0.05)
+            valor_final = precio_original - descuento
+            resumen["Pago"] = "Transferencia"
+            resumen["Descuento"] = f"-{descuento} COP"
+            resumen["Valor Final"] = valor_final
+
+            est["fase"] = "esperando_comprobante"
+
+    # 💳 Mostrar opciones de pago (solo texto)
+    await ctx.bot.send_message(
+        chat_id=cid,
+        text=(
+            "💳 *¿Cómo deseas hacer el pago?*\n\n"
+            "🔸 *Contraentrega*\n"
+            "Deberás hacer un pago de *35.000 COP* para cubrir el envío. Este valor se descuenta del precio total cuando recibas los tenis en casa.\n\n"
+            "🔸 *Transferencia inmediata*\n"
+            "¡Promoción del día! Si haces el pago completo hoy, recibes un *5% de descuento* en tus tenis.\n\n"
+            "✉️ Escribe tu método de pago:\n"
+            "`Transferencia` o `Contraentrega`",
+        ),
+        parse_mode="Markdown"
+    )
+    est["fase"] = "esperando_pago"
+    return
+
+    # 💳 Método de pago
+    if est.get("fase") == "esperando_pago":
+        opt = normalize(txt_raw.replace(" ", ""))
+        resumen = est["resumen"]
+        precio_original = est.get("precio_total", 0)
+
+        if opt == "transferencia":
+            descuento = int(precio_original * 0.05)
+            valor_final = precio_original - descuento
+            resumen["Pago"] = "Transferencia"
+            resumen["Descuento"] = f"-{descuento} COP"
+            resumen["Valor Final"] = valor_final
+
+            est["fase"] = "esperando_comprobante"
+
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    f"🟢 Perfecto, elegiste *Transferencia inmediata*.\n"
+                    f"💰 Valor original: {precio_original} COP\n"
+                    f"🎉 Descuento 5%: -{descuento} COP\n"
+                    f"✅ *Total a pagar: {valor_final} COP*\n\n"
+                    "💳 Realiza el pago a cualquiera de estas cuentas:\n\n"
+                    "• Bancolombia: *30300002233* a nombre de *X100 sas*\n"
+                    "• Nequi: *3177171171* a nombre de *Car***Car***\n"
+                    "• Daviplata: *3004141021* a nombre de *Zul***Mar***\n\n"
+                    "📸 Cuando realices el pago, por favor envía la foto del comprobante."
+                ),
+                parse_mode="Markdown"
+            )
+        elif opt == "contraentrega":
+            resumen["Pago"] = "Contra entrega"
+            resumen["Valor Anticipo"] = 35000
+            est["fase"] = "esperando_comprobante"
+
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "🟡 Elegiste *Contra entrega*.\n"
+                    "Debes realizar ahora un pago de *35.000 COP* para cubrir el envío (se descuenta del precio total cuando recibas los tenis).\n\n"
+                    "Los números de cuenta para pagar son:\n\n"
+                    "• Bancolombia: *30300002233* a nombre de *X100 sas*\n"
+                    "• Nequi: *3177171171* a nombre de *Car***Car***\n"
+                    "• Daviplata: *3004141021* a nombre de *Zul***Mar***\n\n"
+                    "📸 Envía el comprobante del pago cuando lo tengas listo."
+                ),
+                parse_mode="Markdown"
+            )
+
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="⚠️ Opción no válida. Por favor escribe *Transferencia* o *Contraentrega*.",
+                parse_mode="Markdown"
+            )
         return
 
     # 💳 Método de pago
     if est.get("fase") == "esperando_pago":
         opt = normalize(txt_raw.replace(" ", ""))
         resumen = est["resumen"]
+        precio_original = est.get("precio_total", 0)
 
         if opt == "transferencia":
-            est["fase"] = "esperando_comprobante"
             resumen["Pago"] = "Transferencia"
-            await ctx.bot.send_message(chat_id=cid, text="Envía la foto de tu comprobante. 📸")
-        elif opt == "qr":
+            descuento = int(precio_original * 0.05)
+            valor_final = precio_original - descuento
+
+            resumen["Descuento"] = f"-{descuento} COP"
+            resumen["Valor Final"] = valor_final
             est["fase"] = "esperando_comprobante"
-            resumen["Pago"] = "QR"
-            await ctx.bot.send_message(chat_id=cid, text="Escanea el QR y envía la foto. 📸")
+
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    f"🟢 Perfecto, elegiste *Transferencia inmediata*.\n"
+                    f"💰 Valor original: {precio_original} COP\n"
+                    f"🎉 Descuento 5%: -{descuento} COP\n"
+                    f"✅ *Total a pagar: {valor_final} COP*\n\n"
+                    "💳 Realiza el pago a cualquiera de estas cuentas:\n\n"
+                    "• Bancolombia: *30300002233* a nombre de *X100 sas*\n"
+                    "• Nequi: *3177171171* a nombre de *Car***Car***\n"
+                    "• Daviplata: *3004141021* a nombre de *Zul***Mar***\n\n"
+                    "📸 Cuando realices el pago, por favor envía la foto del comprobante."
+                ),
+                parse_mode="Markdown"
+            )
+
         elif opt == "contraentrega":
             resumen["Pago"] = "Contra entrega"
-            registrar_orden(resumen)
-            await ctx.bot.send_message(chat_id=cid, text="✅ Pedido registrado para *Contra entrega*. ¡Gracias!", parse_mode="Markdown")
-            reset_estado(cid)
+            resumen["Valor Anticipo"] = 35000
+            est["fase"] = "esperando_comprobante"
+
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "🟡 Elegiste *Contra entrega*.\n"
+                    "Debes realizar ahora un pago de *35.000 COP* para cubrir el envío (se descuenta del precio total cuando recibas los tenis).\n\n"
+                    "Los números de cuenta para pagar son:\n\n"
+                    "• Bancolombia: *30300002233* a nombre de *X100 sas*\n"
+                    "• Nequi: *3177171171* a nombre de *Car***Car***\n"
+                    "• Daviplata: *3004141021* a nombre de *Zul***Mar***\n\n"
+                    "📸 Envía el comprobante del pago cuando lo tengas listo."
+                ),
+                parse_mode="Markdown"
+            )
+
         else:
-            await ctx.bot.send_message(chat_id=cid, text="⚠️ Método de pago inválido. Elige uno correcto.")
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="⚠️ Opción no válida. Por favor escribe *Transferencia* o *Contraentrega*.",
+                parse_mode="Markdown"
+            )
         return
+
+    # 📸 Recibir comprobante de pago
+    if est.get("fase") == "esperando_comprobante" and update.message.photo:
+        f = await update.message.photo[-1].get_file()
+        tmp = os.path.join("temp", f"{cid}_proof.jpg")
+        os.makedirs("temp", exist_ok=True)
+        await f.download_to_drive(tmp)
+
+        resumen = est["resumen"]
+        registrar_orden(resumen)
+        enviar_correo(est["correo"], f"Pago recibido {resumen['Número Venta']}", json.dumps(resumen, indent=2))
+        enviar_correo_con_adjunto(EMAIL_JEFE, f"Comprobante {resumen['Número Venta']}", json.dumps(resumen, indent=2), tmp)
+        os.remove(tmp)
+
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="✅ ¡Pago registrado exitosamente! Tu pedido está en proceso. 🚚",
+            parse_mode="Markdown"
+        )
+        reset_estado(cid)
+        return
+
 
     # 📸 Recibir comprobante de pago
     if est.get("fase") == "esperando_comprobante" and update.message.photo:
