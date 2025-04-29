@@ -344,12 +344,11 @@ def obtener_colores_por_modelo(inv: list[dict], marca: str, modelo: str) -> list
                    and normalize(i.get("modelo","")) == normalize(modelo)
                    and disponible(i)})
 
-def obtener_tallas_por_color(inv: list[dict], marca: str, modelo: str, color: str) -> list[str]:
-    return sorted({str(i.get("talla","")).strip()
+def obtener_tallas_por_color(inv: list[dict], modelo: str, color: str) -> list[str]:
+    return sorted({str(i.get("talla", "")).strip()
                    for i in inv
-                   if normalize(i.get("marca"))==normalize(marca)
-                   and normalize(i.get("modelo"))==normalize(modelo)
-                   and normalize(i.get("color"))==normalize(color)
+                   if normalize(i.get("modelo")) == normalize(modelo)
+                   and normalize(i.get("color")) == normalize(color)
                    and disponible(i)})
 
 #  TRANSCRIPCIÓN DE AUDIO (WHISPER)
