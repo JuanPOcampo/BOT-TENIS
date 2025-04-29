@@ -1186,7 +1186,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if est.get("fase") == "confirmar_compra":
         if txt in ("si", "sí", "si quiero comprar", "sí quiero comprar", "quiero comprar", "comprar", "dale", "SI", "De una", "claro"):
             modelo = est.get("modelo_confirmado")
-            color_confirmado = est.get("color_confirmado")
 
             if not modelo:
                 await ctx.bot.send_message(
@@ -1199,7 +1198,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             est["modelo"] = modelo
 
-            # Obtener colores disponibles para el modelo
+            # Buscar colores disponibles para ese modelo (sin asumir el confirmado)
             colores = obtener_colores_por_modelo(inv, modelo)
             if isinstance(colores, (int, float, str)):
                 colores = [str(colores)]
@@ -1207,7 +1206,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if len(colores) == 1:
                 est["color"] = colores[0]
                 est["fase"] = "esperando_talla"
-
                 tallas = obtener_tallas_por_color(inv, modelo, colores[0])
                 if isinstance(tallas, (int, float, str)):
                     tallas = [str(tallas)]
@@ -1226,7 +1224,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await ctx.bot.send_message(
                     chat_id=cid,
                     text=(
-                        f"🎨 El modelo *{modelo}* está disponible en varios colores:\n\n"
+                        f"🎨 El modelo *{modelo}* está disponible en varios colores.\n\n"
                         f"{colores_str}\n\n"
                         "¿Cuál color te interesa?"
                     ),
