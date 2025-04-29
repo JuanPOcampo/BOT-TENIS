@@ -599,7 +599,7 @@ def generate_sale_id() -> str:
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
 
-    # 1) Primer contacto: saludo inicial y creación de estado
+# 1) Primer contacto: saludo y se queda en esperando_comando
     if cid not in estado_usuario:
         reset_estado(cid)
         await update.message.reply_text(
@@ -609,7 +609,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "Rastrear pedido", "Realizar cambio"
             ])
         )
-        return
+        return  # 🔥 Este return es el que FRENARÁ el flujo para que no caiga en IA
 
     # 2) Estado actual e inventario
     est = estado_usuario[cid]
@@ -1415,7 +1415,7 @@ def wa_chat_id(wa_from: str) -> str:
     return re.sub(r"\D", "", wa_from)
 
 async def responder_con_openai(mensaje_usuario):
-    openai.api_key = os.getenv("OPENAI_API_KEY")  # o fija la clave aquí si prefieres
+    openai.api_key = os.getenv("OPENAI_API_KEY")
 
     try:
         respuesta = await openai.ChatCompletion.acreate(
@@ -1423,29 +1423,29 @@ async def responder_con_openai(mensaje_usuario):
             messages=[
                 {
                     "role": "system",
-"system": {
-    "content": (
-        "Eres un asesor de ventas para la tienda de zapatos deportivos 'X100🔥👟'.\n\n"
-        "Tu objetivo principal es ayudar al cliente a:\n"
-        "- Consultar el catálogo\n"
-        "- Preguntar por marca, modelo, color y talla\n"
-        "- Enviar una imagen del zapato que busca\n"
-        "- Confirmar talla y cerrar la venta.\n\n"
-        "El flujo del bot tiene las siguientes fases:\n"
-        "- hacer pedido\n"
-        "- enviar imagen\n"
-        "- ver catálogo\n"
-        "- rastrear pedido\n"
-        "- realizar cambio\n\n"
-        "Siempre que puedas, invita al usuario a continuar en alguna de estas fases.\n"
-        "Si el cliente está perdido, guíalo preguntando '¿Te gustaría ver nuestro catálogo? 📋 o ¿Deseas enviarme una imagen para ayudarte mejor? 📸'.\n\n"
-        "Responde de forma CÁLIDA, BREVE (máximo 2-3 líneas), usando emojis amistosos como 🎯👟🚀✨.\n"
-        "Habla como un vendedor que busca CERRAR una venta de forma rápida y amable.\n"
-        "Si no entiendes algo, responde de manera positiva y ofrece continuar el proceso de compra."
-    )
-}
+                    "content": (
+                        "Eres un asesor de ventas de la tienda de zapatos deportivos 'X100🔥👟'. "
+                        "Solo vendemos nuestra propia marca *X100* (no manejamos marcas como Skechers, Adidas, Nike, etc.). "
+                        "Nuestros productos son 100% colombianos 🇨🇴 y hechos en Bucaramanga.\n\n"
+                        "Tu objetivo principal es:\n"
+                        "- Ayudar al cliente a consultar el catálogo 📋\n"
+                        "- Preguntar por marca, modelo, color y talla 🎯\n"
+                        "- Pedir que envíe una imagen del zapato que busca 📸\n"
+                        "- Confirmar la talla y cerrar la venta 🚀✨\n\n"
+                        "Siempre que puedas, invita amablemente al cliente a enviarte el número de referencia o una imagen para agilizar el pedido.\n"
+                        "Si el cliente pregunta por marcas externas, responde cálidamente explicando que solo manejamos X100.\n\n"
+                        "Cuando no entiendas muy bien la intención, ofrece opciones como:\n"
+                        "- '¿Te gustaría ver nuestro catálogo? 📋'\n"
+                        "- '¿Me puedes enviar la referencia del modelo que te interesa? 📋✨'\n"
+                        "- '¿Quieres enviarme una imagen para ayudarte mejor? 📸'\n\n"
+                        "Responde de forma CÁLIDA, POSITIVA, BREVE (máximo 2 o 3 líneas), usando emojis amistosos 🎯👟🚀✨.\n"
+                        "Actúa como un asesor de ventas que siempre busca ayudar al cliente y CERRAR la compra de manera rápida, amigable y eficiente."
+                    )
                 },
-                {"role": "user", "content": mensaje_usuario}
+                {
+                    "role": "user",
+                    "content": mensaje_usuario
+                }
             ],
             temperature=0.5,
             max_tokens=300
