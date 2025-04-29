@@ -1085,7 +1085,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"👟 Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
             f"💰 Valor a pagar: {precio}\n\n"
             "💳 ¿Cómo deseas hacer el pago?\n\n"
-            "🔸 *Contraentrega*: debes pagar *35.000 COP* ahora para cubrir el envío. Este valor se descuenta del total cuando recibas los tenis.\n\n"
+            "🔸 *Contraentrega*: debes pagar *35.000 COP* ahora para cubrir el envío. "
+            "Este valor se descuenta del total cuando recibas los tenis.\n\n"
             "🔸 *Transferencia inmediata*: si pagas el valor completo hoy, tienes un *5% de descuento* sobre el precio total.\n\n"
             "✉️ Escribe tu método de pago:\n"
             "`Transferencia`, o `Contraentrega`"
@@ -1099,18 +1100,39 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "esperando_pago"
         return
 
-
     # 💳 Método de pago
     if est.get("fase") == "esperando_pago":
-        opt = normalize(txt_raw.replace(" ", ""))
+        opciones_validas = {
+            "transferencia": "transferencia",
+            "transferenci": "transferencia",
+            "trans": "transferencia",
+            "transf": "transferencia",
+            "pago inmediato": "transferencia",
+            "qr": "qr",
+            "contraentrega": "contraentrega",
+            "contra entrega": "contraentrega",
+            "contra": "contraentrega",
+            "contrapago": "contraentrega"
+        }
+
+        op_detectada = None
+        for clave in opciones_validas:
+            if clave in normalize(txt_raw):
+                op_detectada = opciones_validas[clave]
+                break
+
+        if not op_detectada:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="⚠️ Opción no válida. Por favor escribe: *Transferencia* o *Contraentrega*.",
+                parse_mode="Markdown"
+            )
+            return
+
         resumen = est["resumen"]
         precio_original = est.get("precio_total", precio)
 
-        # Normalizaciones adicionales para detectar mejor "transferencia"
-        transfer_aliases = ("transferencia", "transferir", "pagoinmediato", "quierotransferir", "voyahacertransferencia")
-        contra_aliases = ("contraentrega", "contra", "contrapago")
-
-        if any(alias in opt for alias in transfer_aliases):
+        if op_detectada == "transferencia":
             est["fase"] = "esperando_comprobante"
             resumen["Pago"] = "Transferencia"
             descuento = int(precio_original * 0.05)
@@ -1134,7 +1156,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
 
-        elif any(alias in opt for alias in contra_aliases):
+        elif op_detectada == "contraentrega":
             resumen["Pago"] = "Contra entrega"
             resumen["Valor Anticipo"] = 35000
             est["fase"] = "esperando_comprobante"
@@ -1150,13 +1172,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "• Daviplata: *3004141021* (Zul***Mar***)\n\n"
                     "📸 Envía la foto del comprobante cuando lo tengas."
                 ),
-                parse_mode="Markdown"
-            )
-
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="⚠️ Opción no válida. Por favor escribe: *Transferencia* o *Contraentrega*.",
                 parse_mode="Markdown"
             )
         return
@@ -1709,6 +1724,13 @@ async def procesar_wa(cid: str, body: str) -> dict:
     # 🔥 Aseguramos que el estado exista
     if cid not in estado_usuario:
         reset_estado(cid)
+
+    # 🔒 Cargar estado actual del usuario
+    est = estado_usuario[cid]
+
+    # 🚫 Bloquear uso de IA si estamos en fases críticas de pago
+    if est.get("fase") in ("esperando_pago", "esperando_comprobante"):
+        return {"type": "text", "text": ""}  # No pasa a IA, aunque el bot no responda
 
     try:
         # 🔥 Intenta responder con el flujo normal del BOT
