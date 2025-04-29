@@ -895,7 +895,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if txt in map(normalize, modelos):
             est["modelo"] = next(m for m in modelos if normalize(m) == txt)
             est["fase"] = "esperando_color"
-            colores = obtener_colores_por_modelo(inv, est["marca"], est["modelo"])
+            colores = obtener_colores_por_modelo(inv, est["modelo"])
             await ctx.bot.send_message(
                 chat_id=cid,
                 text="¿Qué color deseas?",
@@ -911,7 +911,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 🎨 Elegir color del modelo
     if est.get("fase") == "esperando_color":
-        colores = obtener_colores_por_modelo(inv, est["marca"], est["modelo"])
+        colores = obtener_colores_por_modelo(inv, est["modelo"])
         if isinstance(colores, (int, float, str)):
             colores = [str(colores)]
 
@@ -1074,10 +1074,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["resumen"] = resumen
         text_res = (
             f"✅ Pedido: {sale_id}\n"
-            f"👤 {est['nombre']}  📧 {est['correo']}  📲 {est['telefono']}\n"
-            f"🏠 {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
-            f"👟 {est['marca']} {est['modelo']} color {est['color']} talla {est['talla']}\n"
-            f"💰 {precio}\n\n"
+            f"👤 Nombre: {est['nombre']}  📧 {est['correo']}  📲 {est['telefono']}\n"
+            f"📧 Correo: {est['correo']}\n"
+            f"📲 Celular: {est['telefono']}\n"
+            f"🏠 Dirección de envío: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
+            f"👟 Producto: {est['marca']} {est['modelo']} color {est['color']} talla {est['talla']}\n"
+            f"💰 Valor a pagar: {precio}\n\n"
             "Elige método de pago:"
         )
         await ctx.bot.send_message(
