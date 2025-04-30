@@ -163,6 +163,9 @@ MODEL_HASHES = precargar_imagenes_drive(drive_service, DRIVE_FOLDER_ID)
 for h, ref in MODEL_HASHES.items():
     print(f"HASH precargado: {h} → {ref}")
 
+def normalize(text):
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("utf-8").lower()
+
 def identify_model_from_stream(path: str) -> str | None:
     """
     Abre la imagen subida, calcula su hash y busca directamente
@@ -1117,7 +1120,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         op_detectada = None
         for clave in opciones_validas:
-            if clave in normalize(txt_raw):
+            if clave in texto_normalizado:
                 op_detectada = opciones_validas[clave]
                 break
 
@@ -1176,27 +1179,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # 📸 Recibir comprobante de pago
-    if est.get("fase") == "esperando_comprobante" and update.message.photo:
-        f = await update.message.photo[-1].get_file()
-        tmp = os.path.join("temp", f"{cid}_proof.jpg")
-        os.makedirs("temp", exist_ok=True)
-        await f.download_to_drive(tmp)
-
-        resumen = est["resumen"]
-        registrar_orden(resumen)
-        enviar_correo(est["correo"], f"Pago recibido {resumen['Número Venta']}", json.dumps(resumen, indent=2))
-        enviar_correo_con_adjunto(EMAIL_JEFE, f"Comprobante {resumen['Número Venta']}", json.dumps(resumen, indent=2), tmp)
-        os.remove(tmp)
-
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="✅ ¡Pago registrado exitosamente! Tu pedido está en proceso. 🚚",
-            parse_mode="Markdown"
-        )
-        reset_estado(cid)
-        return
-
     # 🚚 Rastrear pedido
     if est.get("fase") == "esperando_numero_rastreo":
         await ctx.bot.send_message(
@@ -1247,7 +1229,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 reply_markup=ReplyKeyboardRemove()
             )
             return
-        txt = normalize(txt_raw)
 
     # 🖼️ Intención global de imagen
     if menciona_imagen(txt):
