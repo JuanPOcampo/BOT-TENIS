@@ -1076,20 +1076,23 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 🏡 Dirección de envío
     if est.get("fase") == "esperando_direccion":
         est["direccion"] = txt_raw
+        precio = next((i["precio"] for i in inv
+                       if normalize(i["marca"]) == normalize(est["marca"])
+                       and normalize(i["modelo"]) == normalize(est["modelo"])
+                       and normalize(i["color"]) == normalize(est["color"])), "N/A")
         sale_id = generate_sale_id()
         est["sale_id"] = sale_id
-
-        precio_total = calcular_precio_total(est)
-        est["precio_total"] = precio_total
-
         resumen = {
-            "Pedido":    sale_id,
-            "Nombre":    est["nombre"],
-            "Correo":    est["correo"],
-            "Teléfono":  est["telefono"],
-            "Dirección": f"{est['direccion']}, {est['ciudad']}, {est['provincia']}",
-            "Producto":  f"{est['modelo']} color {est['color']} talla {est['talla']}",
-            "Valor":     precio_total,
+            "Número Venta": sale_id,
+            "Fecha Venta": datetime.datetime.now().isoformat(),
+            "Cliente": est["nombre"],
+            "Teléfono": est["telefono"],
+            "Producto": f"{est['modelo']}",
+            "Color": est["color"],
+            "Talla": est["talla"],
+            "Correo": est["correo"],
+            "Pago": None,
+            "Estado": "PENDIENTE"
         }
         est["resumen"] = resumen
 
