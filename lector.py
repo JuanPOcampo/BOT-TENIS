@@ -187,14 +187,7 @@ def identify_model_from_stream(path: str) -> str | None:
     return modelo
 # ───────── utilidades de precios ─────────
 def calcular_precio_total(est):
-    """
-    Devuelve el precio base del par que el usuario eligió,
-    tomado del inventario global `inv`.
-
-    ➜ Ajusta aquí si necesitas sumar envío, impuestos u otros
-      recargos fijos.
-    """
-    global inv                             # ya lo tienes cargado al arrancar
+    global inv            # ←⏎ añade esta línea
 
     precio_base = next(
         (
@@ -204,9 +197,8 @@ def calcular_precio_total(est):
             and normalize(item["modelo"]) == normalize(est["modelo"])
             and normalize(item["color"])  == normalize(est["color"])
         ),
-        0                                   # fallback si no encuentra
+        0
     )
-
     return precio_base
 
 # ——— VARIABLES DE ENTORNO ——————————————————————————————————————————————
@@ -376,6 +368,9 @@ def obtener_tallas_por_color(inv: list[dict], modelo: str, color: str) -> list[s
         and normalize(i.get("color", "")) == normalize(color)
         and disponible(i)
     })
+# ─── Inventario global ───
+inv = obtener_inventario()
+print(f"✅ Inventario cargado: {len(inv)} registros")
 
 #  TRANSCRIPCIÓN DE AUDIO (WHISPER)
 # ───────────────────────────────────────────────────────────────
@@ -638,7 +633,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 2) Estado actual e inventario
     est = estado_usuario[cid]
-    inv = obtener_inventario()
 
     # 3) Captura y normaliza texto del usuario
     txt_raw = update.message.text or ""
