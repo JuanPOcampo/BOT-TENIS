@@ -1684,19 +1684,18 @@ async def responder_con_openai(mensaje_usuario):
 
 # 4. Procesar mensaje de WhatsApp
 async def procesar_wa(cid: str, body: str) -> dict:
-    texto = body.lower() if body else ""  # Si no hay texto, asigna vacío a 'texto'
+    texto = body.lower() if body else ""
     palabras_genericas = [
         "hola", "buenas", "gracias", "catálogo", "ver catálogo", 
         "hacer pedido", "enviar imagen", "rastrear pedido", "realizar cambio"
     ]
 
-    # Asegurándonos de que 'txt' siempre tenga algo
-    txt = texto if texto else ""  # Si texto es nulo o vacío, asigna vacío a 'txt'
+    txt = texto if texto else ""
 
     class DummyCtx(SimpleNamespace):
         async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
         async def bot_send_chat_action(self, chat_id, action, **kw): pass
-        async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ''}")
+        async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ' '}]")
 
     ctx = DummyCtx(resp=[], bot=SimpleNamespace(
         send_message=lambda chat_id, text, **kw: asyncio.create_task(ctx.bot_send(chat_id, text)),
@@ -1721,25 +1720,21 @@ async def procesar_wa(cid: str, body: str) -> dict:
         effective_chat=SimpleNamespace(id=cid)
     )
 
-    # 🔥 Aseguramos que el estado exista
     if cid not in estado_usuario:
         reset_estado(cid)
 
-    # 🔒 Cargar estado actual del usuario
-    est = estado_usuario[cid]
-
-    # 🚫 Bloquear uso de IA si estamos en fases críticas de pago
-    if est.get("fase") in ("esperando_pago", "esperando_comprobante"):
-        return {"type": "text", "text": ""}  # No pasa a IA, aunque el bot no responda
-
     try:
-        # 🔥 Intenta responder con el flujo normal del BOT
         await responder(dummy_update, ctx)
 
         if ctx.resp:
             print(f"[DEBUG] BOT respondió correctamente: {ctx.resp}")
             return {"type": "text", "text": "\n".join(ctx.resp)}
         else:
+            est = estado_usuario[cid]
+            if est.get("fase") in ("esperando_pago", "esperando_comprobante"):
+                print("[DEBUG] Fase crítica: el bot no respondió pero no se usará IA.")
+                return {"type": "text", "text": "💬 Estoy esperando que confirmes tu método de pago o me envíes el comprobante. 📸"}
+
             print(f"[DEBUG] BOT no respondió nada, se usará IA para el mensaje: {body}")
             respuesta_ia = await responder_con_openai(body)
             return {"type": "text", "text": respuesta_ia}
