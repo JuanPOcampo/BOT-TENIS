@@ -1103,82 +1103,92 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "esperando_pago"
         return
 
-    # 💳 Método de pago
-    if est.get("fase") == "esperando_pago":
-        opciones_validas = {
-            "transferencia": "transferencia",
-            "transferenci": "transferencia",
-            "trans": "transferencia",
-            "transf": "transferencia",
-            "pagoinmediato": "transferencia",
-            "qr": "qr",
-            "contraentrega": "contraentrega",
-            "contra entrega": "contraentrega",
-            "contra": "contraentrega",
-            "contrapago": "contraentrega"
-        }
+# 💳 Método de pago
+if est.get("fase") == "esperando_pago":
+    print(f"[DEBUG] Entrando en fase: esperando_pago")
+    print(f"[DEBUG] Mensaje recibido para pago: {txt_raw}")
 
-        op_detectada = None
-        for clave in opciones_validas:
-            if clave in txt:
-                op_detectada = opciones_validas[clave]
-                break
+    opciones_validas = {
+        "transferencia": "transferencia",
+        "pagoinmediato": "transferencia",
+        "qr": "qr",
+        "contraentrega": "contraentrega",
+        "contraentrega": "contraentrega",
+        "contra": "contraentrega",
+        "contrapago": "contraentrega"
+    }
 
-        if not op_detectada:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="⚠️ Opción no válida. Por favor escribe: *Transferencia* o *Contraentrega*.",
-                parse_mode="Markdown"
-            )
-            return
+    # Limpiar texto crudo (remueve tildes, pasa a minúsculas y elimina espacios)
+    txt_limpio = normalize(txt_raw).replace(" ", "")
+    print(f"[DEBUG] Texto normalizado sin espacios: {txt_limpio}")
 
-        resumen = est["resumen"]
-        precio_original = est.get("precio_total", precio)
+    op_detectada = None
+    for clave in opciones_validas:
+        if clave in txt_limpio:
+            op_detectada = opciones_validas[clave]
+            break
 
-        if op_detectada == "transferencia":
-            est["fase"] = "esperando_comprobante"
-            resumen["Pago"] = "Transferencia"
-            descuento = int(precio_original * 0.05)
-            valor_final = precio_original - descuento
-            resumen["Descuento"] = f"-{descuento} COP"
-            resumen["Valor Final"] = valor_final
+    print(f"[DEBUG] Opción de pago detectada: {op_detectada}")
 
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    f"🟢 Elegiste *Transferencia inmediata*.\n"
-                    f"💰 Valor original: {precio_original} COP\n"
-                    f"🎉 Descuento 5%: -{descuento} COP\n"
-                    f"✅ *Total a pagar: {valor_final} COP*\n\n"
-                    "💳 Realiza el pago a cualquiera de estas cuentas:\n"
-                    "• Bancolombia: *30300002233* (X100 sas)\n"
-                    "• Nequi: *3177171171* (Car***Car***)\n"
-                    "• Daviplata: *3004141021* (Zul***Mar***)\n\n"
-                    "📸 Cuando realices el pago, por favor envía la foto del comprobante aquí."
-                ),
-                parse_mode="Markdown"
-            )
-
-        elif op_detectada == "contraentrega":
-            resumen["Pago"] = "Contra entrega"
-            resumen["Valor Anticipo"] = 35000
-            est["fase"] = "esperando_comprobante"
-
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    "🟡 Elegiste *Contra entrega*.\n"
-                    "Debes pagar *35.000 COP* ahora para cubrir el envío. Este valor se descuenta del total cuando recibas los tenis.\n\n"
-                    "Puedes pagar a cualquiera de estas cuentas:\n"
-                    "• Bancolombia: *30300002233* (X100 sas)\n"
-                    "• Nequi: *3177171171* (Car***Car***)\n"
-                    "• Daviplata: *3004141021* (Zul***Mar***)\n\n"
-                    "📸 Envía la foto del comprobante cuando lo tengas."
-                ),
-                parse_mode="Markdown"
-            )
-
+    if not op_detectada:
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="⚠️ Opción no válida. Por favor escribe: *Transferencia* o *Contraentrega*.",
+            parse_mode="Markdown"
+        )
         return
+
+    resumen = est["resumen"]
+    precio_original = est.get("precio_total", precio)
+
+    if op_detectada == "transferencia":
+        est["fase"] = "esperando_comprobante"
+        resumen["Pago"] = "Transferencia"
+        descuento = int(precio_original * 0.05)
+        valor_final = precio_original - descuento
+        resumen["Descuento"] = f"-{descuento} COP"
+        resumen["Valor Final"] = valor_final
+
+        print(f"[DEBUG] Aplicando descuento por transferencia. Total: {valor_final}")
+
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                f"🟢 Elegiste *Transferencia inmediata*.\n"
+                f"💰 Valor original: {precio_original} COP\n"
+                f"🎉 Descuento 5%: -{descuento} COP\n"
+                f"✅ *Total a pagar: {valor_final} COP*\n\n"
+                "💳 Realiza el pago a cualquiera de estas cuentas:\n"
+                "• Bancolombia: *30300002233* (X100 sas)\n"
+                "• Nequi: *3177171171* (Car***Car***)\n"
+                "• Daviplata: *3004141021* (Zul***Mar***)\n\n"
+                "📸 Cuando realices el pago, por favor envía la foto del comprobante aquí."
+            ),
+            parse_mode="Markdown"
+        )
+
+    elif op_detectada == "contraentrega":
+        resumen["Pago"] = "Contra entrega"
+        resumen["Valor Anticipo"] = 35000
+        est["fase"] = "esperando_comprobante"
+
+        print(f"[DEBUG] Seleccionado método contraentrega")
+
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                "🟡 Elegiste *Contra entrega*.\n"
+                "Debes pagar *35.000 COP* ahora para cubrir el envío. Este valor se descuenta del total cuando recibas los tenis.\n\n"
+                "Puedes pagar a cualquiera de estas cuentas:\n"
+                "• Bancolombia: *30300002233* (X100 sas)\n"
+                "• Nequi: *3177171171* (Car***Car***)\n"
+                "• Daviplata: *3004141021* (Zul***Mar***)\n\n"
+                "📸 Envía la foto del comprobante cuando lo tengas."
+            ),
+            parse_mode="Markdown"
+        )
+
+    return
 
 
     # 🚚 Rastrear pedido
