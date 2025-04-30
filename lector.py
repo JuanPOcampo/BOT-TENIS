@@ -1144,27 +1144,32 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         print(f"[DEBUG] Entrando en fase: esperando_pago")
         print(f"[DEBUG] Mensaje recibido para pago: {txt_raw}")
 
+        # Palabras clave aceptadas
         opciones_validas = {
             "transferencia": "transferencia",
+            "pagoimediato":  "transferencia",
             "pagoinmediato": "transferencia",
-            "qr": "qr",
+            "qr":            "transferencia",
             "contraentrega": "contraentrega",
             "contra entrega": "contraentrega",
-            "contra": "contraentrega",
-            "contrapago": "contraentrega"
+            "contrapago":    "contraentrega",
+            "contra":        "contraentrega"
         }
 
+        # Texto del usuario normalizado
         txt_limpio = normalize(txt_raw).replace(" ", "")
         print(f"[DEBUG] Texto normalizado sin espacios: {txt_limpio}")
 
+        # Detectar opción de pago
         op_detectada = None
         for clave in opciones_validas:
-            if normalize(clave).replace(" ", "") in txt_limpio:
+            if clave.replace(" ", "") in txt_limpio:
                 op_detectada = opciones_validas[clave]
                 break
 
         print(f"[DEBUG] Opción de pago detectada: {op_detectada}")
 
+        # Si el texto no coincide con nada válido
         if not op_detectada:
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -1173,49 +1178,48 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        resumen = est["resumen"]
+        # ───────── Procesar la opción válida ─────────
+        resumen         = est["resumen"]
         precio_original = est.get("precio_total", 0)
 
         if op_detectada == "transferencia":
             est["fase"] = "esperando_comprobante"
-            resumen["Pago"] = "Transferencia"
-            descuento = int(precio_original * 0.05)
-            valor_final = precio_original - descuento
-            resumen["Descuento"] = f"-{descuento} COP"
-            resumen["Valor Final"] = valor_final
 
-            print(f"[DEBUG] Aplicando descuento por transferencia. Total: {valor_final}")
+            descuento   = int(precio_original * 0.05)
+            valor_final = precio_original - descuento
+
+            resumen["Pago"]       = "Transferencia"
+            resumen["Descuento"]  = f"-{descuento:,} COP"
+            resumen["Valor Final"] = f"{valor_final:,} COP"
 
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
                     f"🟢 Elegiste *Transferencia inmediata*.\n"
                     f"💰 Valor original: {precio_original:,} COP\n"
-                    f"🎉 Descuento 5%: -{descuento:,} COP\n"
+                    f"🎉 Descuento 5 %: -{descuento:,} COP\n"
                     f"✅ *Total a pagar: {valor_final:,} COP*\n\n"
                     "💳 Realiza el pago a cualquiera de estas cuentas:\n"
                     "• Bancolombia: *30300002233* (X100 sas)\n"
                     "• Nequi: *3177171171* (Car***Car***)\n"
                     "• Daviplata: *3004141021* (Zul***Mar***)\n\n"
-                    "📸 Cuando realices el pago, por favor envía la foto del comprobante aquí."
+                    "📸 Cuando realices el pago, envía la foto del comprobante aquí."
                 ),
                 parse_mode="Markdown"
             )
-            ESTADOS[cid] = est  # ✅ guardar avance de fase
-            return
 
         elif op_detectada == "contraentrega":
-            resumen["Pago"] = "Contra entrega"
-            resumen["Valor Anticipo"] = 35000
             est["fase"] = "esperando_comprobante"
 
-            print(f"[DEBUG] Seleccionado método contraentrega")
+            resumen["Pago"]          = "Contra entrega"
+            resumen["Valor Anticipo"] = "35.000 COP"
 
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
                     "🟡 Elegiste *Contra entrega*.\n"
-                    "Debes pagar *35.000 COP* ahora para cubrir el envío. Este valor se descuenta del total cuando recibas los tenis.\n\n"
+                    "Debes pagar *35.000 COP* ahora para cubrir el envío. "
+                    "Este valor se descuenta del total cuando recibas los tenis.\n\n"
                     "Puedes pagar a cualquiera de estas cuentas:\n"
                     "• Bancolombia: *30300002233* (X100 sas)\n"
                     "• Nequi: *3177171171* (Car***Car***)\n"
@@ -1224,8 +1228,11 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ),
                 parse_mode="Markdown"
             )
-            ESTADOS[cid] = est  # ✅ guardar avance de fase
-            return
+
+        # 👉🏻  Guarda siempre el estado actualizado
+        estado_usuario[cid] = est
+        print(f"[DEBUG] Fase actual guardada: {est['fase']}")
+        return
 
 
     # 🚚 Rastrear pedido
