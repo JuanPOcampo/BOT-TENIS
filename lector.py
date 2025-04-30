@@ -1096,7 +1096,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             precio = int("".join(ch for ch in str(raw_precio) if ch.isdigit()))
         except:
             precio = 0
-
         est["precio_total"] = precio  # ✅ GUARDAR el total
 
         sale_id = generate_sale_id()
@@ -1129,66 +1128,53 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Este valor se descuenta del total cuando recibas los tenis.\n\n"
             "🔸 *Transferencia inmediata*: si pagas el valor completo hoy, tienes un *5% de descuento* sobre el precio total.\n\n"
             "✉️ Escribe tu método de pago:\n"
-            "`Transferencia`, o `Contraentrega`"
+            "`1` para Transferencia, o `2` para Contraentrega"
         )
-
         await ctx.bot.send_message(chat_id=cid, text=text_res, parse_mode="Markdown")
 
         est["fase"] = "esperando_pago"
         estado_usuario[cid] = est  # ✅ GUARDAR ESTADO CORRECTAMENTE
         return
 
-
     # 💳 Método de pago
     if est.get("fase") == "esperando_pago":
         print(f"[🧠 FASE ANTES] {est.get('fase')}")
-        print(f"[🔥 RAW] {txt_raw!r}")          # texto crudo recibido
+        print(f"[🔥 RAW] {txt_raw!r}")  # texto crudo recibido
 
         # Palabras clave que aceptamos
         opciones_validas = {
-            "transferencia":   "transferencia",
-            "pago inmediato":  "transferencia",
-            "pagoinmediato":   "transferencia",
-            "qr":              "transferencia",
-            "contraentrega":   "contraentrega",
-            "contra entrega":  "contraentrega",
-            "contrapago":      "contraentrega",
-            "contra":          "contraentrega"
+            "1":             "transferencia",
+            "2":             "contraentrega",
+            "transferencia": "transferencia",
+            "contraentrega": "contraentrega",
+            "contra entrega": "contraentrega"
         }
 
-        # Normalizamos: quitar tildes, bajar a minúsculas, quitar espacios extras
-        txt_limpio = normalize(txt_raw).lower().strip()
-        print(f"[✅ LIMPIO] {txt_limpio!r}")
+        sel = txt_raw.strip()
+        print(f"[✅ SELECCIÓN] {sel!r}")
 
-        op_detectada = None
-        for clave, salida in opciones_validas.items():
-            if clave.replace(" ", "") in txt_limpio.replace(" ", ""):
-                op_detectada = salida
-                break
-
-        print(f"[🎯 DETECTADO] {op_detectada}")
-
-        # Si no detectamos nada válido
-        if not op_detectada:
+        if sel in opciones_validas:
+            op_detectada = opciones_validas[sel]
+        else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="⚠️ Opción no válida. Por favor escribe: *Transferencia* o *Contraentrega*.",
+                text="⚠️ Opción no válida. Responde *1* o *2*.",
                 parse_mode="Markdown"
             )
             return
 
-        # ───────── Procesar la opción válida ─────────
-        resumen         = est["resumen"]
+        print(f"[🎯 DETECTADO] {op_detectada}")
+
+        resumen = est["resumen"]
         precio_original = est.get("precio_total", 0)
 
         if op_detectada == "transferencia":
             est["fase"] = "esperando_comprobante"
-
-            descuento   = int(precio_original * 0.05)
+            descuento = int(precio_original * 0.05)
             valor_final = precio_original - descuento
 
-            resumen["Pago"]       = "Transferencia"
-            resumen["Descuento"]  = f"-{descuento:,} COP"
+            resumen["Pago"]        = "Transferencia inmediata"
+            resumen["Descuento"]   = f"-{descuento:,} COP"
             resumen["Valor Final"] = f"{valor_final:,} COP"
 
             await ctx.bot.send_message(
@@ -1198,18 +1184,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     f"💰 Valor original: {precio_original:,} COP\n"
                     f"🎉 Descuento 5 %: -{descuento:,} COP\n"
                     f"✅ *Total a pagar: {valor_final:,} COP*\n\n"
-                    "💳 Realiza el pago a cualquiera de estas cuentas:\n"
-                    "• Bancolombia: *30300002233* (X100 sas)\n"
-                    "• Nequi: *3177171171* (Car***Car***)\n"
-                    "• Daviplata: *3004141021* (Zul***Mar***)\n\n"
-                    "📸 Cuando realices el pago, envía la foto del comprobante aquí."
+                    "📸 Envía el comprobante y lo validamos."
                 ),
                 parse_mode="Markdown"
             )
 
         elif op_detectada == "contraentrega":
             est["fase"] = "esperando_comprobante"
-
             resumen["Pago"]           = "Contra entrega"
             resumen["Valor Anticipo"] = "35.000 COP"
 
@@ -1217,17 +1198,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 chat_id=cid,
                 text=(
                     "🟡 Elegiste *Contra entrega*.\n"
-                    "Debes pagar *35 000 COP* ahora para cubrir el envío. "
-                    "Este valor se descuenta del total cuando recibas los tenis.\n\n"
-                    "• Bancolombia: *30300002233*\n"
-                    "• Nequi: *3177171171*\n"
-                    "• Daviplata: *3004141021*\n\n"
-                    "📸 Envía la foto del comprobante cuando lo tengas."
+                    "Debes pagar *35.000 COP* ahora.\n"
+                    "📸 Envía el comprobante cuando lo tengas."
                 ),
                 parse_mode="Markdown"
             )
 
-        # Guarda SIEMPRE el estado actualizado
+        # Guarda siempre el estado actualizado
         estado_usuario[cid] = est
         print(f"[💾 GUARDADO] fase → {est['fase']}")
         return
