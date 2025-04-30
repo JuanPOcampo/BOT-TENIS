@@ -4,6 +4,7 @@ import io
 import base64
 import logging
 import json
+import time
 import re
 import requests
 import random
@@ -334,12 +335,21 @@ def reset_estado(cid: int):
 def menu_botones(opts: list[str]):
     return ReplyKeyboardMarkup([[KeyboardButton(o)] for o in opts], resize_keyboard=True)
 
+inventario_cache = None
+inventario_cache_time = 0
+
 def obtener_inventario() -> list[dict]:
-    global inventario_cache
-    if inventario_cache is None:
+    global inventario_cache, inventario_cache_time
+    ahora = time.time()
+
+    # ⏱ Si pasaron más de 5 minutos (300 seg), recarga
+    if inventario_cache is None or (ahora - inventario_cache_time) > 300:
         try:
             inventario_cache = requests.get(URL_SHEETS_INVENTARIO).json()
-        except:
+            inventario_cache_time = ahora
+            print(f"[CACHE] Inventario recargado a las {datetime.datetime.now()}")
+        except Exception as e:
+            print(f"[CACHE] Error al actualizar inventario: {e}")
             inventario_cache = []
     return inventario_cache
 
@@ -1077,10 +1087,16 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if est.get("fase") == "esperando_direccion":
         est["direccion"] = txt_raw
 
-        precio = next((i["precio"] for i in inv
-                       if normalize(i["marca"]) == normalize(est["marca"])
-                       and normalize(i["modelo"]) == normalize(est["modelo"])
-                       and normalize(i["color"]) == normalize(est["color"])), 0)
+        # Obtener y limpiar precio desde el inventario
+        raw_precio = next((i["precio"] for i in inv
+                           if normalize(i["marca"]) == normalize(est["marca"])
+                           and normalize(i["modelo"]) == normalize(est["modelo"])
+                           and normalize(i["color"]) == normalize(est["color"])), "0")
+        try:
+            precio = int("".join(ch for ch in str(raw_precio) if ch.isdigit()))
+        except:
+            precio = 0
+
         est["precio_total"] = precio  # ✅ GUARDAR el total
 
         sale_id = generate_sale_id()
@@ -1119,7 +1135,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=cid, text=text_res, parse_mode="Markdown")
 
         est["fase"] = "esperando_pago"
-        ESTADOS[cid] = est  # ✅ guardar estado actualizado
+        estado_usuario[cid] = est  # ✅ GUARDAR ESTADO CORRECTAMENTE
         return
 
 
