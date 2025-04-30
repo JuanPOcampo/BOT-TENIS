@@ -1074,8 +1074,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
 # 🏡 Dirección de envío
-if est.get("fase") == "esperando_direccion":
-    est["direccion"] = txt_raw
+    if est.get("fase") == "esperando_direccion":
+        est["direccion"] = txt_raw
     sale_id = generate_sale_id()
     est["sale_id"] = sale_id
 
