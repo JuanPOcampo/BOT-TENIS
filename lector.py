@@ -183,9 +183,31 @@ def identify_model_from_stream(path: str) -> str | None:
         (m for m, hashes in MODEL_HASHES.items() if img_hash in hashes),
         None
     )
-    # ───────────────────────────────────────
 
     return modelo
+# ───────── utilidades de precios ─────────
+def calcular_precio_total(est):
+    """
+    Devuelve el precio base del par que el usuario eligió,
+    tomado del inventario global `inv`.
+
+    ➜ Ajusta aquí si necesitas sumar envío, impuestos u otros
+      recargos fijos.
+    """
+    global inv                             # ya lo tienes cargado al arrancar
+
+    precio_base = next(
+        (
+            item["precio"]
+            for item in inv
+            if normalize(item["marca"])  == normalize(est["marca"])
+            and normalize(item["modelo"]) == normalize(est["modelo"])
+            and normalize(item["color"])  == normalize(est["color"])
+        ),
+        0                                   # fallback si no encuentra
+    )
+
+    return precio_base
 
 # ——— VARIABLES DE ENTORNO ——————————————————————————————————————————————
 OPENAI_API_KEY        = os.environ["OPENAI_API_KEY"]
