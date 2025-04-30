@@ -1073,48 +1073,52 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🏡 Dirección de envío
-    if est.get("fase") == "esperando_direccion":
-        est["direccion"] = txt_raw
-        precio = next((i["precio"] for i in inv
-                       if normalize(i["marca"]) == normalize(est["marca"])
-                       and normalize(i["modelo"]) == normalize(est["modelo"])
-                       and normalize(i["color"]) == normalize(est["color"])), "N/A")
-        sale_id = generate_sale_id()
-        est["sale_id"] = sale_id
-        resumen = {
-            "Número Venta": sale_id,
-            "Fecha Venta": datetime.datetime.now().isoformat(),
-            "Cliente": est["nombre"],
-            "Teléfono": est["telefono"],
-            "Producto": f"{est['modelo']}",
-            "Color": est["color"],
-            "Talla": est["talla"],
-            "Correo": est["correo"],
-            "Pago": None,
-            "Estado": "PENDIENTE"
-        }
-        est["resumen"] = resumen
-        text_res = (
-            f"✅ Pedido: {sale_id}\n"
-            f"👤 Nombre: {est['nombre']}\n"
-            f"📧 Correo: {est['correo']}\n"
-            f"📲 Celular: {est['telefono']}\n"
-            f"🏠 Dirección de envío: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
-            f"👟 Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
-            f"💰 Valor a pagar: {precio}\n\n"
-            "💳 ¿Cómo deseas hacer el pago?\n\n"
-            "🔸 *Contraentrega*: debes pagar *35.000 COP* ahora para cubrir el envío. "
-            "Este valor se descuenta del total cuando recibas los tenis.\n\n"
-            "🔸 *Transferencia inmediata*: si pagas el valor completo hoy, tienes un *5% de descuento* sobre el precio total.\n\n"
-            "✉️ Escribe tu método de pago:\n"
-            "`Transferencia`, o `Contraentrega`"
-        )
-        await ctx.bot.send_message(chat_id=cid, text=text_res, parse_mode="Markdown")
+# 🏡 Dirección de envío
+if est.get("fase") == "esperando_direccion":
+    est["direccion"] = txt_raw
+    sale_id = generate_sale_id()
+    est["sale_id"] = sale_id
 
-        est["fase"] = "esperando_pago"
-        ESTADOS[cid] = est  # ✅ guardar estado actualizado
-        return
+    precio = next((i["precio"] for i in inv
+                   if normalize(i["marca"]) == normalize(est["marca"])
+                   and normalize(i["modelo"]) == normalize(est["modelo"])
+                   and normalize(i["color"]) == normalize(est["color"])), 0)
+    est["precio_total"] = precio  # ✅ GUARDAR el total
+
+    resumen = {
+        "Número Venta": sale_id,
+        "Fecha Venta": datetime.datetime.now().isoformat(),
+        "Cliente": est["nombre"],
+        "Teléfono": est["telefono"],
+        "Producto": f"{est['modelo']}",
+        "Color": est["color"],
+        "Talla": est["talla"],
+        "Correo": est["correo"],
+        "Pago": None,
+        "Estado": "PENDIENTE"
+    }
+    est["resumen"] = resumen
+
+    text_res = (
+        f"✅ Pedido: {sale_id}\n"
+        f"👤 Nombre: {est['nombre']}\n"
+        f"📧 Correo: {est['correo']}\n"
+        f"📲 Celular: {est['telefono']}\n"
+        f"🏠 Dirección de envío: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
+        f"👟 Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
+        f"💰 Valor a pagar: {precio:,} COP\n\n"
+        "💳 ¿Cómo deseas hacer el pago?\n\n"
+        "🔸 *Contraentrega*: debes pagar *35.000 COP* ahora para cubrir el envío. "
+        "Este valor se descuenta del total cuando recibas los tenis.\n\n"
+        "🔸 *Transferencia inmediata*: si pagas el valor completo hoy, tienes un *5% de descuento* sobre el precio total.\n\n"
+        "✉️ Escribe tu método de pago:\n"
+        "`Transferencia`, o `Contraentrega`"
+    )
+    await ctx.bot.send_message(chat_id=cid, text=text_res, parse_mode="Markdown")
+
+    est["fase"] = "esperando_pago"
+    ESTADOS[cid] = est  # ✅ guardar estado actualizado
+    return
 
     # 💳 Método de pago
     if est.get("fase") == "esperando_pago":
