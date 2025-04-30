@@ -1078,31 +1078,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Pago": None,
             "Estado": "PENDIENTE"
         }
-        est["resumen"] = resumen
-        text_res = (
-            f"✅ Pedido: {sale_id}\n"
-            f"👤 Nombre: {est['nombre']}\n"
-            f"📧 Correo: {est['correo']}\n"
-            f"📲 Celular: {est['telefono']}\n"
-            f"🏠 Dirección de envío: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
-            f"👟 Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
-            f"💰 Valor a pagar: {precio}\n\n"
-            "💳 ¿Cómo deseas hacer el pago?\n\n"
-            "🔸 *Contraentrega*: debes pagar *35.000 COP* ahora para cubrir el envío. "
-            "Este valor se descuenta del total cuando recibas los tenis.\n\n"
-            "🔸 *Transferencia inmediata*: si pagas el valor completo hoy, tienes un *5% de descuento* sobre el precio total.\n\n"
-            "✉️ Escribe tu método de pago:\n"
-            "`Transferencia`, o `Contraentrega`"
-        )
-
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=text_res,
-            parse_mode="Markdown"
-        )
-        est["fase"] = "esperando_pago"
-        return
-
     # 💳 Método de pago
     if est.get("fase") == "esperando_pago":
         print(f"[DEBUG] Entrando en fase: esperando_pago")
@@ -1138,6 +1113,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+        # ─── A PARTIR DE AQUÍ YA ESTÁ FUERA del if not op_detectada ───
         resumen = est["resumen"]
         precio_original = est.get("precio_total", precio)
 
