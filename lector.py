@@ -1110,7 +1110,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "transferenci": "transferencia",
             "trans": "transferencia",
             "transf": "transferencia",
-            "pago inmediato": "transferencia",
+            "pagoinmediato": "transferencia",
             "qr": "qr",
             "contraentrega": "contraentrega",
             "contra entrega": "contraentrega",
@@ -1120,7 +1120,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         op_detectada = None
         for clave in opciones_validas:
-            if clave in texto_normalizado:
+            if clave in txt:
                 op_detectada = opciones_validas[clave]
                 break
 
@@ -1177,7 +1177,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ),
                 parse_mode="Markdown"
             )
+
         return
+
 
     # 🚚 Rastrear pedido
     if est.get("fase") == "esperando_numero_rastreo":
