@@ -1060,28 +1060,22 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 🏡 Dirección de envío
     if est.get("fase") == "esperando_direccion":
         est["direccion"] = txt_raw
-        precio = next((i["precio"] for i in inv
-                       if normalize(i["marca"]) == normalize(est["marca"])
-                       and normalize(i["modelo"]) == normalize(est["modelo"])
-                       and normalize(i["color"]) == normalize(est["color"])), "N/A")
         sale_id = generate_sale_id()
         est["sale_id"] = sale_id
 
-    # ░░░ Generar resumen y preguntar método de pago ░░░
-    if est.get("fase") == "resumen_compra":      # ⇐ ajusta el nombre de la fase según tu flujo
-        precio = calcular_precio_total(est)         # calcula el total
-        est["precio_total"] = precio                # guarda el precio
+        precio_total = calcular_precio_total(est)
+        est["precio_total"] = precio_total
 
         resumen = {
-            "Pedido": sale_id,
-            "Nombre": est["nombre"],
-            "Correo": est["correo"],
-            "Teléfono": est["telefono"],
+            "Pedido":    sale_id,
+            "Nombre":    est["nombre"],
+            "Correo":    est["correo"],
+            "Teléfono":  est["telefono"],
             "Dirección": f"{est['direccion']}, {est['ciudad']}, {est['provincia']}",
-            "Producto": f"{est['modelo']} color {est['color']} talla {est['talla']}",
-            "Valor": precio,
+            "Producto":  f"{est['modelo']} color {est['color']} talla {est['talla']}",
+            "Valor":     precio_total,
         }
-        est["resumen"] = resumen                    # guarda el resumen
+        est["resumen"] = resumen
 
         text_res = (
             f"✅ Pedido: {sale_id}\n"
@@ -1090,21 +1084,19 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"📲 Celular: {est['telefono']}\n"
             f"🏠 Dirección de envío: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
             f"👟 Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
-            f"💰 Valor a pagar: {precio:,} COP\n\n"
+            f"💰 Valor a pagar: {precio_total:,} COP\n\n"
             "💳 ¿Cómo deseas hacer el pago?\n\n"
-            "🔸 *Contraentrega*: debes pagar *35 000 COP* ahora para cubrir el envío. "
-            "Este valor se descuenta del total cuando recibas los tenis.\n\n"
-            "🔸 *Transferencia inmediata*: si pagas el valor completo hoy, tienes un *5 % de descuento* sobre el precio total.\n\n"
+            "🔸 *Contraentrega*: paga *35 000 COP* ahora (se descuenta del total).\n\n"
+            "🔸 *Transferencia inmediata*: 5 % de descuento pagando hoy.\n\n"
             "✉️ Escribe tu método de pago:\n"
-            "`Transferencia`, o `Contraentrega`"
+            "Transferencia  o  Contraentrega"
         )
+        await ctx.bot.send_message(chat_id=cid, text=text_res, parse_mode="Markdown")
 
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=text_res,
-            parse_mode="Markdown"
-        )
         est["fase"] = "esperando_pago"
+
+        # 👉 ***GUARDA el estado ANTES de salir***
+        ESTADOS[cid] = est
         return
     # 💳 Método de pago
     if est.get("fase") == "esperando_pago":
