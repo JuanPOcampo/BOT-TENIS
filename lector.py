@@ -1136,41 +1136,39 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         estado_usuario[cid] = est  # ✅ GUARDAR ESTADO CORRECTAMENTE
         return
 
-    # 💳 Método de pago
+    # 💳 Método de pago (menú numérico)
     if est.get("fase") == "esperando_pago":
-        print(f"[🧠 FASE ANTES] {est.get('fase')}")
-        print(f"[🔥 RAW] {txt_raw!r}")  # texto crudo recibido
+        # DEBUG: ¿en qué fase estamos?
+        print(f"[DEBUG] Fase antes de pago: {est['fase']}")
 
-        # Palabras clave que aceptamos
-        opciones_validas = {
-            "1":             "transferencia",
-            "2":             "contraentrega",
-            "transferencia": "transferencia",
-            "contraentrega": "contraentrega",
-            "contra entrega": "contraentrega"
-        }
+        # Texto crudo del usuario
+        msg = txt_raw.strip()
+        print(f"[DEBUG] Entrada usuario (strip): {msg!r}")
 
-        sel = txt_raw.strip()
-        print(f"[✅ SELECCIÓN] {sel!r}")
-
-        if sel in opciones_validas:
-            op_detectada = opciones_validas[sel]
+        # Interpretamos la selección 1 ó 2
+        if msg == "1":
+            op = "transferencia"
+        elif msg == "2":
+            op = "contraentrega"
         else:
+            # Si no es 1 ni 2, preguntamos de nuevo
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="⚠️ Opción no válida. Responde *1* o *2*.",
+                text="⚠️ Opción no válida. Responde *1* para Transferencia o *2* para Contraentrega.",
                 parse_mode="Markdown"
             )
             return
 
-        print(f"[🎯 DETECTADO] {op_detectada}")
+        # DEBUG: qué opción detectamos
+        print(f"[DEBUG] Opción detectada: {op}")
 
-        resumen = est["resumen"]
+        resumen         = est["resumen"]
         precio_original = est.get("precio_total", 0)
 
-        if op_detectada == "transferencia":
+        if op == "transferencia":
+            # Avanzamos de fase y calculamos descuento
             est["fase"] = "esperando_comprobante"
-            descuento = int(precio_original * 0.05)
+            descuento   = int(precio_original * 0.05)
             valor_final = precio_original - descuento
 
             resumen["Pago"]        = "Transferencia inmediata"
@@ -1180,16 +1178,16 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
-                    f"🟢 Elegiste *Transferencia inmediata*.\n"
-                    f"💰 Valor original: {precio_original:,} COP\n"
+                    f"🟢 Transferencia inmediatamente seleccionada.\n"
+                    f"💰 Original: {precio_original:,} COP\n"
                     f"🎉 Descuento 5 %: -{descuento:,} COP\n"
                     f"✅ *Total a pagar: {valor_final:,} COP*\n\n"
-                    "📸 Envía el comprobante y lo validamos."
+                    "📸 Cuando envíes el comprobante, lo validamos."
                 ),
                 parse_mode="Markdown"
             )
 
-        elif op_detectada == "contraentrega":
+        else:  # contraentrega
             est["fase"] = "esperando_comprobante"
             resumen["Pago"]           = "Contra entrega"
             resumen["Valor Anticipo"] = "35.000 COP"
@@ -1197,16 +1195,16 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
-                    "🟡 Elegiste *Contra entrega*.\n"
-                    "Debes pagar *35.000 COP* ahora.\n"
-                    "📸 Envía el comprobante cuando lo tengas."
+                    "🟡 Contraentrega seleccionada.\n"
+                    "Anticipo de *35.000 COP* ahora.\n"
+                    "📸 Envía el comprobante para confirmar tu pago."
                 ),
                 parse_mode="Markdown"
             )
 
-        # Guarda siempre el estado actualizado
+        # Guardamos el nuevo estado
         estado_usuario[cid] = est
-        print(f"[💾 GUARDADO] fase → {est['fase']}")
+        print(f"[DEBUG] Fase guardada: {est['fase']}")
         return
 
 
