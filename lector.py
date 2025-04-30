@@ -1110,10 +1110,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=cid, text=text_res, parse_mode="Markdown")
 
         est["fase"] = "esperando_pago"
-
-        # 👉 ***GUARDA el estado ANTES de salir***
-        ESTADOS[cid] = est
+        ESTADOS[cid] = est  # ✅ guardar estado actualizado
         return
+
     # 💳 Método de pago
     if est.get("fase") == "esperando_pago":
         print(f"[DEBUG] Entrando en fase: esperando_pago")
@@ -1129,13 +1128,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "contrapago": "contraentrega"
         }
 
-        # Limpiar texto crudo (remueve tildes, minúsculas, sin espacios)
         txt_limpio = normalize(txt_raw).replace(" ", "")
         print(f"[DEBUG] Texto normalizado sin espacios: {txt_limpio}")
 
         op_detectada = None
         for clave in opciones_validas:
-            if clave in txt_limpio:
+            if normalize(clave).replace(" ", "") in txt_limpio:
                 op_detectada = opciones_validas[clave]
                 break
 
@@ -1149,9 +1147,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # ─── A PARTIR DE AQUÍ YA ESTÁ FUERA del if not op_detectada ───
         resumen = est["resumen"]
-        precio_original = est.get("precio_total", precio)
+        precio_original = est.get("precio_total", 0)
 
         if op_detectada == "transferencia":
             est["fase"] = "esperando_comprobante"
@@ -1167,9 +1164,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 chat_id=cid,
                 text=(
                     f"🟢 Elegiste *Transferencia inmediata*.\n"
-                    f"💰 Valor original: {precio_original} COP\n"
-                    f"🎉 Descuento 5%: -{descuento} COP\n"
-                    f"✅ *Total a pagar: {valor_final} COP*\n\n"
+                    f"💰 Valor original: {precio_original:,} COP\n"
+                    f"🎉 Descuento 5%: -{descuento:,} COP\n"
+                    f"✅ *Total a pagar: {valor_final:,} COP*\n\n"
                     "💳 Realiza el pago a cualquiera de estas cuentas:\n"
                     "• Bancolombia: *30300002233* (X100 sas)\n"
                     "• Nequi: *3177171171* (Car***Car***)\n"
@@ -1178,6 +1175,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ),
                 parse_mode="Markdown"
             )
+            ESTADOS[cid] = est  # ✅ guardar avance de fase
+            return
 
         elif op_detectada == "contraentrega":
             resumen["Pago"] = "Contra entrega"
@@ -1199,8 +1198,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ),
                 parse_mode="Markdown"
             )
-
-        return
+            ESTADOS[cid] = est  # ✅ guardar avance de fase
+            return
 
 
     # 🚚 Rastrear pedido
