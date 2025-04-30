@@ -1141,35 +1141,34 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 💳 Método de pago
     if est.get("fase") == "esperando_pago":
-        print(f"[DEBUG] Entrando en fase: esperando_pago")
-        print(f"[DEBUG] Mensaje recibido para pago: {txt_raw}")
+        print(f"[🧠 FASE ANTES] {est.get('fase')}")
+        print(f"[🔥 RAW] {txt_raw!r}")          # texto crudo recibido
 
-        # Palabras clave aceptadas
+        # Palabras clave que aceptamos
         opciones_validas = {
-            "transferencia": "transferencia",
-            "pagoimediato":  "transferencia",
-            "pagoinmediato": "transferencia",
-            "qr":            "transferencia",
-            "contraentrega": "contraentrega",
-            "contra entrega": "contraentrega",
-            "contrapago":    "contraentrega",
-            "contra":        "contraentrega"
+            "transferencia":   "transferencia",
+            "pago inmediato":  "transferencia",
+            "pagoinmediato":   "transferencia",
+            "qr":              "transferencia",
+            "contraentrega":   "contraentrega",
+            "contra entrega":  "contraentrega",
+            "contrapago":      "contraentrega",
+            "contra":          "contraentrega"
         }
 
-        # Texto del usuario normalizado
-        txt_limpio = normalize(txt_raw).replace(" ", "")
-        print(f"[DEBUG] Texto normalizado sin espacios: {txt_limpio}")
+        # Normalizamos: quitar tildes, bajar a minúsculas, quitar espacios extras
+        txt_limpio = normalize(txt_raw).lower().strip()
+        print(f"[✅ LIMPIO] {txt_limpio!r}")
 
-        # Detectar opción de pago
         op_detectada = None
-        for clave in opciones_validas:
-            if clave.replace(" ", "") in txt_limpio:
-                op_detectada = opciones_validas[clave]
+        for clave, salida in opciones_validas.items():
+            if clave.replace(" ", "") in txt_limpio.replace(" ", ""):
+                op_detectada = salida
                 break
 
-        print(f"[DEBUG] Opción de pago detectada: {op_detectada}")
+        print(f"[🎯 DETECTADO] {op_detectada}")
 
-        # Si el texto no coincide con nada válido
+        # Si no detectamos nada válido
         if not op_detectada:
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -1211,27 +1210,26 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif op_detectada == "contraentrega":
             est["fase"] = "esperando_comprobante"
 
-            resumen["Pago"]          = "Contra entrega"
+            resumen["Pago"]           = "Contra entrega"
             resumen["Valor Anticipo"] = "35.000 COP"
 
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
                     "🟡 Elegiste *Contra entrega*.\n"
-                    "Debes pagar *35.000 COP* ahora para cubrir el envío. "
+                    "Debes pagar *35 000 COP* ahora para cubrir el envío. "
                     "Este valor se descuenta del total cuando recibas los tenis.\n\n"
-                    "Puedes pagar a cualquiera de estas cuentas:\n"
-                    "• Bancolombia: *30300002233* (X100 sas)\n"
-                    "• Nequi: *3177171171* (Car***Car***)\n"
-                    "• Daviplata: *3004141021* (Zul***Mar***)\n\n"
+                    "• Bancolombia: *30300002233*\n"
+                    "• Nequi: *3177171171*\n"
+                    "• Daviplata: *3004141021*\n\n"
                     "📸 Envía la foto del comprobante cuando lo tengas."
                 ),
                 parse_mode="Markdown"
             )
 
-        # 👉🏻  Guarda siempre el estado actualizado
+        # Guarda SIEMPRE el estado actualizado
         estado_usuario[cid] = est
-        print(f"[DEBUG] Fase actual guardada: {est['fase']}")
+        print(f"[💾 GUARDADO] fase → {est['fase']}")
         return
 
 
