@@ -1302,11 +1302,11 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     parse_mode="Markdown"
                 )
                 est["fase"] = "inicio"
+                estado_usuario[cid] = est
                 return
 
             est["modelo"] = modelo
 
-            # Obtener colores disponibles para el modelo
             colores = obtener_colores_por_modelo(inv, modelo)
             if isinstance(colores, (int, float, str)):
                 colores = [str(colores)]
@@ -1314,17 +1314,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if len(colores) == 1:
                 est["color"] = colores[0]
                 est["fase"] = "esperando_talla"
-
                 tallas = obtener_tallas_por_color(inv, modelo, colores[0])
                 if isinstance(tallas, (int, float, str)):
                     tallas = [str(tallas)]
 
                 await ctx.bot.send_message(
                     chat_id=cid,
-                    text=(
-                        f"Perfecto 🎯 ¿Qué talla deseas para el modelo *{modelo}* color *{colores[0]}*?\n\n"
-                        f"👉 Tallas disponibles: {', '.join(tallas)}"
-                    ),
+                    text=f"Perfecto 🎯 ¿Qué talla deseas para el modelo *{modelo}* color *{colores[0]}*?\n👉 Tallas disponibles: {', '.join(tallas)}",
                     parse_mode="Markdown"
                 )
             else:
@@ -1332,22 +1328,21 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 colores_str = "\n".join(f"- {c}" for c in colores)
                 await ctx.bot.send_message(
                     chat_id=cid,
-                    text=(
-                        f"🎨 El modelo *{modelo}* está disponible en varios colores:\n\n"
-                        f"{colores_str}\n\n"
-                        "¿Cuál color te interesa?"
-                    ),
+                    text=f"🎨 El modelo *{modelo}* está disponible en varios colores:\n\n{colores_str}\n\n¿Cuál color te interesa?",
                     parse_mode="Markdown"
                 )
+
+            estado_usuario[cid] = est
             return
 
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="No hay problema. Si deseas, puedes ver nuestro catálogo completo 📋.\n\n👉 Catalogo: https://wa.me/c/573246666652",
+                text="No hay problema. Si deseas, puedes ver nuestro catálogo completo 📋.\n👉 https://wa.me/c/573246666652",
                 parse_mode="Markdown"
             )
-            reset_estado(cid)
+            est["fase"] = "inicio"
+            estado_usuario[cid] = est
             return
 
 
@@ -1622,11 +1617,13 @@ async def manejar_precio(update, ctx, inventario):
             except Exception as e:
                 logging.error(f"[manejar_precio] Error formateando tallas: {e}")
 
-        # Guardar estado
-        estado_usuario[cid]["fase"] = "confirmar_compra"
-        estado_usuario[cid]["modelo_confirmado"] = primer_producto["modelo"]
-        estado_usuario[cid]["color_confirmado"] = primer_producto["color"]
-        estado_usuario[cid]["marca"] = primer_producto.get("marca", "sin marca")
+        # ✅ Guardar estado de forma segura
+        est = estado_usuario.get(cid, {})
+        est["fase"] = "confirmar_compra"
+        est["modelo_confirmado"] = primer_producto["modelo"]
+        est["color_confirmado"] = primer_producto["color"]
+        est["marca"] = primer_producto.get("marca", "sin marca")
+        estado_usuario[cid] = est  # ✅ GUARDA el estado correctamente
 
         logging.debug(f"[manejar_precio] Guardado modelo: {primer_producto['modelo']}, color: {primer_producto['color']}")
 
