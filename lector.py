@@ -1138,13 +1138,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # 🔐 Protege contra estado dañado
         resumen = est.get("resumen")
         precio_original = est.get("precio_total")
+
         if not resumen or not precio_original:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="❌ Hubo un problema con tu pedido. Por favor escribe *hola* para reiniciar el proceso."
+                text="❌ Hubo un problema con tu pedido. Escribe *hola* para empezar de nuevo."
             )
             reset_estado(cid)
             estado_usuario.pop(cid, None)
@@ -1155,46 +1155,47 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # 🟢 TRANSFERENCIA
         if op_detectada == "transferencia":
             est["fase"] = "esperando_comprobante"
-            estado_usuario[cid] = est
-
             resumen["Pago"] = "Transferencia"
             descuento = round(precio_original * 0.05)
             valor_final = precio_original - descuento
             resumen["Descuento"] = f"-{descuento} COP"
             resumen["Valor Final"] = valor_final
+            estado_usuario[cid] = est  # ✅ Guarda todo
 
             msg = (
                 "🟢 Elegiste TRANSFERENCIA.\n"
-                f"💰 Valor original: {precio_original:,} COP\n"
-                f"🎉 Descuento 5 %: -{descuento:,} COP\n"
-                f"✅ Total a pagar: {valor_final:,} COP\n\n"
+                f"💰 Valor original: {precio_original} COP\n"
+                f"🎉 Descuento 5 %: -{descuento} COP\n"
+                f"✅ Total a pagar: {valor_final} COP\n\n"
                 "💳 Paga a cualquiera de estas cuentas:\n"
-                "- Bancolombia 30300002233 (X100 SAS)\n"
-                "- Nequi 3177171171\n"
-                "- Daviplata 3004141021\n\n"
-                "📸 Cuando pagues, envía la foto del comprobante aquí."
+                "- Bancolombia: 30300002233 (X100 SAS)\n"
+                "- Nequi: 3177171171\n"
+                "- Daviplata: 3004141021\n\n"
+                "📸 Envía la foto del comprobante aquí."
             )
 
+            print("💬 Enviando mensaje:\n", msg)  # Debug seguro
             await ctx.bot.send_message(chat_id=cid, text=msg)
             return
 
-        # -------------- Contraentrega --------------
+        # 🟡 CONTRAENTREGA
         else:
             est["fase"] = "esperando_comprobante"
             resumen["Pago"] = "Contra entrega"
             resumen["Valor Anticipo"] = 35000
-            estado_usuario[cid] = est  # ✅ GUARDA FASE Y RESUMEN
+            estado_usuario[cid] = est  # ✅ Guarda todo
 
             msg = (
                 "🟡 Elegiste CONTRAENTREGA.\n"
-                "Debes adelantar 35 000 COP para el envío; se descuenta del total.\n\n"
-                "Cuentas disponibles:\n"
-                "- Bancolombia 30300002233 (X100 SAS)\n"
-                "- Nequi 3177171171\n"
-                "- Daviplata 3004141021\n\n"
-                "📸 Envía la foto del comprobante cuando lo tengas."
+                "Debes adelantar 35 000 COP para el envío (se descuenta del total).\n\n"
+                "💳 Cuentas disponibles:\n"
+                "- Bancolombia: 30300002233 (X100 SAS)\n"
+                "- Nequi: 3177171171\n"
+                "- Daviplata: 3004141021\n\n"
+                "📸 Envía la foto del comprobante aquí."
             )
 
+            print("💬 Enviando mensaje:\n", msg)  # Debug seguro
             await ctx.bot.send_message(chat_id=cid, text=msg)
             return
 
