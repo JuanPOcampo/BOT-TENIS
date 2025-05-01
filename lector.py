@@ -1114,6 +1114,19 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 💳 Método de pago
     # ------------------------------------------------------------------------
     if est.get("fase") == "esperando_pago":
+
+        # 🔎 DEBUG: mira exactamente lo que llega de WhatsApp
+        print("DEBUG-RAW:", txt_raw, "| repr:", repr(txt_raw))
+
+        # Limpieza extra de caracteres invisibles que a veces mete WhatsApp
+        txt_norm = normalize(txt_raw).lower().strip()
+        txt_norm = (
+            txt_norm.replace("\u200e", "")   # LTR mark
+                    .replace("\u202a", "")   # LRE
+                    .replace("\u202c", "")   # PDF
+                    .replace("\r", "")       # retorno de carro
+        )
+
         opciones = {
             "transferencia":  "transferencia",
             "transf":         "transferencia",
@@ -1126,7 +1139,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "contrapago":     "contraentrega"
         }
 
-        txt_norm     = normalize(txt_raw).lower()
         op_detectada = next((v for k, v in opciones.items() if k in txt_norm), None)
 
         if not op_detectada:
@@ -1135,6 +1147,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 text="Opción no válida. Escribe Transferencia o Contraentrega."
             )
             return
+
+        # --------------- resto de tu lógica (resumen, descuento, etc.) ---------------
+        # …
 
         resumen         = est["resumen"]
         precio_original = est["precio_total"]
