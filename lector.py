@@ -599,7 +599,7 @@ def generate_sale_id() -> str:
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
 
-# 1) Primer contacto: saludo y se queda en esperando_comando
+    # 1) Primer contacto: saludo
     if cid not in estado_usuario:
         reset_estado(cid)
         await update.message.reply_text(
@@ -609,15 +609,20 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "Rastrear pedido", "Realizar cambio"
             ])
         )
-        return  # 🔥 Este return es el que FRENARÁ el flujo para que no caiga en IA
+        return
 
     # 2) Estado actual e inventario
     est = estado_usuario[cid]
     inv = obtener_inventario()
 
-    # 3) Captura y normaliza texto del usuario
+    # 3) Captura y normaliza texto
     txt_raw = update.message.text or ""
     txt = normalize(txt_raw)
+
+    # ✅ DEBUG real
+    print("🧠 FASE:", est.get("fase"))
+    print("🧠 TEXTO:", txt_raw, "|", repr(txt_raw))
+    print("🧠 ESTADO:", est)
 
     # 4) Reinicio explícito si escribe /start o similares
     if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
@@ -1746,8 +1751,47 @@ async def procesar_wa(cid: str, body: str) -> dict:
         effective_chat=SimpleNamespace(id=cid)
     )
 
-    # ❌ NO RESETEES: si no existe, inicia en fase inicio
-    if cid not in estado_usuario:
+# 4. Procesar mensaje de WhatsApp
+async def procesar_wa(cid: str, body: str) -> dict:
+    cid = str(cid)  # 🔐 Asegura que el ID sea string SIEMPRE
+    texto = body.lower() if body else ""
+    txt = texto if texto else ""
+
+    palabras_genericas = [
+        "hola", "buenas", "gracias", "catálogo", "ver catálogo", 
+        "hacer pedido", "enviar imagen", "rastrear pedido", "realizar cambio"
+    ]
+
+    class DummyCtx(SimpleNamespace):
+        async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
+        async def bot_send_chat_action(self, chat_id, action, **kw): pass
+        async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ' '}]")
+
+    ctx = DummyCtx(resp=[], bot=SimpleNamespace(
+        send_message=lambda chat_id, text, **kw: asyncio.create_task(ctx.bot_send(chat_id, text)),
+        send_chat_action=lambda chat_id, action, **kw: asyncio.create_task(ctx.bot_send_chat_action(chat_id, action)),
+        send_video=lambda chat_id, video, caption=None, **kw: asyncio.create_task(ctx.bot_send_video(chat_id, video, caption=caption))
+    ))
+
+    class DummyMsg(SimpleNamespace):
+        def __init__(self, text, ctx, photo=None, voice=None, audio=None):
+            self.text = text
+            self.photo = photo
+            self.voice = voice
+            self.audio = audio
+            self._ctx = ctx
+
+        async def reply_text(self, text, **kw):
+            self._ctx.resp.append(text)
+
+    dummy_msg = DummyMsg(text=body, ctx=ctx, photo=None, voice=None, audio=None)
+    dummy_update = SimpleNamespace(
+        message=dummy_msg,
+        effective_chat=SimpleNamespace(id=cid)
+    )
+
+    # ✅ Si no hay estado previo, inicializa SIN borrar nada más
+    if not estado_usuario.get(cid):
         estado_usuario[cid] = {"fase": "inicio"}
 
     try:
@@ -1760,7 +1804,7 @@ async def procesar_wa(cid: str, body: str) -> dict:
             est = estado_usuario.get(cid, {})
             if est.get("fase") in ("esperando_pago", "esperando_comprobante"):
                 print("[DEBUG] Fase crítica: el bot no respondió pero no se usará IA.")
-                return {"type": "text", "text": "💬 Estoy esperando que confirmes tu método de pago o me envíes el comprobante. 📸"}
+                return {"type": "text", "text": "💬 MALPARIDO tu método de pago o me envíes el comprobante. 📸"}
 
             print(f"[DEBUG] BOT no respondió nada, se usará IA para el mensaje: {body}")
             respuesta_ia = await responder_con_openai(body)
