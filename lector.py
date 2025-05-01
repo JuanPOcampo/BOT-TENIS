@@ -1681,43 +1681,6 @@ async def responder_con_openai(mensaje_usuario):
         print(f"Error al consultar OpenAI: {e}")
         return "Disculpa, estamos teniendo un inconveniente en este momento. ¿Puedes intentar de nuevo más tarde?"
 
-# 4. Procesar mensaje de WhatsApp
-async def procesar_wa(cid: str, body: str) -> dict:
-    texto = body.lower() if body else ""
-    palabras_genericas = [
-        "hola", "buenas", "gracias", "catálogo", "ver catálogo", 
-        "hacer pedido", "enviar imagen", "rastrear pedido", "realizar cambio"
-    ]
-
-    txt = texto if texto else ""
-
-    class DummyCtx(SimpleNamespace):
-        async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
-        async def bot_send_chat_action(self, chat_id, action, **kw): pass
-        async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ' '}]")
-
-    ctx = DummyCtx(resp=[], bot=SimpleNamespace(
-        send_message=lambda chat_id, text, **kw: asyncio.create_task(ctx.bot_send(chat_id, text)),
-        send_chat_action=lambda chat_id, action, **kw: asyncio.create_task(ctx.bot_send_chat_action(chat_id, action)),
-        send_video=lambda chat_id, video, caption=None, **kw: asyncio.create_task(ctx.bot_send_video(chat_id, video, caption=caption))
-    ))
-
-    class DummyMsg(SimpleNamespace):
-        def __init__(self, text, ctx, photo=None, voice=None, audio=None):
-            self.text = text
-            self.photo = photo
-            self.voice = voice
-            self.audio = audio
-            self._ctx = ctx
-
-        async def reply_text(self, text, **kw):
-            self._ctx.resp.append(text)
-
-    dummy_msg = DummyMsg(text=body, ctx=ctx, photo=None, voice=None, audio=None)
-    dummy_update = SimpleNamespace(
-        message=dummy_msg,
-        effective_chat=SimpleNamespace(id=cid)
-    )
 
 # 4. Procesar mensaje de WhatsApp
 async def procesar_wa(cid: str, body: str) -> dict:
@@ -1731,9 +1694,9 @@ async def procesar_wa(cid: str, body: str) -> dict:
         async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ' '}]")
 
     ctx = DummyCtx(resp=[], bot=SimpleNamespace(
-        send_message=lambda chat_id, text, **kw: asyncio.create_task(ctx.bot_send(chat_id, text)),
-        send_chat_action=lambda chat_id, action, **kw: asyncio.create_task(ctx.bot_send_chat_action(chat_id, action)),
-        send_video=lambda chat_id, video, caption=None, **kw: asyncio.create_task(ctx.bot_send_video(chat_id, video, caption=caption))
+        send_message=ctx.bot_send,
+        send_chat_action=ctx.bot_send_chat_action,
+        send_video=ctx.bot_send_video
     ))
 
     class DummyMsg(SimpleNamespace):
