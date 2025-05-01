@@ -637,7 +637,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
 # ─────────── Preguntas frecuentes (FAQ) ───────────
-
+if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
 
     # FAQ 1: ¿Cuánto demora el envío?
     if any(frase in txt for frase in (
@@ -659,7 +659,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # FAQ 2: ¿Tienen pago contra entrega?
     if any(frase in txt for frase in (
-        "pago contra entrega", "contraentrega", "contra entrega",
+        "pago contra entrega", "pago contraentrega", "contraentrega", "contra entrega",
         "pagan al recibir", "puedo pagar al recibir", "tienen contra entrega"
     )):
         await ctx.bot.send_message(
@@ -688,6 +688,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         return
+
+    # ... puedes dejar tus demás FAQs igual que están ...
 
     # FAQ 4: ¿Cómo sé que no me van a robar?
     if any(frase in txt for frase in (
