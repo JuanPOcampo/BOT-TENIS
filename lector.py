@@ -1207,6 +1207,39 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         print(f"[DEBUG] Fase guardada: {est['fase']}")
         return
 
+    # 📸 Procesar comprobante de pago
+    if est.get("fase") == "esperando_comprobante" and update.message.photo:
+        # Descargar foto temporalmente
+        f = await update.message.photo[-1].get_file()
+        tmp_path = os.path.join("temp", f"{cid}_comprobante.jpg")
+        os.makedirs("temp", exist_ok=True)
+        await f.download_to_drive(tmp_path)
+
+        # Extraer texto con OCR
+        texto_ocr = detectar_texto(tmp_path)
+        os.remove(tmp_path)
+        print(f"[DEBUG] Texto OCR comprobante: {texto_ocr!r}")
+
+        # Comparar montos
+        monto_ocr = "".join(ch for ch in texto_ocr if ch.isdigit())
+        monto_esperado = str(est.get("precio_total", 0))
+
+        if monto_esperado in monto_ocr:
+            est["fase"] = "pedido_confirmado"
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="✅ Pago confirmado correctamente. ¡Gracias por tu compra! 🎉"
+            )
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="❌ No reconozco el monto en el comprobante. ¿Puedes enviarlo de nuevo?"
+            )
+            # Sigue en esperando_comprobante
+
+        # Guarda el estado actualizado
+        estado_usuario[cid] = est
+        return
 
     # 🚚 Rastrear pedido
     if est.get("fase") == "esperando_numero_rastreo":
