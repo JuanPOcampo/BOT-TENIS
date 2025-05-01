@@ -72,41 +72,7 @@ def precargar_imagenes_drive(service, root_id):
     """
     imagenes = []
 
-def extraer_texto_comprobante(path_local: str) -> str:
-    """
-    Usa Google Cloud Vision OCR para extraer texto de una imagen local.
-    """
-    try:
-        credentials = service_account.Credentials.from_service_account_info(
-            json.loads(os.environ["GOOGLE_CREDS_JSON"])
-        )
-        client = vision.ImageAnnotatorClient(credentials=credentials)
 
-        with io.open(path_local, "rb") as image_file:
-            content = image_file.read()
-
-        image = vision.Image(content=content)
-        response = client.text_detection(image=image)
-        texts = response.text_annotations
-
-        if texts:
-            return texts[0].description  # El primer elemento es el texto completo detectado
-        else:
-            return ""
-    except Exception as e:
-        logging.error(f"❌ Error extrayendo texto del comprobante: {e}")
-        return ""
-
-def es_comprobante_valido(texto: str) -> bool:
-    texto = texto.lower()
-    claves = [
-        "pago exitoso",
-        "Transferencia exitosa",
-        "Pago exitoso", "comprobante",
-        "valor", "$", "pesos",
-        "fecha", "hora", "nombre"
-    ]
-    return any(clave in texto for clave in claves)
 
     def _walk(current_id, ruta):
         query = f"'{current_id}' in parents and trashed=false"
@@ -256,7 +222,41 @@ def enviar_correo(dest, subj, body):
 
 def enviar_correo_con_adjunto(dest, subj, body, adj):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}\n[Adj: {adj}]")
+def extraer_texto_comprobante(path_local: str) -> str:
+    """
+    Usa Google Cloud Vision OCR para extraer texto de una imagen local.
+    """
+    try:
+        credentials = service_account.Credentials.from_service_account_info(
+            json.loads(os.environ["GOOGLE_CREDS_JSON"])
+        )
+        client = vision.ImageAnnotatorClient(credentials=credentials)
 
+        with io.open(path_local, "rb") as image_file:
+            content = image_file.read()
+
+        image = vision.Image(content=content)
+        response = client.text_detection(image=image)
+        texts = response.text_annotations
+
+        if texts:
+            return texts[0].description  # El primer elemento es el texto completo detectado
+        else:
+            return ""
+    except Exception as e:
+        logging.error(f"❌ Error extrayendo texto del comprobante: {e}")
+        return ""
+
+def es_comprobante_valido(texto: str) -> bool:
+    texto = texto.lower()
+    claves = [
+        "pago exitoso",
+        "Transferencia exitosa",
+        "Pago exitoso", "comprobante",
+        "valor", "$", "pesos",
+        "fecha", "hora", "nombre"
+    ]
+    return any(clave in texto for clave in claves)
 # ——— UTILIDADES DE INVENTARIO —————————————————————————————————————————
 estado_usuario: dict[int, dict] = {}
 inventario_cache = None
