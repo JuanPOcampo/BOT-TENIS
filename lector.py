@@ -637,57 +637,58 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
 # ─────────── Preguntas frecuentes (FAQ) ───────────
-if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
+    if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
 
-    # FAQ 1: ¿Cuánto demora el envío?
-    if any(frase in txt for frase in (
-        "cuanto demora", "cuánto demora", "cuanto tarda", "cuánto tarda",
-        "cuanto se demora", "cuánto se demora", "en cuanto llega", "en cuánto llega",
-        "me llega rapido", "llegan rapido"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "🚚 El tiempo de entrega depende de la ciudad de destino, "
-                "pero generalmente tarda *2 días hábiles* en llegar.\n\n"
-                "Si lo necesitas para *mañana mismo*, podemos enviarlo al terminal de transporte. "
-                "En ese caso aplica *pago anticipado* (no contra entrega)."
-            ),
-            parse_mode="Markdown"
-        )
-        return
+        # FAQ 1: ¿Cuánto demora el envío?
+        if any(frase in txt for frase in (
+            "cuanto demora", "cuánto demora", "cuanto tarda", "cuánto tarda",
+            "cuanto se demora", "cuánto se demora", "en cuanto llega", "en cuánto llega",
+            "me llega rapido", "llegan rapido"
+        )):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "🚚 El tiempo de entrega depende de la ciudad de destino, "
+                    "pero generalmente tarda *2 días hábiles* en llegar.\n\n"
+                    "Si lo necesitas para *mañana mismo*, podemos enviarlo al terminal de transporte. "
+                    "En ese caso aplica *pago anticipado* (no contra entrega)."
+                ),
+                parse_mode="Markdown"
+            )
+            return
 
-    # FAQ 2: ¿Tienen pago contra entrega?
-    if any(frase in txt for frase in (
-        "pago contra entrega", "pago contraentrega", "contraentrega", "contra entrega",
-        "pagan al recibir", "puedo pagar al recibir", "tienen contra entrega"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "📦 ¡Claro que sí! Tenemos *pago contra entrega*.\n\n"
-                "Pedimos un *anticipo de $35 000* que cubre el envío. "
-                "Ese valor se descuenta del precio total cuando recibes el pedido."
-            ),
-            parse_mode="Markdown"
-        )
-        return
+        # FAQ 2: ¿Tienen pago contra entrega?
+        if any(frase in txt for frase in (
+            "pago contra entrega", "pago contraentrega", "contraentrega", "contra entrega",
+            "pagan al recibir", "puedo pagar al recibir", "tienen contra entrega"
+        )):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "📦 ¡Claro que sí! Tenemos *pago contra entrega*.\n\n"
+                    "Pedimos un *anticipo de $35 000* que cubre el envío. "
+                    "Ese valor se descuenta del precio total cuando recibes el pedido."
+                ),
+                parse_mode="Markdown"
+            )
+            return
 
-    # FAQ 3: ¿Tienen garantía?
-    if any(frase in txt for frase in (
-        "tienen garantia", "tienen garantía", "hay garantía", "hay garantia",
-        "garantía", "garantia", "tienen garantia de fabrica"
-    )):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "🛡️ Todos nuestros productos tienen *garantía de 60 días* "
-                "por defectos de fábrica o problemas de pegado.\n\n"
-                "Cualquier inconveniente, estamos para ayudarte."
-            ),
-            parse_mode="Markdown"
-        )
-        return
+        # FAQ 3: ¿Tienen garantía?
+        if any(frase in txt for frase in (
+            "tienen garantia", "tienen garantía", "hay garantía", "hay garantia",
+            "garantía", "garantia", "tienen garantia de fabrica"
+        )):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "🛡️ Todos nuestros productos tienen *garantía de 60 días* "
+                    "por defectos de fábrica o problemas de pegado.\n\n"
+                    "Cualquier inconveniente, estamos para ayudarte."
+                ),
+                parse_mode="Markdown"
+            )
+            return
+
 
     # ... puedes dejar tus demás FAQs igual que están ...
 
