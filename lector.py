@@ -1061,17 +1061,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # ------------------------------------------------------------------------
     # 🏡 Dirección de envío
-    # ------------------------------------------------------------------------
     if est.get("fase") == "esperando_direccion":
         est["direccion"] = txt_raw.strip()
 
-        # Precio del producto
         precio = next(
             (
                 i["precio"] for i in inv
-                if normalize(i["marca"])  == normalize(est["marca"])
+                if normalize(i["marca"]) == normalize(est["marca"])
                 and normalize(i["modelo"]) == normalize(est["modelo"])
-                and normalize(i["color"])  == normalize(est["color"])
+                and normalize(i["color"]) == normalize(est["color"])
             ),
             None
         )
@@ -1083,19 +1081,19 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
 
         est["precio_total"] = int(precio)
-        sale_id             = generate_sale_id()
-        est["sale_id"]      = sale_id
+        sale_id = generate_sale_id()
+        est["sale_id"] = sale_id
         est["resumen"] = {
             "Número Venta": sale_id,
-            "Fecha Venta":  datetime.datetime.now().isoformat(),
-            "Cliente":      est["nombre"],
-            "Teléfono":     est["telefono"],
-            "Producto":     est["modelo"],
-            "Color":        est["color"],
-            "Talla":        est["talla"],
-            "Correo":       est["correo"],
-            "Pago":         None,
-            "Estado":       "PENDIENTE"
+            "Fecha Venta": datetime.datetime.now().isoformat(),
+            "Cliente": est["nombre"],
+            "Teléfono": est["telefono"],
+            "Producto": est["modelo"],
+            "Color": est["color"],
+            "Talla": est["talla"],
+            "Correo": est["correo"],
+            "Pago": None,
+            "Estado": "PENDIENTE"
         }
 
         msg = (
@@ -1113,60 +1111,61 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await ctx.bot.send_message(chat_id=cid, text=msg)
         est["fase"] = "esperando_pago"
+        estado_usuario[cid] = est
         return
 
-# 💳 Método de pago
-if est.get("fase") == "esperando_pago":
-    opciones = {
-        "transferencia": "transferencia",
-        "transf": "transferencia",
-        "trans": "transferencia",
-        "pago inmediato": "transferencia",
-        "qr": "transferencia",
-        "contraentrega": "contraentrega",
-        "contra entrega": "contraentrega",
-        "contra": "contraentrega",
-        "contrapago": "contraentrega"
-    }
+    # 💳 Método de pago
+    if est.get("fase") == "esperando_pago":
+        opciones = {
+            "transferencia": "transferencia",
+            "transf": "transferencia",
+            "trans": "transferencia",
+            "pago inmediato": "transferencia",
+            "qr": "transferencia",
+            "contraentrega": "contraentrega",
+            "contra entrega": "contraentrega",
+            "contra": "contraentrega",
+            "contrapago": "contraentrega"
+        }
 
-    txt_norm = normalize(txt_raw).lower().strip()
-    op_detectada = next((v for k, v in opciones.items() if k in txt_norm), None)
+        txt_norm = normalize(txt_raw).lower().strip()
+        op_detectada = next((v for k, v in opciones.items() if k in txt_norm), None)
 
-    if not op_detectada:
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="⚠️ Opción no válida. Escribe Transferencia o Contraentrega."
-        )
-        return
+        if not op_detectada:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="⚠️ Opción no válida. Escribe Transferencia o Contraentrega."
+            )
+            return
 
-    resumen = est["resumen"]
-    precio_original = int(est["precio_total"])
+        resumen = est["resumen"]
+        precio_original = int(est["precio_total"])
 
-    # 🟢 TRANSFERENCIA
-    if op_detectada == "transferencia":
-        est["fase"] = "esperando_comprobante"
-        estado_usuario[cid] = est  # ✅ GUARDA CAMBIO DE FASE
+        # 🟢 TRANSFERENCIA
+        if op_detectada == "transferencia":
+            est["fase"] = "esperando_comprobante"
+            estado_usuario[cid] = est
 
-        resumen["Pago"] = "Transferencia"
-        descuento = round(precio_original * 0.05)
-        valor_final = precio_original - descuento
-        resumen["Descuento"] = f"-{descuento} COP"
-        resumen["Valor Final"] = valor_final
+            resumen["Pago"] = "Transferencia"
+            descuento = round(precio_original * 0.05)
+            valor_final = precio_original - descuento
+            resumen["Descuento"] = f"-{descuento} COP"
+            resumen["Valor Final"] = valor_final
 
-        msg = (
-            "🟢 Elegiste TRANSFERENCIA.\n"
-            f"💰 Valor original: {precio_original:,} COP\n"
-            f"🎉 Descuento 5 %: -{descuento:,} COP\n"
-            f"✅ Total a pagar: {valor_final:,} COP\n\n"
-            "💳 Paga a cualquiera de estas cuentas:\n"
-            "- Bancolombia 30300002233 (X100 SAS)\n"
-            "- Nequi 3177171171\n"
-            "- Daviplata 3004141021\n\n"
-            "📸 Cuando pagues, envía la foto del comprobante aquí."
-        )
+            msg = (
+                "🟢 Elegiste TRANSFERENCIA.\n"
+                f"💰 Valor original: {precio_original:,} COP\n"
+                f"🎉 Descuento 5 %: -{descuento:,} COP\n"
+                f"✅ Total a pagar: {valor_final:,} COP\n\n"
+                "💳 Paga a cualquiera de estas cuentas:\n"
+                "- Bancolombia 30300002233 (X100 SAS)\n"
+                "- Nequi 3177171171\n"
+                "- Daviplata 3004141021\n\n"
+                "📸 Cuando pagues, envía la foto del comprobante aquí."
+            )
 
-        await ctx.bot.send_message(chat_id=cid, text=msg)
-        return
+            await ctx.bot.send_message(chat_id=cid, text=msg)
+            return
 
     # -------------- Contraentrega --------------
     else:  # contraentrega
