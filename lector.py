@@ -1739,6 +1739,21 @@ async def procesar_wa(cid: str, body: str) -> dict:
         async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
         async def bot_send_chat_action(self, chat_id, action, **kw): pass
         async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ' '}]")
+    async def _dummy_send_message(chat_id, text, **kw):
+        ctx.resp.append(text)
+
+    async def _dummy_send_chat_action(chat_id, action, **kw):
+        pass
+
+    async def _dummy_send_video(chat_id, video, caption=None, **kw):
+        ctx.resp.append(f"[VIDEO] {caption or ''}")
+
+# … dentro de procesar_wa(), sustituye tu ctx=DummyCtx(…) así:
+ctx = DummyCtx(resp=[], bot=SimpleNamespace(
+    send_message=_dummy_send_message,
+    send_chat_action=_dummy_send_chat_action,
+    send_video=_dummy_send_video
+))
 
     ctx = DummyCtx(resp=[], bot=SimpleNamespace(
         send_message=lambda chat_id, text, **kw: ctx.resp.append(text),
