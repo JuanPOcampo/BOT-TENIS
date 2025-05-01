@@ -1115,68 +1115,69 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     # 💳 Método de pago
-    if est.get("fase") == "esperando_pago":
-        opciones = {
-            "transferencia": "transferencia",
-            "transf": "transferencia",
-            "trans": "transferencia",
-            "pago inmediato": "transferencia",
-            "qr": "transferencia",
-            "contraentrega": "contraentrega",
-            "contra entrega": "contraentrega",
-            "contra": "contraentrega",
-            "contrapago": "contraentrega"
-        }
+if est.get("fase") == "esperando_pago":
+    print("🧪 ENTRÓ AL BLOQUE DE PAGO ✅")
+    opciones = {
+        "transferencia": "transferencia",
+        "transf": "transferencia",
+        "trans": "transferencia",
+        "pago inmediato": "transferencia",
+        "qr": "transferencia",
+        "contraentrega": "contraentrega",
+        "contra entrega": "contraentrega",
+        "contra": "contraentrega",
+        "contrapago": "contraentrega"
+    }
 
-        txt_norm = normalize(txt_raw).lower().strip()
-        op_detectada = next((v for k, v in opciones.items() if k in txt_norm), None)
+    txt_norm = normalize(txt_raw).lower().strip()
+    op_detectada = next((v for k, v in opciones.items() if k in txt_norm), None)
 
-        if not op_detectada:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="⚠️ Opción no válida. Escribe Transferencia o Contraentrega."
-            )
-            return
+    print("🧪 opción detectada:", op_detectada)
 
-        resumen = est.get("resumen")
-        precio_original = est.get("precio_total")
+    if not op_detectada:
+        print("❌ Opción inválida detectada")
+        await ctx.bot.send_message(chat_id=cid, text="⚠️ Opción no válida. Escribe Transferencia o Contraentrega.")
+        return
 
-        if not resumen or not precio_original:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="❌ Hubo un problema con tu pedido. Escribe *hola* para empezar de nuevo."
-            )
-            reset_estado(cid)
-            estado_usuario.pop(cid, None)
-            return
+    resumen = est.get("resumen")
+    precio_original = est.get("precio_total")
 
-        precio_original = int(precio_original)
+    if not resumen or not precio_original:
+        print("❌ ERROR: resumen o precio_total vacíos")
+        await ctx.bot.send_message(chat_id=cid, text="❌ Hubo un problema. Escribe *hola* para reiniciar.")
+        reset_estado(cid)
+        estado_usuario.pop(cid, None)
+        return
 
-        # 🟢 TRANSFERENCIA
-        if op_detectada == "transferencia":
-            est["fase"] = "esperando_comprobante"
-            resumen["Pago"] = "Transferencia"
-            descuento = round(precio_original * 0.05)
-            valor_final = precio_original - descuento
-            resumen["Descuento"] = f"-{descuento} COP"
-            resumen["Valor Final"] = valor_final
-            estado_usuario[cid] = est  # ✅ Guarda todo
+    precio_original = int(precio_original)
 
-            msg = (
-                "🟢 Elegiste TRANSFERENCIA.\n"
-                f"💰 Valor original: {precio_original} COP\n"
-                f"🎉 Descuento 5 %: -{descuento} COP\n"
-                f"✅ Total a pagar: {valor_final} COP\n\n"
-                "💳 Paga a cualquiera de estas cuentas:\n"
-                "- Bancolombia: 30300002233 (X100 SAS)\n"
-                "- Nequi: 3177171171\n"
-                "- Daviplata: 3004141021\n\n"
-                "📸 Envía la foto del comprobante aquí."
-            )
+    if op_detectada == "transferencia":
+        est["fase"] = "esperando_comprobante"
+        resumen["Pago"] = "Transferencia"
+        descuento = round(precio_original * 0.05)
+        valor_final = precio_original - descuento
+        resumen["Descuento"] = f"-{descuento} COP"
+        resumen["Valor Final"] = valor_final
+        estado_usuario[cid] = est
 
-            print("💬 Enviando mensaje:\n", msg)  # Debug seguro
-            await ctx.bot.send_message(chat_id=cid, text=msg)
-            return
+        msg = (
+            "🟢 Elegiste TRANSFERENCIA.\n"
+            f"💰 Valor original: {precio_original} COP\n"
+            f"🎉 Descuento 5 %: -{descuento} COP\n"
+            f"✅ Total a pagar: {valor_final} COP\n\n"
+            "💳 Cuentas disponibles:\n"
+            "- Bancolombia 30300002233 (X100 SAS)\n"
+            "- Nequi 3177171171\n"
+            "- Daviplata 3004141021\n\n"
+            "📸 Envía la foto del comprobante aquí."
+        )
+
+        print("🧪 MENSAJE A ENVIAR:\n", msg)
+
+        await ctx.bot.send_message(chat_id=cid, text=msg)
+
+        print("✅ MENSAJE ENVIADO (transferencia)")
+        return
 
         # 🟡 CONTRAENTREGA
         else:
