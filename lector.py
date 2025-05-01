@@ -1693,11 +1693,15 @@ async def procesar_wa(cid: str, body: str) -> dict:
         async def bot_send_chat_action(self, chat_id, action, **kw): pass
         async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ' '}]")
 
-    ctx = DummyCtx(resp=[], bot=SimpleNamespace(
+    # 👇 Define ctx primero
+    ctx = DummyCtx(resp=[])
+
+    # 👇 Ahora sí define ctx.bot correctamente
+    ctx.bot = SimpleNamespace(
         send_message=ctx.bot_send,
         send_chat_action=ctx.bot_send_chat_action,
         send_video=ctx.bot_send_video
-    ))
+    )
 
     class DummyMsg(SimpleNamespace):
         def __init__(self, text, ctx, photo=None, voice=None, audio=None):
