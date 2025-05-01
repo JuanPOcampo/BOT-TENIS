@@ -1741,9 +1741,9 @@ async def procesar_wa(cid: str, body: str) -> dict:
         async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ' '}]")
 
     ctx = DummyCtx(resp=[], bot=SimpleNamespace(
-        send_message=lambda chat_id, text, **kw: asyncio.create_task(ctx.bot_send(chat_id, text)),
-        send_chat_action=lambda chat_id, action, **kw: asyncio.create_task(ctx.bot_send_chat_action(chat_id, action)),
-        send_video=lambda chat_id, video, caption=None, **kw: asyncio.create_task(ctx.bot_send_video(chat_id, video, caption=caption))
+        send_message=lambda chat_id, text, **kw: ctx.resp.append(text),
+        send_chat_action=lambda chat_id, action, **kw: None,
+        send_video=lambda chat_id, video, caption=None, **kw: ctx.resp.append(f"[VIDEO] {caption or ''}")
     ))
 
     class DummyMsg(SimpleNamespace):
