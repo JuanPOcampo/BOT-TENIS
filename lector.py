@@ -4,7 +4,6 @@ import io
 import base64
 import logging
 import json
-import time
 import re
 import requests
 import random
@@ -164,9 +163,6 @@ MODEL_HASHES = precargar_imagenes_drive(drive_service, DRIVE_FOLDER_ID)
 for h, ref in MODEL_HASHES.items():
     print(f"HASH precargado: {h} → {ref}")
 
-def normalize(text):
-    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("utf-8").lower()
-
 def identify_model_from_stream(path: str) -> str | None:
     """
     Abre la imagen subida, calcula su hash y busca directamente
@@ -184,23 +180,9 @@ def identify_model_from_stream(path: str) -> str | None:
         (m for m, hashes in MODEL_HASHES.items() if img_hash in hashes),
         None
     )
+    # ───────────────────────────────────────
 
     return modelo
-# ───────── utilidades de precios ─────────
-def calcular_precio_total(est):
-    global inv            # ←⏎ añade esta línea
-
-    precio_base = next(
-        (
-            item["precio"]
-            for item in inv
-            if normalize(item["marca"])  == normalize(est["marca"])
-            and normalize(item["modelo"]) == normalize(est["modelo"])
-            and normalize(item["color"])  == normalize(est["color"])
-        ),
-        0
-    )
-    return precio_base
 
 # ——— VARIABLES DE ENTORNO ——————————————————————————————————————————————
 OPENAI_API_KEY        = os.environ["OPENAI_API_KEY"]
@@ -335,21 +317,12 @@ def reset_estado(cid: int):
 def menu_botones(opts: list[str]):
     return ReplyKeyboardMarkup([[KeyboardButton(o)] for o in opts], resize_keyboard=True)
 
-inventario_cache = None
-inventario_cache_time = 0
-
 def obtener_inventario() -> list[dict]:
-    global inventario_cache, inventario_cache_time
-    ahora = time.time()
-
-    # ⏱ Si pasaron más de 5 minutos (300 seg), recarga
-    if inventario_cache is None or (ahora - inventario_cache_time) > 300:
+    global inventario_cache
+    if inventario_cache is None:
         try:
             inventario_cache = requests.get(URL_SHEETS_INVENTARIO).json()
-            inventario_cache_time = ahora
-            print(f"[CACHE] Inventario recargado a las {datetime.datetime.now()}")
-        except Exception as e:
-            print(f"[CACHE] Error al actualizar inventario: {e}")
+        except:
             inventario_cache = []
     return inventario_cache
 
@@ -378,9 +351,6 @@ def obtener_tallas_por_color(inv: list[dict], modelo: str, color: str) -> list[s
         and normalize(i.get("color", "")) == normalize(color)
         and disponible(i)
     })
-# ─── Inventario global ───
-inv = obtener_inventario()
-print(f"✅ Inventario cargado: {len(inv)} registros")
 
 #  TRANSCRIPCIÓN DE AUDIO (WHISPER)
 # ───────────────────────────────────────────────────────────────
@@ -643,6 +613,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 2) Estado actual e inventario
     est = estado_usuario[cid]
+    inv = obtener_inventario()
 
     # 3) Captura y normaliza texto del usuario
     txt_raw = update.message.text or ""
@@ -1083,162 +1054,171 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # ---------------------------------------------------------------------------
     # 🏡 Dirección de envío
+    # ---------------------------------------------------------------------------
     if est.get("fase") == "esperando_direccion":
-        est["direccion"] = txt_raw
+        est["direccion"] = txt_raw.strip()
 
-        # Obtener y limpiar precio desde el inventario
-        raw_precio = next((i["precio"] for i in inv
-                           if normalize(i["marca"]) == normalize(est["marca"])
-                           and normalize(i["modelo"]) == normalize(est["modelo"])
-                           and normalize(i["color"]) == normalize(est["color"])), "0")
-        try:
-            precio = int("".join(ch for ch in str(raw_precio) if ch.isdigit()))
-        except:
-            precio = 0
-        est["precio_total"] = precio  # ✅ GUARDAR el total
+        # Precio del producto elegido
+        precio = next(
+            (
+                i["precio"] for i in inv
+                if normalize(i["marca"])  == normalize(est["marca"])
+                and normalize(i["modelo"]) == normalize(est["modelo"])
+                and normalize(i["color"])  == normalize(est["color"])
+            ),
+            "N/A"
+        )
+        est["precio_total"] = precio
 
+        # Generar ID de venta y resumen
         sale_id = generate_sale_id()
         est["sale_id"] = sale_id
-
         resumen = {
-            "Número Venta": sale_id,
-            "Fecha Venta": datetime.datetime.now().isoformat(),
-            "Cliente": est["nombre"],
-            "Teléfono": est["telefono"],
-            "Producto": f"{est['modelo']}",
-            "Color": est["color"],
-            "Talla": est["talla"],
-            "Correo": est["correo"],
-            "Pago": None,
-            "Estado": "PENDIENTE"
+            "Número Venta":   sale_id,
+            "Fecha Venta":    datetime.datetime.now().isoformat(),
+            "Cliente":        est["nombre"],
+            "Teléfono":       est["telefono"],
+            "Producto":       est["modelo"],
+            "Color":          est["color"],
+            "Talla":          est["talla"],
+            "Correo":         est["correo"],
+            "Pago":           None,
+            "Estado":         "PENDIENTE"
         }
         est["resumen"] = resumen
 
+        # Mensaje de confirmación + métodos de pago
         text_res = (
             f"✅ Pedido: {sale_id}\n"
             f"👤 Nombre: {est['nombre']}\n"
             f"📧 Correo: {est['correo']}\n"
             f"📲 Celular: {est['telefono']}\n"
-            f"🏠 Dirección de envío: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
+            f"🏠 Dirección: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
             f"👟 Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
-            f"💰 Valor a pagar: {precio:,} COP\n\n"
+            f"💰 Valor a pagar: {precio}\n\n"
             "💳 ¿Cómo deseas hacer el pago?\n\n"
-            "🔸 *Contraentrega*: debes pagar *35.000 COP* ahora para cubrir el envío. "
-            "Este valor se descuenta del total cuando recibas los tenis.\n\n"
-            "🔸 *Transferencia inmediata*: si pagas el valor completo hoy, tienes un *5% de descuento* sobre el precio total.\n\n"
+            "🔸 *Contraentrega*: adelanta *35 000 COP* para el envío (se descuenta del total).\n\n"
+            "🔸 *Transferencia inmediata*: paga completo hoy y obtén *5 % de descuento*.\n\n"
             "✉️ Escribe tu método de pago:\n"
-            "`1` para Transferencia, o `2` para Contraentrega"
+            "`Transferencia`, o `Contraentrega`"
         )
         await ctx.bot.send_message(chat_id=cid, text=text_res, parse_mode="Markdown")
-
         est["fase"] = "esperando_pago"
-        estado_usuario[cid] = est  # ✅ GUARDAR ESTADO CORRECTAMENTE
         return
 
-    # 💳 Método de pago (menú numérico)
+    # ---------------------------------------------------------------------------
+    # 💳 Método de pago
+    # ---------------------------------------------------------------------------
     if est.get("fase") == "esperando_pago":
-        # DEBUG: ¿en qué fase estamos?
-        print(f"[DEBUG] Fase antes de pago: {est['fase']}")
+        opciones_validas = {
+            "transferencia":      "transferencia",
+            "transferenci":       "transferencia",
+            "trans":              "transferencia",
+            "transf":             "transferencia",
+            "pago inmediato":     "transferencia",
+            "qr":                 "qr",
+            "contraentrega":      "contraentrega",
+            "contra entrega":     "contraentrega",
+            "contra":             "contraentrega",
+            "contrapago":         "contraentrega"
+        }
 
-        # Texto crudo del usuario
-        msg = txt_raw.strip()
-        print(f"[DEBUG] Entrada usuario (strip): {msg!r}")
+        txt_norm = normalize(txt_raw).lower()
+        op_detectada = next(
+            (val for clave, val in opciones_validas.items() if clave in txt_norm),
+            None
+        )
 
-        # Interpretamos la selección 1 ó 2
-        if msg == "1":
-            op = "transferencia"
-        elif msg == "2":
-            op = "contraentrega"
-        else:
-            # Si no es 1 ni 2, preguntamos de nuevo
+        if not op_detectada:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="⚠️ Opción no válida. Responde *1* para Transferencia o *2* para Contraentrega.",
+                text="⚠️ Opción no válida. Escribe: *Transferencia* o *Contraentrega*.",
                 parse_mode="Markdown"
             )
             return
 
-        # DEBUG: qué opción detectamos
-        print(f"[DEBUG] Opción detectada: {op}")
-
         resumen         = est["resumen"]
-        precio_original = est.get("precio_total", 0)
+        precio_original = est["precio_total"]
 
-        if op == "transferencia":
-            # Avanzamos de fase y calculamos descuento
-            est["fase"] = "esperando_comprobante"
+        # ---------------- Transferencia ----------------
+        if op_detectada == "transferencia":
+            est["fase"]     = "esperando_comprobante"
+            resumen["Pago"] = "Transferencia"
+
             descuento   = int(precio_original * 0.05)
             valor_final = precio_original - descuento
-
-            resumen["Pago"]        = "Transferencia inmediata"
-            resumen["Descuento"]   = f"-{descuento:,} COP"
-            resumen["Valor Final"] = f"{valor_final:,} COP"
+            resumen["Descuento"]   = f"-{descuento} COP"
+            resumen["Valor Final"] = valor_final
 
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
-                    f"🟢 Transferencia inmediatamente seleccionada.\n"
-                    f"💰 Original: {precio_original:,} COP\n"
-                    f"🎉 Descuento 5 %: -{descuento:,} COP\n"
-                    f"✅ *Total a pagar: {valor_final:,} COP*\n\n"
-                    "📸 Cuando envíes el comprobante, lo validamos."
+                    f"🟢 Elegiste *Transferencia inmediata*.\n"
+                    f"💰 Valor original: {precio_original} COP\n"
+                    f"🎉 Descuento 5 %: -{descuento} COP\n"
+                    f"✅ *Total a pagar: {valor_final} COP*\n\n"
+                    "💳 Paga a cualquiera de estas cuentas:\n"
+                    "• Bancolombia: *30300002233* (X100 SAS)\n"
+                    "• Nequi: *3177171171* (Car***Car***)\n"
+                    "• Daviplata: *3004141021* (Zul***Mar***)\n\n"
+                    "📸 Envía la foto del comprobante aquí."
                 ),
                 parse_mode="Markdown"
             )
 
-        else:  # contraentrega
-            est["fase"] = "esperando_comprobante"
-            resumen["Pago"]           = "Contra entrega"
-            resumen["Valor Anticipo"] = "35.000 COP"
+        # ---------------- Contraentrega ----------------
+        elif op_detectada == "contraentrega":
+            est["fase"]     = "esperando_comprobante"
+            resumen["Pago"] = "Contra entrega"
+            resumen["Valor Anticipo"] = 35_000
 
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
-                    "🟡 Contraentrega seleccionada.\n"
-                    "Anticipo de *35.000 COP* ahora.\n"
-                    "📸 Envía el comprobante para confirmar tu pago."
+                    "🟡 Elegiste *Contra entrega*.\n"
+                    "Debes pagar *35 000 COP* ahora para el envío; se descuenta después.\n\n"
+                    "Cuentas disponibles:\n"
+                    "• Bancolombia: *30300002233* (X100 SAS)\n"
+                    "• Nequi: *3177171171* (Car***Car***)\n"
+                    "• Daviplata: *3004141021* (Zul***Mar***)\n\n"
+                    "📸 Envía la foto del comprobante cuando lo tengas."
                 ),
                 parse_mode="Markdown"
             )
-
-        # Guardamos el nuevo estado
-        estado_usuario[cid] = est
-        print(f"[DEBUG] Fase guardada: {est['fase']}")
         return
 
-    # 📸 Procesar comprobante de pago
+    # ---------------------------------------------------------------------------
+    # 📸 Recibir comprobante de pago
+    # ---------------------------------------------------------------------------
     if est.get("fase") == "esperando_comprobante" and update.message.photo:
-        # Descargar foto temporalmente
-        f = await update.message.photo[-1].get_file()
-        tmp_path = os.path.join("temp", f"{cid}_comprobante.jpg")
+        f   = await update.message.photo[-1].get_file()
+        tmp = os.path.join("temp", f"{cid}_proof.jpg")
         os.makedirs("temp", exist_ok=True)
-        await f.download_to_drive(tmp_path)
+        await f.download_to_drive(tmp)
 
-        # Extraer texto con OCR
-        texto_ocr = detectar_texto(tmp_path)
-        os.remove(tmp_path)
-        print(f"[DEBUG] Texto OCR comprobante: {texto_ocr!r}")
+        resumen = est["resumen"]
+        registrar_orden(resumen)
+        enviar_correo(
+            est["correo"],
+            f"Pago recibido {resumen['Número Venta']}",
+            json.dumps(resumen, indent=2)
+        )
+        enviar_correo_con_adjunto(
+            EMAIL_JEFE,
+            f"Comprobante {resumen['Número Venta']}",
+            json.dumps(resumen, indent=2),
+            tmp
+        )
+        os.remove(tmp)
 
-        # Comparar montos
-        monto_ocr = "".join(ch for ch in texto_ocr if ch.isdigit())
-        monto_esperado = str(est.get("precio_total", 0))
-
-        if monto_esperado in monto_ocr:
-            est["fase"] = "pedido_confirmado"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="✅ Pago confirmado correctamente. ¡Gracias por tu compra! 🎉"
-            )
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="❌ No reconozco el monto en el comprobante. ¿Puedes enviarlo de nuevo?"
-            )
-            # Sigue en esperando_comprobante
-
-        # Guarda el estado actualizado
-        estado_usuario[cid] = est
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="✅ ¡Pago registrado exitosamente! Tu pedido está en proceso. 🚚",
+            parse_mode="Markdown"
+        )
+        reset_estado(cid)
         return
 
     # 🚚 Rastrear pedido
@@ -1291,6 +1271,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 reply_markup=ReplyKeyboardRemove()
             )
             return
+        txt = normalize(txt_raw)
 
     # 🖼️ Intención global de imagen
     if menciona_imagen(txt):
@@ -1739,26 +1720,11 @@ async def procesar_wa(cid: str, body: str) -> dict:
         async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
         async def bot_send_chat_action(self, chat_id, action, **kw): pass
         async def bot_send_video(self, chat_id, video, caption=None, **kw): self.resp.append(f"[VIDEO] {caption or ' '}]")
-    async def _dummy_send_message(chat_id, text, **kw):
-        ctx.resp.append(text)
-
-    async def _dummy_send_chat_action(chat_id, action, **kw):
-        pass
-
-    async def _dummy_send_video(chat_id, video, caption=None, **kw):
-        ctx.resp.append(f"[VIDEO] {caption or ''}")
-
-# … dentro de procesar_wa(), sustituye tu ctx=DummyCtx(…) así:
-ctx = DummyCtx(resp=[], bot=SimpleNamespace(
-    send_message=_dummy_send_message,
-    send_chat_action=_dummy_send_chat_action,
-    send_video=_dummy_send_video
-))
 
     ctx = DummyCtx(resp=[], bot=SimpleNamespace(
-        send_message=lambda chat_id, text, **kw: ctx.resp.append(text),
-        send_chat_action=lambda chat_id, action, **kw: None,
-        send_video=lambda chat_id, video, caption=None, **kw: ctx.resp.append(f"[VIDEO] {caption or ''}")
+        send_message=lambda chat_id, text, **kw: asyncio.create_task(ctx.bot_send(chat_id, text)),
+        send_chat_action=lambda chat_id, action, **kw: asyncio.create_task(ctx.bot_send_chat_action(chat_id, action)),
+        send_video=lambda chat_id, video, caption=None, **kw: asyncio.create_task(ctx.bot_send_video(chat_id, video, caption=caption))
     ))
 
     class DummyMsg(SimpleNamespace):
