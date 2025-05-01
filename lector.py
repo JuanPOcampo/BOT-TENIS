@@ -1115,96 +1115,84 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "esperando_pago"
         return
 
-    # ------------------------------------------------------------------------
-    # 💳 Método de pago
-    # ------------------------------------------------------------------------
-    if est.get("fase") == "esperando_pago":
+# 💳 Método de pago
+if est.get("fase") == "esperando_pago":
+    opciones = {
+        "transferencia": "transferencia",
+        "transf": "transferencia",
+        "trans": "transferencia",
+        "pago inmediato": "transferencia",
+        "qr": "transferencia",
+        "contraentrega": "contraentrega",
+        "contra entrega": "contraentrega",
+        "contra": "contraentrega",
+        "contrapago": "contraentrega"
+    }
 
-        # 🔎 DEBUG: mira exactamente lo que llega de WhatsApp
-        print("DEBUG-RAW:", txt_raw, "| repr:", repr(txt_raw))
+    txt_norm = normalize(txt_raw).lower().strip()
+    op_detectada = next((v for k, v in opciones.items() if k in txt_norm), None)
 
-        # Limpieza extra de caracteres invisibles que a veces mete WhatsApp
-        txt_norm = normalize(txt_raw).lower().strip()
-        txt_norm = (
-            txt_norm.replace("\u200e", "")   # LTR mark
-                    .replace("\u202a", "")   # LRE
-                    .replace("\u202c", "")   # PDF
-                    .replace("\r", "")       # retorno de carro
+    if not op_detectada:
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="⚠️ Opción no válida. Escribe Transferencia o Contraentrega."
+        )
+        return
+
+    resumen = est["resumen"]
+    precio_original = int(est["precio_total"])
+
+    # 🟢 TRANSFERENCIA
+    if op_detectada == "transferencia":
+        est["fase"] = "esperando_comprobante"
+        estado_usuario[cid] = est  # ✅ GUARDA CAMBIO DE FASE
+
+        resumen["Pago"] = "Transferencia"
+        descuento = round(precio_original * 0.05)
+        valor_final = precio_original - descuento
+        resumen["Descuento"] = f"-{descuento} COP"
+        resumen["Valor Final"] = valor_final
+
+        msg = (
+            "🟢 Elegiste TRANSFERENCIA.\n"
+            f"💰 Valor original: {precio_original:,} COP\n"
+            f"🎉 Descuento 5 %: -{descuento:,} COP\n"
+            f"✅ Total a pagar: {valor_final:,} COP\n\n"
+            "💳 Paga a cualquiera de estas cuentas:\n"
+            "- Bancolombia 30300002233 (X100 SAS)\n"
+            "- Nequi 3177171171\n"
+            "- Daviplata 3004141021\n\n"
+            "📸 Cuando pagues, envía la foto del comprobante aquí."
         )
 
-        opciones = {
-            "transferencia":  "transferencia",
-            "transf":         "transferencia",
-            "trans":          "transferencia",
-            "pago inmediato": "transferencia",
-            "qr":             "transferencia",
-            "contraentrega":  "contraentrega",
-            "contra entrega": "contraentrega",
-            "contra":         "contraentrega",
-            "contrapago":     "contraentrega"
-        }
+        await ctx.bot.send_message(chat_id=cid, text=msg)
+        return
 
-        op_detectada = next((v for k, v in opciones.items() if k in txt_norm), None)
+    # -------------- Contraentrega --------------
+    else:  # contraentrega
+        est["fase"] = "esperando_comprobante"
+        resumen["Pago"] = "Contra entrega"
+        resumen["Valor Anticipo"] = 35000
+        estado_usuario[cid] = est  # ✅ GUARDA FASE Y RESUMEN
 
-        if not op_detectada:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="Opción no válida. Escribe Transferencia o Contraentrega."
-            )
-            return
+        msg = (
+            "🟡 Elegiste CONTRAENTREGA.\n"
+            "Debes adelantar 35 000 COP para el envío; se descuenta del total.\n\n"
+            "Cuentas disponibles:\n"
+            "- Bancolombia 30300002233 (X100 SAS)\n"
+            "- Nequi 3177171171\n"
+            "- Daviplata 3004141021\n\n"
+            "📸 Envía la foto del comprobante cuando lo tengas."
+        )
 
-        # --------------- resto de tu lógica (resumen, descuento, etc.) ---------------
-        # …
-
-        resumen         = est["resumen"]
-        precio_original = est["precio_total"]
-
-        # -------------- Transferencia --------------
-        if op_detectada == "transferencia":
-            est["fase"]     = "esperando_comprobante"
-            resumen["Pago"] = "Transferencia"
-
-            descuento   = round(precio_original * 0.05)
-            valor_final = precio_original - descuento
-            resumen["Descuento"]   = f"-{descuento}"
-            resumen["Valor Final"] = valor_final
-
-            msg = (
-                "Elegiste TRANSFERENCIA.\n"
-                f"Valor original: {precio_original:,} COP\n"
-                f"Descuento 5 %: {descuento:,} COP\n"
-                f"Total a pagar: {valor_final:,} COP\n\n"
-                "Cuentas disponibles:\n"
-                "- Bancolombia 30300002233 (X100 SAS)\n"
-                "- Nequi 3177171171 (Car...)\n"
-                "- Daviplata 3004141021 (Zul...)\n\n"
-                "Cuando completes el pago, envía la foto del comprobante aquí."
-            )
-            await ctx.bot.send_message(chat_id=cid, text=msg)
-
-        # -------------- Contraentrega --------------
-        else:  # contraentrega
-            est["fase"]     = "esperando_comprobante"
-            resumen["Pago"] = "Contra entrega"
-            resumen["Valor Anticipo"] = 35000
-
-            msg = (
-                "Elegiste CONTRAENTREGA.\n"
-                "Debes adelantar 35 000 COP para el envío; se descuenta del total.\n\n"
-                "Cuentas disponibles:\n"
-                "- Bancolombia 30300002233 (X100 SAS)\n"
-                "- Nequi 3177171171 (Car...)\n"
-                "- Daviplata 3004141021 (Zul...)\n\n"
-                "Envía la foto del comprobante cuando lo tengas."
-            )
-            await ctx.bot.send_message(chat_id=cid, text=msg)
+        await ctx.bot.send_message(chat_id=cid, text=msg)
         return
 
     # ------------------------------------------------------------------------
     # 📸 Recibir comprobante de pago
     # ------------------------------------------------------------------------
     if est.get("fase") == "esperando_comprobante" and update.message.photo:
-        f   = await update.message.photo[-1].get_file()
+        f = await update.message.photo[-1].get_file()
         tmp = os.path.join("temp", f"{cid}_proof.jpg")
         os.makedirs("temp", exist_ok=True)
         await f.download_to_drive(tmp)
@@ -1228,7 +1216,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             chat_id=cid,
             text="✅ ¡Pago registrado exitosamente! Tu pedido está en proceso. 🚚"
         )
+
         reset_estado(cid)
+        estado_usuario.pop(cid, None)  # ✅ Limpia el estado guardado
         return
 
     # 🚚 Rastrear pedido
