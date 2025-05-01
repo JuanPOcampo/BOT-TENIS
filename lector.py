@@ -1117,6 +1117,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 💳 Método de pago
     if est.get("fase") == "esperando_pago":
         print("🧪 ENTRÓ AL BLOQUE DE PAGO ✅")
+
         opciones = {
             "transferencia": "transferencia",
             "transf": "transferencia",
@@ -1196,6 +1197,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             print("💬 Enviando mensaje:\n", msg)
             await ctx.bot.send_message(chat_id=cid, text=msg)
             return
+
 
 
     # 🚚 Rastrear pedido
