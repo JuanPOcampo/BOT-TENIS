@@ -23,7 +23,9 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 import nest_asyncio
 import openai
-# Google Drive
+
+# Google Cloud
+from google.cloud import vision
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
@@ -58,6 +60,8 @@ creds = service_account.Credentials.from_service_account_info(
     scopes=["https://www.googleapis.com/auth/drive.readonly"],
 )
 drive_service = build("drive", "v3", credentials=creds)
+# Cliente OCR de Google Cloud Vision
+vision_client = vision.ImageAnnotatorClient(credentials=creds)
 
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 def precargar_imagenes_drive(service, root_id):
@@ -67,6 +71,42 @@ def precargar_imagenes_drive(service, root_id):
     y devuelve un dict {hash: (marca, modelo, color)}.
     """
     imagenes = []
+
+def extraer_texto_comprobante(path_local: str) -> str:
+    """
+    Usa Google Cloud Vision OCR para extraer texto de una imagen local.
+    """
+    try:
+        credentials = service_account.Credentials.from_service_account_info(
+            json.loads(os.environ["GOOGLE_CREDS_JSON"])
+        )
+        client = vision.ImageAnnotatorClient(credentials=credentials)
+
+        with io.open(path_local, "rb") as image_file:
+            content = image_file.read()
+
+        image = vision.Image(content=content)
+        response = client.text_detection(image=image)
+        texts = response.text_annotations
+
+        if texts:
+            return texts[0].description  # El primer elemento es el texto completo detectado
+        else:
+            return ""
+    except Exception as e:
+        logging.error(f"❌ Error extrayendo texto del comprobante: {e}")
+        return ""
+
+def es_comprobante_valido(texto: str) -> bool:
+    texto = texto.lower()
+    claves = [
+        "pago exitoso",
+        "Transferencia exitosa",
+        "Pago exitoso", "comprobante",
+        "valor", "$", "pesos",
+        "fecha", "hora", "nombre"
+    ]
+    return any(clave in texto for clave in claves)
 
     def _walk(current_id, ruta):
         query = f"'{current_id}' in parents and trashed=false"
@@ -1198,6 +1238,60 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(chat_id=cid, text=msg)
             return
 
+    # ------------------------------------------------------------------------
+    # 📸 Recibir comprobante de pago
+    # ------------------------------------------------------------------------
+    if est.get("fase") == "esperando_comprobante" and update.message.photo:
+        f = await update.message.photo[-1].get_file()
+        tmp = os.path.join("temp", f"{cid}_proof.jpg")
+        os.makedirs("temp", exist_ok=True)
+        await f.download_to_drive(tmp)
+
+        # OCR con Google Cloud Vision
+        with io.open(tmp, "rb") as image_file:
+            content = image_file.read()
+        image = vision.Image(content=content)
+        response = vision_client.text_detection(image=image)
+        textos_detectados = response.text_annotations
+
+        texto_extraido = textos_detectados[0].description if textos_detectados else ""
+        print("🧾 TEXTO EXTRAÍDO:\n", texto_extraido)
+
+        # Verificación básica del comprobante
+        if not es_comprobante_valido(texto_extraido):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="⚠️ El comprobante no parece válido. Asegúrate de que sea legible y que diga 'Pago exitoso' o 'Transferencia realizada'."
+            )
+            os.remove(tmp)
+            return
+
+        # Si es válido, continuar flujo
+        resumen = est["resumen"]
+        registrar_orden(resumen)
+
+        enviar_correo(
+            est["correo"],
+            f"Pago recibido {resumen['Número Venta']}",
+            json.dumps(resumen, indent=2)
+        )
+        enviar_correo_con_adjunto(
+            EMAIL_JEFE,
+            f"Comprobante {resumen['Número Venta']}",
+            json.dumps(resumen, indent=2),
+            tmp
+        )
+
+        os.remove(tmp)
+
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="✅ ¡Pago registrado exitosamente! Tu pedido está en proceso. 🚚"
+        )
+
+        reset_estado(cid)
+        estado_usuario.pop(cid, None)
+        return
 
 
     # 🚚 Rastrear pedido
