@@ -1852,66 +1852,80 @@ async def procesar_wa(cid: str, body: str) -> dict:
         respuesta_ia = await responder_con_openai(body)
         return {"type": "text", "text": respuesta_ia}
 
-# ---------- VENOM WEBHOOK ----------
-@api.post("/venom")
-async def venom_webhook(req: Request):
-    try:
-        # 1️⃣ Leer JSON
-        data = await req.json()
-        cid      = wa_chat_id(data.get("from", ""))
-        body     = data.get("body", "") or ""
-        mtype    = (data.get("type") or "").lower()
-        mimetype = (data.get("mimetype") or "").lower()
+    # 2️⃣ Si es imagen en base64
+    if mtype == "image" or mimetype.startswith("image"):
+        try:
+            logging.info("🧪 Imagen recibida por WhatsApp (base64)")
+            b64_str = body.split(",", 1)[1] if "," in body else body
+            img_bytes = base64.b64decode(b64_str + "===")
+            os.makedirs("temp", exist_ok=True)
+            path_local = f"temp/{cid}_img.jpg"
+            with open(path_local, "wb") as f:
+                f.write(img_bytes)
+            logging.info(f"✅ Imagen guardada en: {path_local}")
+        except Exception as e:
+            logging.error(f"❌ No pude leer la imagen: {e}")
+            return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
 
-        logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype}")
+        est = estado_usuario.get(cid, {})
+        fase = est.get("fase", "")
+        logging.info(f"🧠 Fase actual del usuario {cid}: {fase}")
 
-# 2️⃣ Si es imagen en base64
-if mtype == "image" or mimetype.startswith("image"):
-    try:
-        logging.info("🧪 Imagen recibida por WhatsApp (base64)")
-        b64_str = body.split(",", 1)[1] if "," in body else body
-        img_bytes = base64.b64decode(b64_str + "===")
-        os.makedirs("temp", exist_ok=True)
-        path_local = f"temp/{cid}_img.jpg"
-        with open(path_local, "wb") as f:
-            f.write(img_bytes)
-        logging.info(f"✅ Imagen guardada en: {path_local}")
-    except Exception as e:
-        logging.error(f"❌ No pude leer la imagen: {e}")
-        return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
+        if fase == "esperando_comprobante":
+            logging.info("📸 Procesando comprobante de pago (OCR)...")
+            texto = extraer_texto_comprobante(path_local)
+            logging.info(f"🧾 Texto OCR detectado:\n{texto[:300]}")
 
-    est = estado_usuario.get(cid, {})
-    fase = est.get("fase", "")
-    logging.info(f"🧠 Fase actual del usuario {cid}: {fase}")
+            if es_comprobante_valido(texto):
+                logging.info("✅ Comprobante válido detectado")
+                resumen = est.get("resumen", {})
+                registrar_orden(resumen)
 
-    if fase == "esperando_comprobante":
-        logging.info("📸 Procesando comprobante de pago (OCR)...")
-        texto = extraer_texto_comprobante(path_local)
-        logging.info(f"🧾 Texto OCR detectado:\n{texto[:300]}")
+                enviar_correo(
+                    est["correo"],
+                    f"Pago recibido {resumen.get('Número Venta')}",
+                    json.dumps(resumen, indent=2)
+                )
+                enviar_correo_con_adjunto(
+                    EMAIL_JEFE,
+                    f"Comprobante {resumen.get('Número Venta')}",
+                    json.dumps(resumen, indent=2),
+                    path_local
+                )
+                os.remove(path_local)
+                reset_estado(cid)
+                return JSONResponse({"type": "text", "text": "✅ Comprobante verificado. Tu pedido está en proceso. 🚚"})
+            else:
+                logging.warning("⚠️ Comprobante NO válido")
+                os.remove(path_local)
+                return JSONResponse({"type": "text", "text": "⚠️ No pude verificar el comprobante. Asegúrate que sea legible y que diga 'Pago exitoso' o 'Transferencia exitosa'."})
 
-        if es_comprobante_valido(texto):
-            logging.info("✅ Comprobante válido detectado")
-            resumen = est.get("resumen", {})
-            registrar_orden(resumen)
+        # Si no está esperando comprobante, intenta con HASH para modelo
+        try:
+            img = Image.open(path_local)
+            h_in = str(imagehash.phash(img))
+            ref = MODEL_HASHES.get(h_in)
+            logging.info(f"🔍 Imagen no era comprobante. Se calcula hash {h_in} → {ref}")
+        except Exception as e:
+            logging.error(f"❌ Error procesando hash de imagen: {e}")
+            return JSONResponse({"type": "text", "text": "No pude procesar la imagen 😕"})
 
-            enviar_correo(
-                est["correo"],
-                f"Pago recibido {resumen.get('Número Venta')}",
-                json.dumps(resumen, indent=2)
+        if ref:
+            marca, modelo, color = ref
+            estado_usuario.setdefault(cid, reset_estado(cid))
+            estado_usuario[cid].update(
+                fase="imagen_detectada", marca=marca, modelo=modelo, color=color
             )
-            enviar_correo_con_adjunto(
-                EMAIL_JEFE,
-                f"Comprobante {resumen.get('Número Venta')}",
-                json.dumps(resumen, indent=2),
-                path_local
-            )
+            os.remove(path_local)
+            return JSONResponse({
+                "type": "text",
+                "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
+            })
+        else:
             os.remove(path_local)
             reset_estado(cid)
-            return JSONResponse({"type": "text", "text": "✅ Comprobante verificado. Tu pedido está en proceso. 🚚"})
-        else:
-            logging.warning("⚠️ Comprobante NO válido")
-            os.remove(path_local)
-            return JSONResponse({"type": "text", "text": "⚠️ No pude verificar el comprobante. Asegúrate que sea legible y que diga 'Pago exitoso' o 'Transferencia exitosa'."})
+            return JSONResponse({"type": "text", "text": "😕 No reconocí el modelo. Puedes intentarlo con otra imagen."})
+
 
     # Si no está esperando comprobante, intenta con HASH para modelo
     try:
@@ -1923,32 +1937,30 @@ if mtype == "image" or mimetype.startswith("image"):
         logging.error(f"❌ Error procesando hash de imagen: {e}")
         return JSONResponse({"type": "text", "text": "No pude procesar la imagen 😕"})
 
-    if ref:
-        marca, modelo, color = ref
-        estado_usuario.setdefault(cid, reset_estado(cid))
-        estado_usuario[cid].update(
-            fase="imagen_detectada", marca=marca, modelo=modelo, color=color
-        )
-        os.remove(path_local)
-        return JSONResponse({
-            "type": "text",
-            "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
-        })
-    else:
-        os.remove(path_local)
-        reset_estado(cid)
-        return JSONResponse({"type": "text", "text": "😕 No reconocí el modelo. Puedes intentarlo con otra imagen."})
+        if ref:
+            marca, modelo, color = ref
+            estado_usuario.setdefault(cid, reset_estado(cid))
+            estado_usuario[cid].update(
+                fase="imagen_detectada", marca=marca, modelo=modelo, color=color
+            )
+            os.remove(path_local)
+            return JSONResponse({
+                "type": "text",
+                "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
+            })
+        else:
+            os.remove(path_local)
+            reset_estado(cid)
+            return JSONResponse({"type": "text", "text": "😕 No reconocí el modelo. Puedes intentarlo con otra imagen."})
 
-        # 4️⃣ Si NO es imagen, procesa como texto normal
-        reply = await procesar_wa(cid, body)
-        return JSONResponse(reply)
-
+    # ✅ AHORA SÍ VIENE EL except correctamente indentado
     except Exception as e:
         logging.exception("🔥 Error en /venom")
         return JSONResponse(
             {"type": "text", "text": "⚠️ Error interno en el bot. Intenta de nuevo."},
             status_code=500
         )
+
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
