@@ -1749,8 +1749,9 @@ async def procesar_wa(cid: str, body: str) -> dict:
         effective_chat=SimpleNamespace(id=cid)
     )
 
+    # ❌ NO RESETEES: si no existe, inicia en fase inicio
     if cid not in estado_usuario:
-        reset_estado(cid)
+        estado_usuario[cid] = {"fase": "inicio"}
 
     try:
         await responder(dummy_update, ctx)
@@ -1759,7 +1760,7 @@ async def procesar_wa(cid: str, body: str) -> dict:
             print(f"[DEBUG] BOT respondió correctamente: {ctx.resp}")
             return {"type": "text", "text": "\n".join(ctx.resp)}
         else:
-            est = estado_usuario[cid]
+            est = estado_usuario.get(cid, {})
             if est.get("fase") in ("esperando_pago", "esperando_comprobante"):
                 print("[DEBUG] Fase crítica: el bot no respondió pero no se usará IA.")
                 return {"type": "text", "text": "💬 Estoy esperando que confirmes tu método de pago o me envíes el comprobante. 📸"}
