@@ -1138,8 +1138,19 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        resumen = est["resumen"]
-        precio_original = int(est["precio_total"])
+        # 🔐 Protege contra estado dañado
+        resumen = est.get("resumen")
+        precio_original = est.get("precio_total")
+        if not resumen or not precio_original:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="❌ Hubo un problema con tu pedido. Por favor escribe *hola* para reiniciar el proceso."
+            )
+            reset_estado(cid)
+            estado_usuario.pop(cid, None)
+            return
+
+        precio_original = int(precio_original)
 
         # 🟢 TRANSFERENCIA
         if op_detectada == "transferencia":
@@ -1167,58 +1178,25 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(chat_id=cid, text=msg)
             return
 
-    # -------------- Contraentrega --------------
-    else:  # contraentrega
-        est["fase"] = "esperando_comprobante"
-        resumen["Pago"] = "Contra entrega"
-        resumen["Valor Anticipo"] = 35000
-        estado_usuario[cid] = est  # ✅ GUARDA FASE Y RESUMEN
+        # -------------- Contraentrega --------------
+        else:
+            est["fase"] = "esperando_comprobante"
+            resumen["Pago"] = "Contra entrega"
+            resumen["Valor Anticipo"] = 35000
+            estado_usuario[cid] = est  # ✅ GUARDA FASE Y RESUMEN
 
-        msg = (
-            "🟡 Elegiste CONTRAENTREGA.\n"
-            "Debes adelantar 35 000 COP para el envío; se descuenta del total.\n\n"
-            "Cuentas disponibles:\n"
-            "- Bancolombia 30300002233 (X100 SAS)\n"
-            "- Nequi 3177171171\n"
-            "- Daviplata 3004141021\n\n"
-            "📸 Envía la foto del comprobante cuando lo tengas."
-        )
+            msg = (
+                "🟡 Elegiste CONTRAENTREGA.\n"
+                "Debes adelantar 35 000 COP para el envío; se descuenta del total.\n\n"
+                "Cuentas disponibles:\n"
+                "- Bancolombia 30300002233 (X100 SAS)\n"
+                "- Nequi 3177171171\n"
+                "- Daviplata 3004141021\n\n"
+                "📸 Envía la foto del comprobante cuando lo tengas."
+            )
 
-        await ctx.bot.send_message(chat_id=cid, text=msg)
-        return
-
-    # ------------------------------------------------------------------------
-    # 📸 Recibir comprobante de pago
-    # ------------------------------------------------------------------------
-    if est.get("fase") == "esperando_comprobante" and update.message.photo:
-        f = await update.message.photo[-1].get_file()
-        tmp = os.path.join("temp", f"{cid}_proof.jpg")
-        os.makedirs("temp", exist_ok=True)
-        await f.download_to_drive(tmp)
-
-        resumen = est["resumen"]
-        registrar_orden(resumen)
-        enviar_correo(
-            est["correo"],
-            f"Pago recibido {resumen['Número Venta']}",
-            json.dumps(resumen, indent=2)
-        )
-        enviar_correo_con_adjunto(
-            EMAIL_JEFE,
-            f"Comprobante {resumen['Número Venta']}",
-            json.dumps(resumen, indent=2),
-            tmp
-        )
-        os.remove(tmp)
-
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="✅ ¡Pago registrado exitosamente! Tu pedido está en proceso. 🚚"
-        )
-
-        reset_estado(cid)
-        estado_usuario.pop(cid, None)  # ✅ Limpia el estado guardado
-        return
+            await ctx.bot.send_message(chat_id=cid, text=msg)
+            return
 
     # 🚚 Rastrear pedido
     if est.get("fase") == "esperando_numero_rastreo":
@@ -1746,11 +1724,6 @@ async def procesar_wa(cid: str, body: str) -> dict:
     texto = body.lower() if body else ""
     txt = texto if texto else ""
 
-    palabras_genericas = [
-        "hola", "buenas", "gracias", "catálogo", "ver catálogo", 
-        "hacer pedido", "enviar imagen", "rastrear pedido", "realizar cambio"
-    ]
-
     class DummyCtx(SimpleNamespace):
         async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
         async def bot_send_chat_action(self, chat_id, action, **kw): pass
@@ -1779,8 +1752,9 @@ async def procesar_wa(cid: str, body: str) -> dict:
         effective_chat=SimpleNamespace(id=cid)
     )
 
-    # ✅ Si no hay estado previo, inicializa SIN borrar nada más
-    if not estado_usuario.get(cid):
+    # 🧠 Revisa si el estado no existe o está vacío
+    if cid not in estado_usuario or not estado_usuario[cid].get("fase"):
+        reset_estado(cid)
         estado_usuario[cid] = {"fase": "inicio"}
 
     try:
@@ -1793,7 +1767,7 @@ async def procesar_wa(cid: str, body: str) -> dict:
             est = estado_usuario.get(cid, {})
             if est.get("fase") in ("esperando_pago", "esperando_comprobante"):
                 print("[DEBUG] Fase crítica: el bot no respondió pero no se usará IA.")
-                return {"type": "text", "text": "💬 MALPARIDO tu método de pago o me envíes el comprobante. 📸"}
+                return {"type": "text", "text": "💬 Estoy esperando que confirmes tu método de pago o me envíes el comprobante. 📸"}
 
             print(f"[DEBUG] BOT no respondió nada, se usará IA para el mensaje: {body}")
             respuesta_ia = await responder_con_openai(body)
