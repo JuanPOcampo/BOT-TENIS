@@ -638,9 +638,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 # ─────────── Preguntas frecuentes (FAQ) ───────────
 
-    # 🛡️ Protección: no responder FAQs si está en flujo de pago o comprobante
-    if est.get("fase") in ("esperando_pago", "esperando_comprobante"):
-        return
 
     # FAQ 1: ¿Cuánto demora el envío?
     if any(frase in txt for frase in (
