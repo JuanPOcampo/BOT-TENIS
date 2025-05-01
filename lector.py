@@ -1851,6 +1851,32 @@ async def procesar_wa(cid: str, body: str) -> dict:
         print(f"[DEBUG] Usando IA como fallback por error de bot en mensaje: {body}")
         respuesta_ia = await responder_con_openai(body)
         return {"type": "text", "text": respuesta_ia}
+@api.post("/venom")
+async def venom_webhook(req: Request):
+    try:
+        # 1️⃣ Leer JSON
+        data = await req.json()
+        cid      = wa_chat_id(data.get("from", ""))       # ID del chat
+        body     = data.get("body", "") or ""              # Mensaje recibido
+        mtype    = (data.get("type") or "").lower()        # Tipo: chat, image, etc.
+        mimetype = (data.get("mimetype") or "").lower()    # image/jpeg, etc.
+
+        logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype}")
+
+        # Aquí va la lógica principal que ya tienes después, por ejemplo:
+        if mtype == "chat":
+            reply = await procesar_wa(cid, body)
+            return JSONResponse(reply)
+
+        # O si es imagen, etc... (colocas el resto de tu flujo)
+        return JSONResponse({"type": "text", "text": "✅ Mensaje recibido, pero no se procesó ningún flujo."})
+
+    except Exception as e:
+        logging.exception("🔥 Error en venom_webhook:")
+        return JSONResponse(
+            {"type": "text", "text": "⚠️ Error interno procesando el mensaje."},
+            status_code=500
+        )
 
     # 2️⃣ Si es imagen en base64
     if mtype == "image" or mimetype.startswith("image"):
