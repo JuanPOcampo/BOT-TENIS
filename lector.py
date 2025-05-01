@@ -1842,7 +1842,6 @@ async def procesar_wa(cid: str, body: str) -> dict:
         respuesta_ia = await responder_con_openai(body)
         return {"type": "text", "text": respuesta_ia}
 
-# 4. Webhook para WhatsApp (usado por Venom)
 # ---------- VENOM WEBHOOK ----------
 @api.post("/venom")
 async def venom_webhook(req: Request):
@@ -1862,16 +1861,45 @@ async def venom_webhook(req: Request):
                 b64_str = body.split(",", 1)[1] if "," in body else body
                 img_bytes = base64.b64decode(b64_str + "===")
                 img = Image.open(io.BytesIO(img_bytes))
-                img.load()  # ← fuerza carga completa
+                img.load()  # fuerza carga completa
                 logging.info("✅ Imagen decodificada y cargada")
             except Exception as e:
                 logging.error(f"❌ No pude leer la imagen: {e}")
-                return JSONResponse(
-                    {"type": "text", "text": "No pude leer la imagen 😕"},
-                    status_code=status.HTTP_400_BAD_REQUEST
-                )
+                return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
 
-            # 3️⃣ Calcular hash
+            # Guardar temporalmente la imagen
+            os.makedirs("temp", exist_ok=True)
+            path_local = f"temp/{cid}_img.jpg"
+            img.save(path_local)
+
+            est = estado_usuario.get(cid, {})
+            if est.get("fase") == "esperando_comprobante":
+                texto = extraer_texto_comprobante(path_local)
+                logging.info(f"🧾 OCR detectó: {texto[:100]}...")
+
+                if es_comprobante_valido(texto):
+                    resumen = est.get("resumen", {})
+                    registrar_orden(resumen)
+                    enviar_correo(
+                        est["correo"],
+                        f"Pago recibido {resumen.get('Número Venta')}",
+                        json.dumps(resumen, indent=2)
+                    )
+                    enviar_correo_con_adjunto(
+                        EMAIL_JEFE,
+                        f"Comprobante {resumen.get('Número Venta')}",
+                        json.dumps(resumen, indent=2),
+                        path_local
+                    )
+                    os.remove(path_local)
+                    reset_estado(cid)
+                    return JSONResponse({"type": "text", "text": "✅ Comprobante verificado. Tu pedido está en proceso. 🚚"})
+
+                else:
+                    os.remove(path_local)
+                    return JSONResponse({"type": "text", "text": "⚠️ No pude verificar el comprobante. Asegúrate que sea legible y que diga 'Pago exitoso'."})
+
+            # Si no está esperando comprobante, usa hash
             h_in = str(imagehash.phash(img))
             ref = MODEL_HASHES.get(h_in)
             logging.info(f"🔍 Hash {h_in} → {ref}")
@@ -1888,9 +1916,7 @@ async def venom_webhook(req: Request):
                 })
             else:
                 reset_estado(cid)
-                return JSONResponse({
-                    "type": "text",
-                })
+                return JSONResponse({"type": "text", "text": "😕 No reconocí el modelo. Puedes intentarlo con otra imagen."})
 
         # 4️⃣ Si NO es imagen, procesa como texto normal
         reply = await procesar_wa(cid, body)
@@ -1899,8 +1925,8 @@ async def venom_webhook(req: Request):
     except Exception as e:
         logging.exception("🔥 Error en /venom")
         return JSONResponse(
-            {"type": "text", "text": "Error interno en el bot. Intenta de nuevo."},
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            {"type": "text", "text": "⚠️ Error interno en el bot. Intenta de nuevo."},
+            status_code=500
         )
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
