@@ -222,29 +222,52 @@ def enviar_correo(dest, subj, body):
 
 def enviar_correo_con_adjunto(dest, subj, body, adj):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}\n[Adj: {adj}]")
+
 def extraer_texto_comprobante(path_local: str) -> str:
     """
     Usa Google Cloud Vision OCR para extraer texto de una imagen local.
     """
     try:
+        logging.info(f"[OCR] Procesando imagen: {path_local}")
+
+        # 1. Cargar credenciales
         credentials = service_account.Credentials.from_service_account_info(
             json.loads(os.environ["GOOGLE_CREDS_JSON"])
         )
         client = vision.ImageAnnotatorClient(credentials=credentials)
 
+        # 2. Leer imagen
         with io.open(path_local, "rb") as image_file:
             content = image_file.read()
 
+        if not content:
+            logging.warning("[OCR] Imagen está vacía o no se pudo leer.")
+            return ""
+
         image = vision.Image(content=content)
+
+        # 3. Ejecutar OCR
         response = client.text_detection(image=image)
+
+        # 4. Capturar errores de API
+        if response.error.message:
+            logging.error(f"[OCR ERROR] Google Vision respondió con error: {response.error.message}")
+            return ""
+
         texts = response.text_annotations
 
         if texts:
-            return texts[0].description  # El primer elemento es el texto completo detectado
+            texto_detectado = texts[0].description
+            logging.info("[OCR RESULTADO] Texto completo detectado:")
+            for i, linea in enumerate(texto_detectado.splitlines()):
+                logging.info(f"[OCR LINEA {i}] → {repr(linea)}")
+            return texto_detectado
         else:
+            logging.warning("[OCR] No se detectó texto en la imagen.")
             return ""
+
     except Exception as e:
-        logging.error(f"❌ Error extrayendo texto del comprobante: {e}")
+        logging.exception(f"❌ Error extrayendo texto del comprobante: {e}")
         return ""
 
 def es_comprobante_valido(texto: str) -> bool:
