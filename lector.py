@@ -1969,6 +1969,12 @@ async def venom_webhook(req: Request):
                 logging.error(f"❌ Imagen corrupta o ilegible para PIL: {e}")
                 return JSONResponse({"type": "text", "text": "❌ La imagen está dañada. Por favor intenta con otra."})
 
+            # 🧠 Estado del usuario
+            est = estado_usuario.get(cid, {})
+            fase = est.get("fase", "")  # ✅ ESTA LÍNEA FALTABA
+            logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
+            logging.debug(f"🧠 Estado completo: {est}")
+
             # 4️⃣ Si espera comprobante
             if fase == "esperando_comprobante":
                 logging.info("🧾 Fase: esperando_comprobante — Ejecutando OCR")
