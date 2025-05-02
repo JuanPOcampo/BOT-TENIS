@@ -1905,24 +1905,36 @@ async def venom_webhook(req: Request):
             reply = await procesar_wa(cid, body)
             return JSONResponse(reply)
 
-        # 3️⃣ Procesar imagen
-        elif mtype == "image" or mimetype.startswith("image"):
-            try:
-                logging.info("🖼️ Imagen recibida. Decodificando base64...")
-                b64_str = body.split(",", 1)[1] if "," in body else body
-                img_bytes = base64.b64decode(b64_str + "===")
-                os.makedirs("temp", exist_ok=True)
-                path_local = f"temp/{cid}_img.jpg"
-                with open(path_local, "wb") as f:
-                    f.write(img_bytes)
-                logging.info(f"✅ Imagen guardada temporalmente en {path_local}")
-            except Exception as e:
-                logging.error(f"❌ Error al guardar imagen base64: {e}")
-                return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
+# 3️⃣ Procesar imagen
+elif mtype == "image" or mimetype.startswith("image"):
+    try:
+        logging.info("🖼️ Imagen recibida. Decodificando base64...")
+        b64_str = body.split(",", 1)[1] if "," in body else body
+        img_bytes = base64.b64decode(b64_str + "===")
+        os.makedirs("temp", exist_ok=True)
+        path_local = f"temp/{cid}_img.jpg"
+        with open(path_local, "wb") as f:
+            f.write(img_bytes)
+        logging.info(f"✅ Imagen guardada temporalmente en {path_local}")
+    except Exception as e:
+        logging.error(f"❌ Error al guardar imagen base64: {e}")
+        return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
 
-            est = estado_usuario.get(cid, {})
-            fase = est.get("fase", "")
-            logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
+    # 🔍 Verificar que la imagen realmente quedó bien
+    try:
+        from PIL import Image
+        img = Image.open(path_local)
+        img.verify()  # Verifica integridad
+        img = Image.open(path_local)  # Se debe reabrir luego de verify()
+        logging.info(f"🖼️ Imagen verificada con PIL — Tamaño: {img.size} — Modo: {img.mode}")
+    except Exception as e:
+        logging.error(f"❌ Imagen corrupta o ilegible para PIL: {e}")
+        return JSONResponse({"type": "text", "text": "❌ La imagen está dañada. Por favor intenta con otra."})
+
+    # 🧠 Estado del usuario
+    est = estado_usuario.get(cid, {})
+    fase = est.get("fase", "")
+    logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
 
             # 4️⃣ Si espera comprobante
             if fase == "esperando_comprobante":
