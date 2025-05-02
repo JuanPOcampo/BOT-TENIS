@@ -259,9 +259,18 @@ def extraer_texto_comprobante(path: str) -> str:
             logging.error("[OCR] ❌ La imagen está vacía.")
             return ""
 
-        image = vision.Image(content=content)
+        # 🔍 NUEVO: Detalle técnico de la imagen recibida
+        try:
+            img = Image.open(path)
+            logging.info(f"[OCR] 🖼️ Imagen cargada: {path}")
+            logging.info(f"[OCR] 🔍 Formato: {img.format}")
+            logging.info(f"[OCR] 📐 Tamaño: {img.size}")
+            logging.info(f"[OCR] 🎨 Modo de color: {img.mode}")
+        except Exception as e:
+            logging.error(f"[OCR] ❌ No pude abrir la imagen con PIL para inspección: {e}")
 
         # 4️⃣ Enviar a Google Vision
+        image = vision.Image(content=content)
         logging.info("[OCR] 📤 Enviando imagen a Google Vision API (text_detection)...")
         response = client.text_detection(image=image)
         logging.info("[OCR] 📥 Respuesta recibida de Vision API")
@@ -281,10 +290,6 @@ def extraer_texto_comprobante(path: str) -> str:
         if not texto:
             logging.warning("[OCR] ⚠️ Se recibió texto vacío.")
             return ""
-
-        # 🔍 NUEVO: Mostrar texto crudo completo ANTES de dividirlo
-        logging.info("[OCR] 📄 Texto crudo completo:")
-        logging.info(texto)
 
         # 7️⃣ Mostrar texto línea por línea
         logging.info("[OCR] ✅ Texto extraído correctamente. Mostrando líneas:")
@@ -1186,8 +1191,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         msg = (
             f"✅ Pedido: {sale_id}\n"
-            f"Nombre: {est['nombre']}\n"
-            f"Correo: {est['correo']}\n"
+            f"👤Nombre: {est['nombre']}\n"
+            f"📧Correo: {est['correo']}\n"
             f"Celular: {est['telefono']}\n"
             f"Dirección: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
             f"Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
@@ -1941,14 +1946,17 @@ async def venom_webhook(req: Request):
                 logging.error("❌ La imagen no se guardó correctamente o está vacía. OCR cancelado.")
                 return JSONResponse({"type": "text", "text": "❌ La imagen no se guardó bien. Intenta con otra."})
 
+            # 🔎 NUEVO: Inspección visual de la imagen
             try:
                 from PIL import Image
                 img = Image.open(path_local)
-                img.verify()
-                img = Image.open(path_local)
-                logging.info(f"🖼️ Imagen verificada con PIL — Tamaño: {img.size} — Modo: {img.mode}")
+                logging.info(f"[VENOM IMAGE] 📥 Imagen guardada — Tamaño: {img.size}, Modo: {img.mode}, Formato: {img.format}")
+                img_size_kb = os.path.getsize(path_local) / 1024
+                logging.info(f"[VENOM IMAGE] 💾 Peso de la imagen: {img_size_kb:.2f} KB")
+                if img.size[0] < 300 or img.size[1] < 300:
+                    logging.warning("[VENOM IMAGE] ⚠️ Imagen sospechosamente pequeña (<300px en alguna dimensión)")
             except Exception as e:
-                logging.error(f"❌ Imagen corrupta o ilegible para PIL: {e}")
+                logging.error(f"[VENOM IMAGE] ❌ No pude abrir la imagen para inspección inmediata: {e}")
                 return JSONResponse({"type": "text", "text": "❌ La imagen está dañada. Por favor intenta con otra."})
 
             # 🧠 Estado del usuario
@@ -1959,13 +1967,10 @@ async def venom_webhook(req: Request):
             # 4️⃣ Si espera comprobante
             if fase == "esperando_comprobante":
                 logging.info("🧾 Fase: esperando_comprobante — Ejecutando OCR")
-
-                # ✅ Log para confirmar que se llama correctamente
                 logging.info("🧪 [CHECK] Estoy justo antes del OCR")
 
                 texto = extraer_texto_comprobante(path_local)
 
-                # ✅ Log para confirmar qué texto devuelve OCR
                 logging.info("🧪 [CHECK] OCR ejecutado, texto extraído:")
                 logging.info(texto[:500])
 
