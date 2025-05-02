@@ -2014,15 +2014,23 @@ async def venom_webhook(req: Request):
             # 5️⃣ Si no es comprobante, intenta detectar modelo desde imagen
             logging.info("🧪 Imagen recibida fuera de comprobante. Intentando detectar modelo...")
 
-            resultado = analizar_imagen_hash(path_local)
+            try:
+                resultado = identify_model_from_stream(path_local)
+                logging.info(f"🔬 Resultado de identify_model_from_stream: {resultado}")
+            except Exception as e:
+                logging.error(f"❌ Error ejecutando identify_model_from_stream: {e}")
+                resultado = None
 
             if resultado:
+                logging.info(f"✅ Coincidencia encontrada: {resultado}")
                 est["modelo_detectado"] = resultado
                 return JSONResponse({
                     "type": "text",
-                    "text": f"La imagen coincide con {resultado}. ¿Deseas continuar tu compra? (SI/NO)"
+                    "text": f"📸 La imagen coincide con: *{resultado}*\n¿Deseas continuar tu compra? (SI/NO)",
+                    "parse_mode": "Markdown"
                 })
             else:
+                logging.warning("❌ No se detectó ninguna coincidencia de modelo para esta imagen.")
                 return JSONResponse({
                     "type": "text",
                     "text": "❌ No reconocí el modelo en la imagen. Intenta con otra más clara o con fondo blanco."
