@@ -282,6 +282,10 @@ def extraer_texto_comprobante(path: str) -> str:
             logging.warning("[OCR] ⚠️ Se recibió texto vacío.")
             return ""
 
+        # 🔍 NUEVO: Mostrar texto crudo completo ANTES de dividirlo
+        logging.info("[OCR] 📄 Texto crudo completo:")
+        logging.info(texto)
+
         # 7️⃣ Mostrar texto línea por línea
         logging.info("[OCR] ✅ Texto extraído correctamente. Mostrando líneas:")
         for i, linea in enumerate(texto.splitlines()):
