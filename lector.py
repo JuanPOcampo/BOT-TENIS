@@ -240,51 +240,54 @@ def extraer_texto_comprobante(path: str) -> str:
     try:
         logging.info(f"[OCR] 🚀 Iniciando OCR con Google Vision para: {path}")
 
-        # Cargar credenciales
+        # 1️⃣ Cargar credenciales
         creds_raw = os.environ.get("GOOGLE_CREDS_JSON")
         if not creds_raw:
             logging.error("[OCR] ❌ GOOGLE_CREDS_JSON no está definido en las variables de entorno.")
             return ""
 
-        credentials = service_account.Credentials.from_service_account_info(
-            json.loads(creds_raw)
-        )
+        credentials = service_account.Credentials.from_service_account_info(json.loads(creds_raw))
         logging.info("[OCR] ✅ Credenciales cargadas correctamente")
 
+        # 2️⃣ Crear cliente
         client = vision.ImageAnnotatorClient(credentials=credentials)
 
+        # 3️⃣ Leer imagen
         with io.open(path, "rb") as image_file:
             content = image_file.read()
         if not content:
-            logging.warning("[OCR] ⚠️ Imagen vacía")
+            logging.error("[OCR] ❌ La imagen está vacía.")
             return ""
 
         image = vision.Image(content=content)
 
+        # 4️⃣ Enviar a Google Vision
         logging.info("[OCR] 📤 Enviando imagen a Google Vision API (text_detection)...")
         response = client.text_detection(image=image)
         logging.info("[OCR] 📥 Respuesta recibida de Vision API")
 
-        # Verificar si hubo error
+        # 5️⃣ Validar errores de respuesta
         if response.error.message:
             logging.error(f"[OCR ERROR] ❌ Error de Vision API: {response.error.message}")
             return ""
 
-        # ✅ Extraer texto
+        # 6️⃣ Extraer texto
         texts = response.text_annotations
-        if texts:
-            texto = texts[0].description
-        else:
-            texto = ""
-
-        if not texto.strip():
-            logging.warning("[OCR] ⚠️ No se detectó texto en la imagen.")
+        if not texts:
+            logging.warning("[OCR] ⚠️ No se detectó texto (lista vacía).")
             return ""
 
-        logging.info("[OCR] ✅ Texto extraído:")
-        for i, linea in enumerate(texto.splitlines()):
-            logging.info(f"[OCR LINEA] → {repr(linea)}")
+        texto = texts[0].description.strip()
+        if not texto:
+            logging.warning("[OCR] ⚠️ Se recibió texto vacío.")
+            return ""
 
+        # 7️⃣ Mostrar texto línea por línea
+        logging.info("[OCR] ✅ Texto extraído correctamente. Mostrando líneas:")
+        for i, linea in enumerate(texto.splitlines()):
+            logging.info(f"[OCR LINEA {i}] → {repr(linea)}")
+
+        logging.info(f"[OCR] 🟢 Éxito: Se extrajo texto con {len(texto.split())} palabras y {len(texto)} caracteres.")
         return texto
 
     except Exception as e:
@@ -292,36 +295,38 @@ def extraer_texto_comprobante(path: str) -> str:
         return ""
 
 def es_comprobante_valido(texto: str) -> bool:
-    # 🔍 Mostrar texto crudo completo
-    logging.info("[OCR DEBUG] Texto detectado en comprobante:\n" + texto)
+    logging.info("[OCR DEBUG] 🔎 Iniciando validación del texto extraído")
 
-    # 🔍 Mostrar línea por línea con representación exacta
+    # Mostrar texto crudo completo
+    logging.info("[OCR DEBUG] Texto crudo completo:\n" + texto)
+
+    # Mostrar línea por línea con representación exacta
     for i, linea in enumerate(texto.splitlines()):
-        logging.info(f"[OCR LINEA {i}] → {repr(linea)}")
+        logging.info(f"[OCR DEBUG] Línea {i}: {repr(linea)}")
 
-    # 🔄 Normalizar texto (quitar tildes, pasar a minúsculas, quitar signos)
+    # Normalizar texto
     texto_normalizado = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8")
     texto_normalizado = texto_normalizado.lower()
     texto_normalizado = re.sub(r"[^\w\s]", "", texto_normalizado)
 
     logging.info("[OCR DEBUG] Texto normalizado:\n" + texto_normalizado)
 
-    # 🔑 Frases clave válidas
+    # Palabras clave aceptadas
     claves = [
         "pago exitoso",
         "transferencia exitosa",
         "comprobante",
-        "recibo",
+        "Datos de la transferencia",
         "pago aprobado",
         "transferencia realizada"
     ]
 
     for clave in claves:
         if clave in texto_normalizado:
-            logging.info(f"[OCR DEBUG] Coincidencia encontrada: '{clave}'")
+            logging.info(f"[OCR DEBUG] ✅ Coincidencia encontrada: '{clave}'")
             return True
 
-    logging.warning("[OCR DEBUG] No se encontró ninguna clave válida en el texto extraído.")
+    logging.warning("[OCR DEBUG] ❌ No se encontró ninguna clave válida en el texto extraído.")
     return False
 # ——— UTILIDADES DE INVENTARIO —————————————————————————————————————————
 estado_usuario: dict[int, dict] = {}
@@ -671,33 +676,6 @@ def generate_sale_id() -> str:
     rnd = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
     return f"VEN-{ts}-{rnd}"
 
-
-#  HOJA DE PEDIDOS
-# ───────────────────────────────────────────────────────────────
-def registrar_orden(data: dict):
-    payload = {
-        "numero_venta": data.get("Número Venta", ""),
-        "fecha_venta":  data.get("Fecha Venta", ""),
-        "cliente":      data.get("Cliente", ""),
-        "telefono":     data.get("Teléfono", ""),
-        "producto":     data.get("Producto", ""),
-        "color":        data.get("Color", ""),
-        "talla":        data.get("Talla", ""),
-        "correo":       data.get("Correo", ""),
-        "pago":         data.get("Pago", ""),
-        "estado":       data.get("Estado", "")
-    }
-    logging.info(f"[SHEETS] Payload JSON que envío:\n{payload}")
-    try:
-        resp = requests.post(URL_SHEETS_PEDIDOS, json=payload)
-        logging.info(f"[SHEETS] HTTP {resp.status_code} — Body: {resp.text}")
-    except Exception as e:
-        logging.error(f"[SHEETS] Error al hacer POST: {e}")
-
-def generate_sale_id() -> str:
-    ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    rnd = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
-    return f"VEN-{ts}-{rnd}"
 
 
 # --------------------------------------------------------------------------------------------------
@@ -1886,6 +1864,15 @@ async def procesar_wa(cid: str, body: str) -> dict:
         reset_estado(cid)
         estado_usuario[cid] = {"fase": "inicio"}
 
+    # 💬 Si es saludo o /start, siempre responde algo básico
+    if texto in ["/start", "start", "hola", "buenas", "hey"]:
+        logging.info("[BOT] Comando /start o saludo detectado.")
+        reset_estado(cid)
+        return {
+            "type": "text",
+            "text": "¡Bienvenido a *X100🔥👟*!\n\nSi tienes una foto puedes enviarla\nSi tienes número de referencia, envíamelo\nPuedes enviarme la foto del pedido\n¿Te gustaría ver unos videos de nuestras referencias?\nCuéntame sin problema 😀"
+        }
+
     try:
         await responder(dummy_update, ctx)
 
@@ -1900,13 +1887,17 @@ async def procesar_wa(cid: str, body: str) -> dict:
 
             print(f"[DEBUG] BOT no respondió nada, se usará IA para el mensaje: {body}")
             respuesta_ia = await responder_con_openai(body)
-            return {"type": "text", "text": respuesta_ia}
+            return {"type": "text", "text": respuesta_ia or "🤖 Estoy teniendo problemas, pero ya estoy revisando..."}
 
     except Exception as e:
         print(f"🔥 Error interno en procesar_wa(): {e}")
         print(f"[DEBUG] Usando IA como fallback por error de bot en mensaje: {body}")
-        respuesta_ia = await responder_con_openai(body)
-        return {"type": "text", "text": respuesta_ia}
+        try:
+            respuesta_ia = await responder_con_openai(body)
+            return {"type": "text", "text": respuesta_ia or "🤖 Estoy teniendo problemas, pero ya estoy revisando..."}
+        except Exception as fallback_error:
+            logging.error(f"[FALLBACK] También falló responder_con_openai: {fallback_error}")
+            return {"type": "text", "text": "⚠️ Hubo un error inesperado. Por favor intenta de nuevo."}
 @api.post("/venom")
 async def venom_webhook(req: Request):
     try:
@@ -1942,6 +1933,10 @@ async def venom_webhook(req: Request):
                 return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
 
             # 🔍 Verificar que la imagen quedó bien
+            if not os.path.exists(path_local) or os.path.getsize(path_local) == 0:
+                logging.error("❌ La imagen no se guardó correctamente o está vacía. OCR cancelado.")
+                return JSONResponse({"type": "text", "text": "❌ La imagen no se guardó bien. Intenta con otra."})
+
             try:
                 from PIL import Image
                 img = Image.open(path_local)
@@ -1960,8 +1955,15 @@ async def venom_webhook(req: Request):
             # 4️⃣ Si espera comprobante
             if fase == "esperando_comprobante":
                 logging.info("🧾 Fase: esperando_comprobante — Ejecutando OCR")
+
+                # ✅ Log para confirmar que se llama correctamente
+                logging.info("🧪 [CHECK] Estoy justo antes del OCR")
+
                 texto = extraer_texto_comprobante(path_local)
-                logging.info(f"📃 Texto OCR:\n{texto[:300]}")
+
+                # ✅ Log para confirmar qué texto devuelve OCR
+                logging.info("🧪 [CHECK] OCR ejecutado, texto extraído:")
+                logging.info(texto[:500])
 
                 if es_comprobante_valido(texto):
                     logging.info("✅ OCR válido. Se registra orden.")
@@ -2006,7 +2008,7 @@ async def venom_webhook(req: Request):
         logging.exception("🔥 Error general en venom_webhook")
         return JSONResponse(
             {"type": "text", "text": "⚠️ Error interno procesando el mensaje."},
-            status_code=200  # <-- Para que Venom no explote con error JSON
+            status_code=200
         )
 
 # -------------------------------------------------------------------------
