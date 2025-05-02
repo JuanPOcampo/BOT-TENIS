@@ -1929,16 +1929,27 @@ async def venom_webhook(req: Request):
         # 3️⃣ Procesar imagen
         elif mtype == "image" or mimetype.startswith("image"):
             try:
-                logging.info("🖼️ Imagen recibida. Decodificando base64...")
-                b64_str = body.split(",", 1)[1] if "," in body else body
-                img_bytes = base64.b64decode(b64_str + "===")
+                logging.info("🖼️ Imagen recibida. Procesando...")
+
+                # 🔍 Detectar si hay URL de imagen completa
+                url_imagen = data.get("media_url")
+                if url_imagen:
+                    logging.info(f"[VENOM IMAGE] Descargando desde media_url: {url_imagen}")
+                    img_bytes = requests.get(url_imagen).content
+                else:
+                    logging.warning("[VENOM IMAGE] No se encontró media_url. Usando base64 (puede estar comprimida)")
+                    b64_str = body.split(",", 1)[1] if "," in body else body
+                    img_bytes = base64.b64decode(b64_str + "===")
+
+                # 📥 Guardar imagen local
                 os.makedirs("temp", exist_ok=True)
                 path_local = f"temp/{cid}_img.jpg"
                 with open(path_local, "wb") as f:
                     f.write(img_bytes)
                 logging.info(f"✅ Imagen guardada temporalmente en {path_local}")
+
             except Exception as e:
-                logging.error(f"❌ Error al guardar imagen base64: {e}")
+                logging.error(f"❌ Error al guardar imagen: {e}")
                 return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
 
             # 🔍 Verificar que la imagen quedó bien
@@ -1946,23 +1957,17 @@ async def venom_webhook(req: Request):
                 logging.error("❌ La imagen no se guardó correctamente o está vacía. OCR cancelado.")
                 return JSONResponse({"type": "text", "text": "❌ La imagen no se guardó bien. Intenta con otra."})
 
-            # 🔎 NUEVO: Inspección visual de la imagen
             try:
                 from PIL import Image
                 img = Image.open(path_local)
-                logging.info(f"[VENOM IMAGE] 📥 Imagen guardada — Tamaño: {img.size}, Modo: {img.mode}, Formato: {img.format}")
-                img_size_kb = os.path.getsize(path_local) / 1024
-                logging.info(f"[VENOM IMAGE] 💾 Peso de la imagen: {img_size_kb:.2f} KB")
+                img.verify()
+                img = Image.open(path_local)
+                logging.info(f"🖼️ Imagen verificada con PIL — Tamaño: {img.size} — Modo: {img.mode}")
                 if img.size[0] < 300 or img.size[1] < 300:
                     logging.warning("[VENOM IMAGE] ⚠️ Imagen sospechosamente pequeña (<300px en alguna dimensión)")
             except Exception as e:
-                logging.error(f"[VENOM IMAGE] ❌ No pude abrir la imagen para inspección inmediata: {e}")
+                logging.error(f"❌ Imagen corrupta o ilegible para PIL: {e}")
                 return JSONResponse({"type": "text", "text": "❌ La imagen está dañada. Por favor intenta con otra."})
-
-            # 🧠 Estado del usuario
-            est = estado_usuario.get(cid, {})
-            fase = est.get("fase", "")
-            logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
 
             # 4️⃣ Si espera comprobante
             if fase == "esperando_comprobante":
