@@ -54,14 +54,21 @@ load_dotenv()
 api = FastAPI()
 
 
+# ✅ Desde el mismo JSON base
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
-creds = service_account.Credentials.from_service_account_info(
+
+# DRIVE → requiere scope explícito
+drive_creds = service_account.Credentials.from_service_account_info(
     creds_info,
-    scopes=["https://www.googleapis.com/auth/drive.readonly"],
+    scopes=["https://www.googleapis.com/auth/drive.readonly"]
 )
-drive_service = build("drive", "v3", credentials=creds)
-# Cliente OCR de Google Cloud Vision
-vision_client = vision.ImageAnnotatorClient(credentials=creds)
+
+# VISION → no requiere scope personalizado
+vision_creds = service_account.Credentials.from_service_account_info(creds_info)
+
+# Servicios
+drive_service = build("drive", "v3", credentials=drive_creds)
+vision_client = vision.ImageAnnotatorClient(credentials=vision_creds)
 
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 def precargar_imagenes_drive(service, root_id):
@@ -164,51 +171,20 @@ def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehas
     logging.info(f"▶ Precargados hashes para {len(model_hashes)} SKUs")
     return model_hashes
 
-MODEL_HASHES = precargar_hashes_from_drive(DRIVE_FOLDER_ID)
+MODEL_HASHES = precargar_imagenes_drive(drive_service, DRIVE_FOLDER_ID)
+
+for h, ref in MODEL_HASHES.items():
+    print(f"HASH precargado: {h} → {ref}")
 
 def identify_model_from_stream(path: str) -> str | None:
+    """
+    Abre la imagen subida, calcula su hash y busca directamente
+    en MODEL_HASHES cuál es el modelo (marca_modelo_color).
+    """
     try:
-        img = Image.open(path)
-        ph_in = imagehash.phash(img)
-        ah_in = imagehash.average_hash(img)
-        logging.info(f"🔍 Hash PHASH calculado: {ph_in}")
-        logging.info(f"🔍 Hash AHASH calculado: {ah_in}")
-
-        # 1️⃣ Coincidencia EXACTA primero
-        hash_str = str(ph_in)
-        if hash_str in MODEL_HASHES:
-            marca, modelo, color = MODEL_HASHES[hash_str]
-            resultado = " ".join([marca, modelo, color]).strip()
-            logging.info(f"✅ Coincidencia exacta: {resultado}")
-            return resultado
-        else:
-            logging.warning("❌ Coincidencia exacta falló. Probando coincidencia tolerante...")
-
-        # 2️⃣ Coincidencia TOLERANTE
-        mejor_match = None
-        menor_dif = 999
-
-        for ref_hash_str, (marca, modelo, color) in MODEL_HASHES.items():
-            try:
-                ph_ref = imagehash.hex_to_hash(ref_hash_str)
-                dif = ph_in - ph_ref
-                logging.debug(f"🧪 Comparando con {marca} {modelo} {color} — Diferencia: {dif}")
-
-                if dif <= 15 and dif < menor_dif:  # puedes ajustar el threshold
-                    mejor_match = (marca, modelo, color)
-                    menor_dif = dif
-            except Exception as e:
-                logging.error(f"⚠️ Error comparando con {ref_hash_str}: {e}")
-
-        if mejor_match:
-            logging.info(f"✅ Coincidencia tolerante: {' '.join(mejor_match)} con diferencia {menor_dif}")
-            return " ".join(mejor_match).strip()
-
-        logging.warning("❌ No se encontró ninguna coincidencia (ni exacta ni tolerante).")
-        return None
-
+        img_up = Image.open(path)
     except Exception as e:
-        logging.error(f"❌ Error crítico en identify_model_from_stream: {e}")
+        logging.error(f"No pude leer la imagen subida: {e}")
         return None
 
     # ─── Aquí calculas y buscas el hash ───
@@ -2042,32 +2018,7 @@ async def venom_webhook(req: Request):
                     os.remove(path_local)
                     return JSONResponse({"type": "text", "text": "⚠️ No pude verificar el comprobante. Asegúrate que diga 'Pago exitoso' o 'Transferencia exitosa'."})
 
-            # 5️⃣ Si no es comprobante, intenta detectar modelo desde imagen
-            logging.info("🧪 Imagen recibida fuera de comprobante. Intentando detectar modelo...")
-
-            try:
-                resultado = identify_model_from_stream(path_local)
-                logging.info(f"🔬 Resultado de identify_model_from_stream: {resultado}")
-            except Exception as e:
-                logging.error(f"❌ Error ejecutando identify_model_from_stream: {e}")
-                resultado = None
-
-            if resultado:
-                logging.info(f"✅ Coincidencia encontrada: {resultado}")
-                est["modelo_detectado"] = resultado
-                return JSONResponse({
-                    "type": "text",
-                    "text": f"📸 La imagen coincide con: *{resultado}*\n¿Deseas continuar tu compra? (SI/NO)",
-                    "parse_mode": "Markdown"
-                })
-            else:
-                logging.warning("❌ No se detectó ninguna coincidencia de modelo para esta imagen.")
-                return JSONResponse({
-                    "type": "text",
-                    "text": "❌ No reconocí el modelo en la imagen. Intenta con otra más clara o con fondo blanco."
-                })
-
-        # 6️⃣ Tipo de mensaje no manejado
+        # 5️⃣ Tipo de mensaje no manejado
         else:
             logging.warning(f"🤷‍♂️ Tipo de mensaje no manejado: {mtype}")
             return JSONResponse({
