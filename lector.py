@@ -657,18 +657,20 @@ async def mostrar_imagenes_modelo(cid, ctx, marca, tipo_modelo):
 # ───────────────────────────────────────────────────────────────
 
 # 🔥 Registrar la orden en Google Sheets
-def registrar_orden(data: dict):
+def registrar_orden(data: dict, fase: str = ""):
     payload = {
         "numero_venta": data.get("Número Venta", ""),
         "fecha_venta":  data.get("Fecha Venta", ""),
         "cliente":      data.get("Cliente", ""),
+        "cedula":       data.get("Cédula", ""),  # ✅ NUEVO
         "telefono":     data.get("Teléfono", ""),
         "producto":     data.get("Producto", ""),
         "color":        data.get("Color", ""),
         "talla":        data.get("Talla", ""),
         "correo":       data.get("Correo", ""),
         "pago":         data.get("Pago", ""),
-        "estado":       data.get("Estado", "")
+        "estado":       data.get("Estado", ""),
+        "fase_actual":  fase                     # ✅ NUEVO
     }
     logging.info(f"[SHEETS] Payload JSON que envío:\n{payload}")
     try:
@@ -2009,7 +2011,24 @@ async def venom_webhook(req: Request):
                     os.remove(path_local)
                     return JSONResponse({"type": "text", "text": "⚠️ No pude verificar el comprobante. Asegúrate que diga 'Pago exitoso' o 'Transferencia exitosa'."})
 
-        # 5️⃣ Tipo de mensaje no manejado
+            # 5️⃣ Si no es comprobante, intenta detectar modelo desde imagen
+            logging.info("🧪 Imagen recibida fuera de comprobante. Intentando detectar modelo...")
+
+            resultado = analizar_imagen_hash(path_local)
+
+            if resultado:
+                est["modelo_detectado"] = resultado
+                return JSONResponse({
+                    "type": "text",
+                    "text": f"La imagen coincide con {resultado}. ¿Deseas continuar tu compra? (SI/NO)"
+                })
+            else:
+                return JSONResponse({
+                    "type": "text",
+                    "text": "❌ No reconocí el modelo en la imagen. Intenta con otra más clara o con fondo blanco."
+                })
+
+        # 6️⃣ Tipo de mensaje no manejado
         else:
             logging.warning(f"🤷‍♂️ Tipo de mensaje no manejado: {mtype}")
             return JSONResponse({
