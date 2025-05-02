@@ -261,8 +261,8 @@ def extraer_texto_comprobante(path: str) -> str:
 
         image = vision.Image(content=content)
 
-        logging.info("[OCR] 📤 Enviando imagen a Google Vision API...")
-        response = client.document_text_detection(image=image)
+        logging.info("[OCR] 📤 Enviando imagen a Google Vision API (text_detection)...")
+        response = client.text_detection(image=image)
         logging.info("[OCR] 📥 Respuesta recibida de Vision API")
 
         # Verificar si hubo error
@@ -270,11 +270,12 @@ def extraer_texto_comprobante(path: str) -> str:
             logging.error(f"[OCR ERROR] ❌ Error de Vision API: {response.error.message}")
             return ""
 
-        # Revisar si detectó algo
-        texto = response.full_text_annotation.text or ""
-        if not texto.strip() and response.text_annotations:
-            texto = response.text_annotations[0].description
-            logging.warning("[OCR] ⚠️ Fallback: usando text_annotations[0]")
+        # ✅ Extraer texto
+        texts = response.text_annotations
+        if texts:
+            texto = texts[0].description
+        else:
+            texto = ""
 
         if not texto.strip():
             logging.warning("[OCR] ⚠️ No se detectó texto en la imagen.")
