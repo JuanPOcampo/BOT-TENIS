@@ -1921,117 +1921,116 @@ async def venom_webhook(req: Request):
     try:
         # 1️⃣ Leer JSON
         data = await req.json()
-        cid      = wa_chat_id(data.get("from", ""))
-        body     = data.get("body", "") or ""
-        mtype    = (data.get("type") or "").lower()
+        cid = wa_chat_id(data.get("from", ""))
+        body = data.get("body", "") or ""
+        mtype = (data.get("type") or "").lower()
         mimetype = (data.get("mimetype") or "").lower()
 
         logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype} — MIME: {mimetype}")
 
-        # 2️⃣ Procesar texto
-        if mtype == "chat":
+        # 2️⃣ Si es imagen en base64
+        if mtype == "image" or mimetype.startswith("image"):
+            try:
+                b64_str = body.split(",", 1)[1] if "," in body else body
+                img_bytes = base64.b64decode(b64_str + "===")
+                img = Image.open(io.BytesIO(img_bytes))
+                img.load()  # fuerza carga completa
+                logging.info(f"✅ Imagen decodificada correctamente. Tamaño: {img.size}")
+            except Exception as e:
+                logging.error(f"❌ No pude leer la imagen: {e}")
+                return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
+
+            # 🧠 Obtener estado del usuario
+            est = estado_usuario.get(cid, {})
+            fase = est.get("fase", "")
+            logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
+
+            # 3️⃣ Si está esperando comprobante → OCR
+            if fase == "esperando_comprobante":
+                try:
+                    temp_path = f"temp/{cid}_proof.jpg"
+                    os.makedirs("temp", exist_ok=True)
+                    with open(temp_path, "wb") as f:
+                        f.write(img_bytes)
+
+                    texto = extraer_texto_comprobante(temp_path)
+                    logging.info(f"[OCR] Texto extraído:\n{texto[:500]}")
+
+                    if es_comprobante_valido(texto):
+                        logging.info("✅ Comprobante válido por OCR")
+                        resumen = est.get("resumen", {})
+                        registrar_orden(resumen)
+
+                        enviar_correo(
+                            est["correo"],
+                            f"Pago recibido {resumen.get('Número Venta')}",
+                            json.dumps(resumen, indent=2)
+                        )
+                        enviar_correo_con_adjunto(
+                            EMAIL_JEFE,
+                            f"Comprobante {resumen.get('Número Venta')}",
+                            json.dumps(resumen, indent=2),
+                            temp_path
+                        )
+                        os.remove(temp_path)
+                        reset_estado(cid)
+                        return JSONResponse({
+                            "type": "text",
+                            "text": "✅ Comprobante verificado. Tu pedido está en proceso. 🚚"
+                        })
+                    else:
+                        logging.warning("⚠️ OCR no válido. Texto no contiene 'pago exitoso'")
+                        os.remove(temp_path)
+                        return JSONResponse({
+                            "type": "text",
+                            "text": "⚠️ No pude verificar el comprobante. Asegúrate que diga 'Pago exitoso'."
+                        })
+                except Exception as e:
+                    logging.error(f"❌ Error al procesar comprobante: {e}")
+                    return JSONResponse({"type": "text", "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."})
+
+            # 4️⃣ Si NO es comprobante → Detectar modelo por hash
+            try:
+                h_in = str(imagehash.phash(img))
+                ref = MODEL_HASHES.get(h_in)
+                logging.info(f"🔍 Hash calculado: {h_in} → {ref}")
+
+                if ref:
+                    marca, modelo, color = ref
+                    estado_usuario.setdefault(cid, reset_estado(cid))
+                    estado_usuario[cid].update(
+                        fase="imagen_detectada", marca=marca, modelo=modelo, color=color
+                    )
+                    return JSONResponse({
+                        "type": "text",
+                        "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
+                    })
+                else:
+                    logging.warning("❌ No se detectó ninguna coincidencia de modelo para esta imagen.")
+                    reset_estado(cid)
+                    return JSONResponse({
+                        "type": "text",
+                        "text": "❌ No reconocí el modelo. Puedes intentar con otra imagen clara."
+                    })
+
+            except Exception as e:
+                logging.error(f"❌ Error al identificar modelo: {e}")
+                return JSONResponse({"type": "text", "text": "❌ Ocurrió un error al intentar detectar el modelo."})
+
+        # 5️⃣ Si es texto u otro tipo
+        elif mtype == "chat":
             fase_actual = estado_usuario.get(cid, {}).get("fase", "")
             logging.info(f"💬 Texto recibido en fase: {fase_actual or 'NO DEFINIDA'}")
             reply = await procesar_wa(cid, body)
             return JSONResponse(reply)
 
-        # 3️⃣ Procesar imagen
-        elif mtype == "image" or mimetype.startswith("image"):
-            try:
-                logging.info("🖼️ Imagen recibida. Procesando...")
-
-                # 🔍 Detectar si hay URL de imagen completa
-                url_imagen = data.get("media_url")
-                if url_imagen:
-                    logging.info(f"[VENOM IMAGE] Descargando desde media_url: {url_imagen}")
-                    img_bytes = requests.get(url_imagen).content
-                else:
-                    logging.warning("[VENOM IMAGE] No se encontró media_url. Usando base64 (puede estar comprimida)")
-                    b64_str = body.split(",", 1)[1] if "," in body else body
-                    img_bytes = base64.b64decode(b64_str + "===")
-
-                # 📥 Guardar imagen local
-                os.makedirs("temp", exist_ok=True)
-                path_local = f"temp/{cid}_img.jpg"
-                with open(path_local, "wb") as f:
-                    f.write(img_bytes)
-                logging.info(f"✅ Imagen guardada temporalmente en {path_local}")
-
-            except Exception as e:
-                logging.error(f"❌ Error al guardar imagen: {e}")
-                return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
-
-            # 🔍 Verificar que la imagen quedó bien
-            if not os.path.exists(path_local) or os.path.getsize(path_local) == 0:
-                logging.error("❌ La imagen no se guardó correctamente o está vacía. OCR cancelado.")
-                return JSONResponse({"type": "text", "text": "❌ La imagen no se guardó bien. Intenta con otra."})
-
-            try:
-                from PIL import Image
-                img = Image.open(path_local)
-                img.verify()
-                img = Image.open(path_local)
-                logging.info(f"🖼️ Imagen verificada con PIL — Tamaño: {img.size} — Modo: {img.mode}")
-                if img.size[0] < 300 or img.size[1] < 300:
-                    logging.warning("[VENOM IMAGE] ⚠️ Imagen sospechosamente pequeña (<300px en alguna dimensión)")
-            except Exception as e:
-                logging.error(f"❌ Imagen corrupta o ilegible para PIL: {e}")
-                return JSONResponse({"type": "text", "text": "❌ La imagen está dañada. Por favor intenta con otra."})
-
-            # 🧠 Estado del usuario
-            est = estado_usuario.get(cid, {})
-            fase = est.get("fase", "")  # ✅ ESTA LÍNEA FALTABA
-            logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
-            logging.debug(f"🧠 Estado completo: {est}")
-
-            # 4️⃣ Si espera comprobante
-            if fase == "esperando_comprobante":
-                logging.info("🧾 Fase: esperando_comprobante — Ejecutando OCR")
-                logging.info("🧪 [CHECK] Estoy justo antes del OCR")
-
-                texto = extraer_texto_comprobante(path_local)
-
-                logging.info("🧪 [CHECK] OCR ejecutado, texto extraído:")
-                logging.info(texto[:500])
-
-                if es_comprobante_valido(texto):
-                    logging.info("✅ OCR válido. Se registra orden.")
-                    resumen = est.get("resumen", {})
-                    registrar_orden(resumen)
-
-                    enviar_correo(
-                        est["correo"],
-                        f"Pago recibido {resumen.get('Número Venta')}",
-                        json.dumps(resumen, indent=2)
-                    )
-                    enviar_correo_con_adjunto(
-                        EMAIL_JEFE,
-                        f"Comprobante {resumen.get('Número Venta')}",
-                        json.dumps(resumen, indent=2),
-                        path_local
-                    )
-                    os.remove(path_local)
-                    reset_estado(cid)
-                    return JSONResponse({"type": "text", "text": "✅ Comprobante verificado. Tu pedido está en proceso. 🚚"})
-                else:
-                    logging.warning("⚠️ OCR no válido. No se reconoció 'Pago exitoso'.")
-                    os.remove(path_local)
-                    return JSONResponse({"type": "text", "text": "⚠️ No pude verificar el comprobante. Asegúrate que diga 'Pago exitoso' o 'Transferencia exitosa'."})
-
-        # 5️⃣ Tipo de mensaje no manejado
+        # 6️⃣ Tipo no manejado
         else:
             logging.warning(f"🤷‍♂️ Tipo de mensaje no manejado: {mtype}")
             return JSONResponse({
                 "type": "text",
                 "text": f"⚠️ Tipo de mensaje no manejado: {mtype}"
             })
-
-        # 🟡 Si llega hasta aquí y no se ejecutó ningún return, responde fallback
-        logging.warning("🟡 Fallback: ningún flujo procesó este mensaje.")
-        return JSONResponse({
-            "type": "text",
-            "text": "⚠️ Recibí tu mensaje pero no pude procesarlo correctamente. ¿Puedes repetirlo?"
-        })
 
     except Exception as e:
         logging.exception("🔥 Error general en venom_webhook")
