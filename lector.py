@@ -1856,137 +1856,111 @@ async def venom_webhook(req: Request):
     try:
         # 1️⃣ Leer JSON
         data = await req.json()
-        cid      = wa_chat_id(data.get("from", ""))       # ID del chat
-        body     = data.get("body", "") or ""              # Mensaje recibido
-        mtype    = (data.get("type") or "").lower()        # Tipo: chat, image, etc.
-        mimetype = (data.get("mimetype") or "").lower()    # image/jpeg, etc.
+        cid      = wa_chat_id(data.get("from", ""))
+        body     = data.get("body", "") or ""
+        mtype    = (data.get("type") or "").lower()
+        mimetype = (data.get("mimetype") or "").lower()
 
-        logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype}")
+        logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype} — MIME: {mimetype}")
 
-        # Aquí va la lógica principal que ya tienes después, por ejemplo:
+        # 2️⃣ Procesar texto
         if mtype == "chat":
+            fase_actual = estado_usuario.get(cid, {}).get("fase", "")
+            logging.info(f"💬 Texto recibido en fase: {fase_actual or 'NO DEFINIDA'}")
             reply = await procesar_wa(cid, body)
             return JSONResponse(reply)
 
-        # O si es imagen, etc... (colocas el resto de tu flujo)
-        return JSONResponse({"type": "text", "text": "✅ Mensaje recibido, pero no se procesó ningún flujo."})
+        # 3️⃣ Procesar imagen
+        elif mtype == "image" or mimetype.startswith("image"):
+            try:
+                logging.info("🖼️ Imagen recibida. Decodificando base64...")
+                b64_str = body.split(",", 1)[1] if "," in body else body
+                img_bytes = base64.b64decode(b64_str + "===")
+                os.makedirs("temp", exist_ok=True)
+                path_local = f"temp/{cid}_img.jpg"
+                with open(path_local, "wb") as f:
+                    f.write(img_bytes)
+                logging.info(f"✅ Imagen guardada temporalmente en {path_local}")
+            except Exception as e:
+                logging.error(f"❌ Error al guardar imagen base64: {e}")
+                return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
+
+            est = estado_usuario.get(cid, {})
+            fase = est.get("fase", "")
+            logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
+
+            # 4️⃣ Si espera comprobante
+            if fase == "esperando_comprobante":
+                logging.info("🧾 Fase: esperando_comprobante — Ejecutando OCR")
+                texto = extraer_texto_comprobante(path_local)
+                logging.info(f"📃 Texto OCR:\n{texto[:300]}")
+
+                if es_comprobante_valido(texto):
+                    logging.info("✅ OCR válido. Se registra orden.")
+                    resumen = est.get("resumen", {})
+                    registrar_orden(resumen)
+
+                    enviar_correo(
+                        est["correo"],
+                        f"Pago recibido {resumen.get('Número Venta')}",
+                        json.dumps(resumen, indent=2)
+                    )
+                    enviar_correo_con_adjunto(
+                        EMAIL_JEFE,
+                        f"Comprobante {resumen.get('Número Venta')}",
+                        json.dumps(resumen, indent=2),
+                        path_local
+                    )
+                    os.remove(path_local)
+                    reset_estado(cid)
+                    return JSONResponse({"type": "text", "text": "✅ Comprobante verificado. Tu pedido está en proceso. 🚚"})
+                else:
+                    logging.warning("⚠️ OCR no válido. No se reconoció 'Pago exitoso'.")
+                    os.remove(path_local)
+                    return JSONResponse({"type": "text", "text": "⚠️ No pude verificar el comprobante. Asegúrate que diga 'Pago exitoso' o 'Transferencia exitosa'."})
+
+            # 5️⃣ Si no está esperando comprobante
+            logging.info("📸 Fase no es 'esperando_comprobante'. Intentando reconocimiento por hash.")
+            try:
+                img = Image.open(path_local)
+                h_in = str(imagehash.phash(img))
+                ref = MODEL_HASHES.get(h_in)
+                logging.info(f"🧠 Hash de imagen: {h_in} → Resultado: {ref}")
+            except Exception as e:
+                logging.error(f"❌ Error al calcular hash de imagen: {e}")
+                return JSONResponse({"type": "text", "text": "😕 No pude procesar la imagen."})
+
+            if ref:
+                marca, modelo, color = ref
+                logging.info(f"🎯 Imagen reconocida como {marca} {modelo} {color}")
+                estado_usuario.setdefault(cid, reset_estado(cid))
+                estado_usuario[cid].update(
+                    fase="imagen_detectada", marca=marca, modelo=modelo, color=color
+                )
+                os.remove(path_local)
+                return JSONResponse({
+                    "type": "text",
+                    "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
+                })
+            else:
+                logging.warning("🚫 Imagen no reconocida. Se reinicia estado.")
+                os.remove(path_local)
+                reset_estado(cid)
+                return JSONResponse({"type": "text", "text": "😕 No reconocí el modelo. Puedes intentarlo con otra imagen."})
+
+        # 6️⃣ Mensaje no manejado
+        logging.warning(f"🤷‍♂️ Tipo de mensaje no manejado: {mtype}")
+        return JSONResponse({
+            "type": "text",
+            "text": f"⚠️ Tipo de mensaje no manejado: {mtype}"
+        })
 
     except Exception as e:
-        logging.exception("🔥 Error en venom_webhook:")
+        logging.exception("🔥 Error general en venom_webhook")
         return JSONResponse(
             {"type": "text", "text": "⚠️ Error interno procesando el mensaje."},
             status_code=500
         )
-
-    # 2️⃣ Si es imagen en base64
-    if mtype == "image" or mimetype.startswith("image"):
-        try:
-            logging.info("🧪 Imagen recibida por WhatsApp (base64)")
-            b64_str = body.split(",", 1)[1] if "," in body else body
-            img_bytes = base64.b64decode(b64_str + "===")
-            os.makedirs("temp", exist_ok=True)
-            path_local = f"temp/{cid}_img.jpg"
-            with open(path_local, "wb") as f:
-                f.write(img_bytes)
-            logging.info(f"✅ Imagen guardada en: {path_local}")
-        except Exception as e:
-            logging.error(f"❌ No pude leer la imagen: {e}")
-            return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
-
-        est = estado_usuario.get(cid, {})
-        fase = est.get("fase", "")
-        logging.info(f"🧠 Fase actual del usuario {cid}: {fase}")
-
-        if fase == "esperando_comprobante":
-            logging.info("📸 Procesando comprobante de pago (OCR)...")
-            texto = extraer_texto_comprobante(path_local)
-            logging.info(f"🧾 Texto OCR detectado:\n{texto[:300]}")
-
-            if es_comprobante_valido(texto):
-                logging.info("✅ Comprobante válido detectado")
-                resumen = est.get("resumen", {})
-                registrar_orden(resumen)
-
-                enviar_correo(
-                    est["correo"],
-                    f"Pago recibido {resumen.get('Número Venta')}",
-                    json.dumps(resumen, indent=2)
-                )
-                enviar_correo_con_adjunto(
-                    EMAIL_JEFE,
-                    f"Comprobante {resumen.get('Número Venta')}",
-                    json.dumps(resumen, indent=2),
-                    path_local
-                )
-                os.remove(path_local)
-                reset_estado(cid)
-                return JSONResponse({"type": "text", "text": "✅ Comprobante verificado. Tu pedido está en proceso. 🚚"})
-            else:
-                logging.warning("⚠️ Comprobante NO válido")
-                os.remove(path_local)
-                return JSONResponse({"type": "text", "text": "⚠️ No pude verificar el comprobante. Asegúrate que sea legible y que diga 'Pago exitoso' o 'Transferencia exitosa'."})
-
-        # Si no está esperando comprobante, intenta con HASH para modelo
-        try:
-            img = Image.open(path_local)
-            h_in = str(imagehash.phash(img))
-            ref = MODEL_HASHES.get(h_in)
-            logging.info(f"🔍 Imagen no era comprobante. Se calcula hash {h_in} → {ref}")
-        except Exception as e:
-            logging.error(f"❌ Error procesando hash de imagen: {e}")
-            return JSONResponse({"type": "text", "text": "No pude procesar la imagen 😕"})
-
-        if ref:
-            marca, modelo, color = ref
-            estado_usuario.setdefault(cid, reset_estado(cid))
-            estado_usuario[cid].update(
-                fase="imagen_detectada", marca=marca, modelo=modelo, color=color
-            )
-            os.remove(path_local)
-            return JSONResponse({
-                "type": "text",
-                "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
-            })
-        else:
-            os.remove(path_local)
-            reset_estado(cid)
-            return JSONResponse({"type": "text", "text": "😕 No reconocí el modelo. Puedes intentarlo con otra imagen."})
-
-
-    # Si no está esperando comprobante, intenta con HASH para modelo
-    try:
-        img = Image.open(path_local)
-        h_in = str(imagehash.phash(img))
-        ref = MODEL_HASHES.get(h_in)
-        logging.info(f"🔍 Imagen no era comprobante. Se calcula hash {h_in} → {ref}")
-    except Exception as e:
-        logging.error(f"❌ Error procesando hash de imagen: {e}")
-        return JSONResponse({"type": "text", "text": "No pude procesar la imagen 😕"})
-
-        if ref:
-            marca, modelo, color = ref
-            estado_usuario.setdefault(cid, reset_estado(cid))
-            estado_usuario[cid].update(
-                fase="imagen_detectada", marca=marca, modelo=modelo, color=color
-            )
-            os.remove(path_local)
-            return JSONResponse({
-                "type": "text",
-                "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
-            })
-        else:
-            os.remove(path_local)
-            reset_estado(cid)
-            return JSONResponse({"type": "text", "text": "😕 No reconocí el modelo. Puedes intentarlo con otra imagen."})
-
-    # ✅ AHORA SÍ VIENE EL except correctamente indentado
-    except Exception as e:
-        logging.exception("🔥 Error en /venom")
-        return JSONResponse(
-            {"type": "text", "text": "⚠️ Error interno en el bot. Intenta de nuevo."},
-            status_code=500
-        )
-
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
