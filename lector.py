@@ -1905,36 +1905,36 @@ async def venom_webhook(req: Request):
             reply = await procesar_wa(cid, body)
             return JSONResponse(reply)
 
-# 3️⃣ Procesar imagen
-elif mtype == "image" or mimetype.startswith("image"):
-    try:
-        logging.info("🖼️ Imagen recibida. Decodificando base64...")
-        b64_str = body.split(",", 1)[1] if "," in body else body
-        img_bytes = base64.b64decode(b64_str + "===")
-        os.makedirs("temp", exist_ok=True)
-        path_local = f"temp/{cid}_img.jpg"
-        with open(path_local, "wb") as f:
-            f.write(img_bytes)
-        logging.info(f"✅ Imagen guardada temporalmente en {path_local}")
-    except Exception as e:
-        logging.error(f"❌ Error al guardar imagen base64: {e}")
-        return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
+        # 3️⃣ Procesar imagen
+        elif mtype == "image" or mimetype.startswith("image"):
+            try:
+                logging.info("🖼️ Imagen recibida. Decodificando base64...")
+                b64_str = body.split(",", 1)[1] if "," in body else body
+                img_bytes = base64.b64decode(b64_str + "===")
+                os.makedirs("temp", exist_ok=True)
+                path_local = f"temp/{cid}_img.jpg"
+                with open(path_local, "wb") as f:
+                    f.write(img_bytes)
+                logging.info(f"✅ Imagen guardada temporalmente en {path_local}")
+            except Exception as e:
+                logging.error(f"❌ Error al guardar imagen base64: {e}")
+                return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
 
-    # 🔍 Verificar que la imagen realmente quedó bien
-    try:
-        from PIL import Image
-        img = Image.open(path_local)
-        img.verify()  # Verifica integridad
-        img = Image.open(path_local)  # Se debe reabrir luego de verify()
-        logging.info(f"🖼️ Imagen verificada con PIL — Tamaño: {img.size} — Modo: {img.mode}")
-    except Exception as e:
-        logging.error(f"❌ Imagen corrupta o ilegible para PIL: {e}")
-        return JSONResponse({"type": "text", "text": "❌ La imagen está dañada. Por favor intenta con otra."})
+            # 🔍 Verificar que la imagen quedó bien
+            try:
+                from PIL import Image
+                img = Image.open(path_local)
+                img.verify()
+                img = Image.open(path_local)
+                logging.info(f"🖼️ Imagen verificada con PIL — Tamaño: {img.size} — Modo: {img.mode}")
+            except Exception as e:
+                logging.error(f"❌ Imagen corrupta o ilegible para PIL: {e}")
+                return JSONResponse({"type": "text", "text": "❌ La imagen está dañada. Por favor intenta con otra."})
 
-    # 🧠 Estado del usuario
-    est = estado_usuario.get(cid, {})
-    fase = est.get("fase", "")
-    logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
+            # 🧠 Estado del usuario
+            est = estado_usuario.get(cid, {})
+            fase = est.get("fase", "")
+            logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
 
             # 4️⃣ Si espera comprobante
             if fase == "esperando_comprobante":
@@ -1966,41 +1966,13 @@ elif mtype == "image" or mimetype.startswith("image"):
                     os.remove(path_local)
                     return JSONResponse({"type": "text", "text": "⚠️ No pude verificar el comprobante. Asegúrate que diga 'Pago exitoso' o 'Transferencia exitosa'."})
 
-            # 5️⃣ Si no está esperando comprobante
-            logging.info("📸 Fase no es 'esperando_comprobante'. Intentando reconocimiento por hash.")
-            try:
-                img = Image.open(path_local)
-                h_in = str(imagehash.phash(img))
-                ref = MODEL_HASHES.get(h_in)
-                logging.info(f"🧠 Hash de imagen: {h_in} → Resultado: {ref}")
-            except Exception as e:
-                logging.error(f"❌ Error al calcular hash de imagen: {e}")
-                return JSONResponse({"type": "text", "text": "😕 No pude procesar la imagen."})
-
-            if ref:
-                marca, modelo, color = ref
-                logging.info(f"🎯 Imagen reconocida como {marca} {modelo} {color}")
-                estado_usuario.setdefault(cid, reset_estado(cid))
-                estado_usuario[cid].update(
-                    fase="imagen_detectada", marca=marca, modelo=modelo, color=color
-                )
-                os.remove(path_local)
-                return JSONResponse({
-                    "type": "text",
-                    "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
-                })
-            else:
-                logging.warning("🚫 Imagen no reconocida. Se reinicia estado.")
-                os.remove(path_local)
-                reset_estado(cid)
-                return JSONResponse({"type": "text", "text": "😕 No reconocí el modelo. Puedes intentarlo con otra imagen."})
-
-        # 6️⃣ Mensaje no manejado
-        logging.warning(f"🤷‍♂️ Tipo de mensaje no manejado: {mtype}")
-        return JSONResponse({
-            "type": "text",
-            "text": f"⚠️ Tipo de mensaje no manejado: {mtype}"
-        })
+        # 5️⃣ Otro tipo no soportado
+        else:
+            logging.warning(f"🤷‍♂️ Tipo de mensaje no manejado: {mtype}")
+            return JSONResponse({
+                "type": "text",
+                "text": f"⚠️ Tipo de mensaje no manejado: {mtype}"
+            })
 
     except Exception as e:
         logging.exception("🔥 Error general en venom_webhook")
@@ -2008,6 +1980,7 @@ elif mtype == "image" or mimetype.startswith("image"):
             {"type": "text", "text": "⚠️ Error interno procesando el mensaje."},
             status_code=500
         )
+
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
