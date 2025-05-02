@@ -1934,13 +1934,13 @@ async def venom_webhook(req: Request):
                 b64_str = body.split(",", 1)[1] if "," in body else body
                 img_bytes = base64.b64decode(b64_str + "===")
                 img = Image.open(io.BytesIO(img_bytes))
-                img.load()  # fuerza carga completa
+                img.load()
                 logging.info(f"✅ Imagen decodificada correctamente. Tamaño: {img.size}")
             except Exception as e:
                 logging.error(f"❌ No pude leer la imagen: {e}")
                 return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
 
-            # 🧠 Obtener estado del usuario
+            # 🧠 Obtener estado
             est = estado_usuario.get(cid, {})
             fase = est.get("fase", "")
             logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
@@ -1961,17 +1961,8 @@ async def venom_webhook(req: Request):
                         resumen = est.get("resumen", {})
                         registrar_orden(resumen)
 
-                        enviar_correo(
-                            est["correo"],
-                            f"Pago recibido {resumen.get('Número Venta')}",
-                            json.dumps(resumen, indent=2)
-                        )
-                        enviar_correo_con_adjunto(
-                            EMAIL_JEFE,
-                            f"Comprobante {resumen.get('Número Venta')}",
-                            json.dumps(resumen, indent=2),
-                            temp_path
-                        )
+                        enviar_correo(est["correo"], f"Pago recibido {resumen.get('Número Venta')}", json.dumps(resumen, indent=2))
+                        enviar_correo_con_adjunto(EMAIL_JEFE, f"Comprobante {resumen.get('Número Venta')}", json.dumps(resumen, indent=2), temp_path)
                         os.remove(temp_path)
                         reset_estado(cid)
                         return JSONResponse({
@@ -1989,7 +1980,7 @@ async def venom_webhook(req: Request):
                     logging.error(f"❌ Error al procesar comprobante: {e}")
                     return JSONResponse({"type": "text", "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."})
 
-            # 4️⃣ Si NO es comprobante → Detectar modelo por hash
+            # 4️⃣ Si no es comprobante → Detectar modelo por hash
             try:
                 h_in = str(imagehash.phash(img))
                 ref = MODEL_HASHES.get(h_in)
@@ -1998,9 +1989,7 @@ async def venom_webhook(req: Request):
                 if ref:
                     marca, modelo, color = ref
                     estado_usuario.setdefault(cid, reset_estado(cid))
-                    estado_usuario[cid].update(
-                        fase="imagen_detectada", marca=marca, modelo=modelo, color=color
-                    )
+                    estado_usuario[cid].update(fase="imagen_detectada", marca=marca, modelo=modelo, color=color)
                     return JSONResponse({
                         "type": "text",
                         "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
@@ -2017,14 +2006,48 @@ async def venom_webhook(req: Request):
                 logging.error(f"❌ Error al identificar modelo: {e}")
                 return JSONResponse({"type": "text", "text": "❌ Ocurrió un error al intentar detectar el modelo."})
 
-        # 5️⃣ Si es texto u otro tipo
+        # 5️⃣ Si es texto
         elif mtype == "chat":
             fase_actual = estado_usuario.get(cid, {}).get("fase", "")
             logging.info(f"💬 Texto recibido en fase: {fase_actual or 'NO DEFINIDA'}")
             reply = await procesar_wa(cid, body)
             return JSONResponse(reply)
 
-        # 6️⃣ Tipo no manejado
+        # 6️⃣ Si es audio o ptt
+        elif mtype in ("audio", "ptt") or mimetype.startswith("audio"):
+            try:
+                logging.info("🎙️ Audio recibido. Decodificando...")
+
+                b64_str = body.split(",", 1)[1] if "," in body else body
+                audio_bytes = base64.b64decode(b64_str + "===")
+
+                os.makedirs("temp_audio", exist_ok=True)
+                audio_path = f"temp_audio/{cid}_voice.ogg"
+                with open(audio_path, "wb") as f:
+                    f.write(audio_bytes)
+                logging.info(f"✅ Audio guardado en {audio_path}")
+
+                texto_transcrito = await transcribe_audio(audio_path)
+                logging.info(f"📝 Transcripción: {texto_transcrito}")
+
+                if not texto_transcrito:
+                    return JSONResponse({
+                        "type": "text",
+                        "text": "⚠️ No pude entender bien el audio. ¿Podrías repetirlo o escribirlo?"
+                    })
+
+                logging.info("📩 Reenviando transcripción al procesador de texto")
+                reply = await procesar_wa(cid, texto_transcrito)
+                return JSONResponse(reply)
+
+            except Exception as e:
+                logging.error(f"❌ Error al procesar audio: {e}")
+                return JSONResponse({
+                    "type": "text",
+                    "text": "❌ No pude procesar el audio. Intenta grabarlo de nuevo."
+                })
+
+        # 7️⃣ Tipo no manejado
         else:
             logging.warning(f"🤷‍♂️ Tipo de mensaje no manejado: {mtype}")
             return JSONResponse({
