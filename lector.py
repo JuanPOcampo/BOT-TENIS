@@ -164,7 +164,7 @@ def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehas
     logging.info(f"▶ Precargados hashes para {len(model_hashes)} SKUs")
     return model_hashes
 
-MODEL_HASHES = precargar_hashes_from_drive(...)
+MODEL_HASHES = precargar_hashes_from_drive(DRIVE_FOLDER_ID)
 
 def identify_model_from_stream(path: str) -> str | None:
     try:
