@@ -14,6 +14,8 @@ import difflib
 import asyncio
 from types import SimpleNamespace
 from collections import defaultdict
+from PIL 
+import Image, ImageChops
 
 # ——— Librerías externas ———
 from dotenv import load_dotenv
@@ -344,6 +346,26 @@ def es_comprobante_valido(texto: str) -> bool:
 
     logging.warning("[OCR DEBUG] ❌ No se encontró ninguna clave válida en el texto extraído.")
     return False
+def limpiar_y_recortar_bordes(img: Image.Image) -> Image.Image:
+    img = img.convert("RGB")  # asegurarse
+
+    # ⚫ Eliminar bordes negros/blancos/grises detectando el contenido
+    bg = Image.new("RGB", img.size, (0, 0, 0))
+    diff = ImageChops.difference(img, bg).convert("L")
+    bbox = diff.getbbox()
+
+    if bbox:
+        img = img.crop(bbox)
+
+    # ⬜ Recorte extra: eliminar 10 % arriba/abajo (por si quedó barra superior o inferior)
+    w, h = img.size
+    margen_vertical = int(h * 0.10)
+    img = img.crop((0, margen_vertical, w, h - margen_vertical))
+
+    # 📏 Redimensiona a tamaño fijo (para estandarizar hashing)
+    img = img.resize((256, 256), Image.LANCZOS)
+
+    return img
 # ——— UTILIDADES DE INVENTARIO —————————————————————————————————————————
 estado_usuario: dict[int, dict] = {}
 inventario_cache = None
@@ -1935,9 +1957,33 @@ async def venom_webhook(req: Request):
                 img_bytes = base64.b64decode(b64_str + "===")
                 img = Image.open(io.BytesIO(img_bytes))
                 img.load()
-                logging.info(f"✅ Imagen decodificada correctamente. Tamaño: {img.size}")
+                logging.info(f"✅ Imagen decodificada correctamente. Tamaño original: {img.size}")
+
+                # 🔍 Preprocesamiento para recortar bordes molestos
+                def limpiar_y_recortar_bordes(img: Image.Image) -> Image.Image:
+                    img = img.convert("RGB")
+                    bg = Image.new("RGB", img.size, (0, 0, 0))
+                    diff = ImageChops.difference(img, bg).convert("L")
+                    bbox = diff.getbbox()
+
+                    if bbox:
+                        img = img.crop(bbox)
+                        logging.info(f"📐 Imagen recortada a contenido visible. Nuevo tamaño: {img.size}")
+
+                    w, h = img.size
+                    margen_vertical = int(h * 0.10)
+                    img = img.crop((0, margen_vertical, w, h - margen_vertical))
+                    logging.info(f"✂️ Recorte vertical aplicado. Resultado: {img.size}")
+
+                    img = img.resize((256, 256), Image.LANCZOS)
+                    logging.info("📏 Imagen redimensionada a 256x256 para hashing")
+
+                    return img
+
+                img = limpiar_y_recortar_bordes(img)
+
             except Exception as e:
-                logging.error(f"❌ No pude leer la imagen: {e}")
+                logging.error(f"❌ No pude leer o procesar la imagen: {e}")
                 return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
 
             # 🧠 Obtener estado
@@ -2016,35 +2062,46 @@ async def venom_webhook(req: Request):
         # 6️⃣ Si es audio o ptt
         elif mtype in ("audio", "ptt") or mimetype.startswith("audio"):
             try:
-                logging.info("🎙️ Audio recibido. Decodificando...")
+                logging.info("🎙️ Audio recibido. Iniciando procesamiento...")
 
+                # Validar base64
+                if not body:
+                    logging.warning("⚠️ Audio vacío o sin contenido base64.")
+                    return JSONResponse({"type": "text", "text": "❌ No recibí un audio válido."})
+
+                logging.info("🧪 Intentando decodificar base64...")
                 b64_str = body.split(",", 1)[1] if "," in body else body
                 audio_bytes = base64.b64decode(b64_str + "===")
+                logging.info("✅ Audio decodificado correctamente.")
 
+                # Guardar archivo temporal
                 os.makedirs("temp_audio", exist_ok=True)
                 audio_path = f"temp_audio/{cid}_voice.ogg"
                 with open(audio_path, "wb") as f:
                     f.write(audio_bytes)
-                logging.info(f"✅ Audio guardado en {audio_path}")
+                logging.info(f"✅ Audio guardado en disco: {audio_path}")
 
+                # Transcribir
+                logging.info("🧠 Enviando audio a transcripción Whisper...")
                 texto_transcrito = await transcribe_audio(audio_path)
-                logging.info(f"📝 Transcripción: {texto_transcrito}")
 
-                if not texto_transcrito:
+                if texto_transcrito:
+                    logging.info(f"📝 Transcripción completa:\n{texto_transcrito}")
+                    logging.info("➡️ Reenviando texto transcrito a procesador de flujo (procesar_wa)")
+                    reply = await procesar_wa(cid, texto_transcrito)
+                    return JSONResponse(reply)
+                else:
+                    logging.warning("⚠️ Whisper devolvió una transcripción vacía.")
                     return JSONResponse({
                         "type": "text",
                         "text": "⚠️ No pude entender bien el audio. ¿Podrías repetirlo o escribirlo?"
                     })
 
-                logging.info("📩 Reenviando transcripción al procesador de texto")
-                reply = await procesar_wa(cid, texto_transcrito)
-                return JSONResponse(reply)
-
             except Exception as e:
-                logging.error(f"❌ Error al procesar audio: {e}")
+                logging.exception("❌ Error durante el procesamiento del audio")
                 return JSONResponse({
                     "type": "text",
-                    "text": "❌ No pude procesar el audio. Intenta grabarlo de nuevo."
+                    "text": "❌ Ocurrió un error al procesar tu audio. Intenta de nuevo."
                 })
 
         # 7️⃣ Tipo no manejado
