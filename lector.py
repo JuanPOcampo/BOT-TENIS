@@ -1980,7 +1980,7 @@ async def venom_webhook(req: Request):
                     os.remove(path_local)
                     return JSONResponse({"type": "text", "text": "⚠️ No pude verificar el comprobante. Asegúrate que diga 'Pago exitoso' o 'Transferencia exitosa'."})
 
-        # 5️⃣ Otro tipo no soportado
+        # 5️⃣ Tipo de mensaje no manejado
         else:
             logging.warning(f"🤷‍♂️ Tipo de mensaje no manejado: {mtype}")
             return JSONResponse({
@@ -1988,11 +1988,18 @@ async def venom_webhook(req: Request):
                 "text": f"⚠️ Tipo de mensaje no manejado: {mtype}"
             })
 
+        # 🟡 Si llega hasta aquí y no se ejecutó ningún return, responde fallback
+        logging.warning("🟡 Fallback: ningún flujo procesó este mensaje.")
+        return JSONResponse({
+            "type": "text",
+            "text": "⚠️ Recibí tu mensaje pero no pude procesarlo correctamente. ¿Puedes repetirlo?"
+        })
+
     except Exception as e:
         logging.exception("🔥 Error general en venom_webhook")
         return JSONResponse(
             {"type": "text", "text": "⚠️ Error interno procesando el mensaje."},
-            status_code=500
+            status_code=200  # <-- Para que Venom no explote con error JSON
         )
 
 # -------------------------------------------------------------------------
