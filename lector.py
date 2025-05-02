@@ -14,8 +14,7 @@ import difflib
 import asyncio
 from types import SimpleNamespace
 from collections import defaultdict
-from PIL 
-import Image, ImageChops
+from PIL import Image, ImageChops
 
 # ——— Librerías externas ———
 from dotenv import load_dotenv
