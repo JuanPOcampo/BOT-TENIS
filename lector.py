@@ -216,6 +216,19 @@ CLIP_INSTRUCTIONS = (
 )
 CATALOG_LINK    = "https://wa.me/c/573007607245🔝"
 CATALOG_MESSAGE = f"Aquí tienes el catálogo: {CATALOG_LINK}"
+def fase_valida(fase: str) -> bool:
+    fases_validas = [
+        "esperando_color",
+        "esperando_talla",
+        "esperando_nombre",
+        "esperando_telefono",
+        "esperando_correo",
+        "esperando_direccion",
+        "esperando_comprobante",
+        "imagen_detectada",
+        "resumen_compra"
+    ]
+    return fase in fases_validas
 
 def enviar_correo(dest, subj, body):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}")
@@ -225,41 +238,50 @@ def enviar_correo_con_adjunto(dest, subj, body, adj):
 
 def extraer_texto_comprobante(path: str) -> str:
     try:
+        logging.info(f"[OCR] 🟡 Iniciando lectura del comprobante: {path}")
+
+        # Cargar credenciales
         credentials = service_account.Credentials.from_service_account_info(
             json.loads(os.environ["GOOGLE_CREDS_JSON"])
         )
         client = vision.ImageAnnotatorClient(credentials=credentials)
 
+        # Leer contenido de la imagen
         with io.open(path, "rb") as image_file:
             content = image_file.read()
+            logging.info(f"[OCR] 📦 Imagen leída — {len(content)} bytes")
 
         if not content:
-            logging.warning("[OCR] La imagen está vacía.")
+            logging.warning("[OCR] ❌ Imagen vacía. No se pudo leer correctamente.")
             return ""
 
+        # Crear imagen para Vision
         image = vision.Image(content=content)
 
-        # ✅ Usa el modelo adecuado para documentos y recibos
+        # Ejecutar OCR (document-level detection para comprobantes)
         response = client.document_text_detection(image=image)
 
+        # Revisar si hubo error explícito en la respuesta
         if response.error.message:
-            logging.error(f"[OCR ERROR] {response.error.message}")
+            logging.error(f"[OCR ERROR] Google Vision API respondió con error: {response.error.message}")
             return ""
 
+        # Extraer texto completo
         texto = response.full_text_annotation.text or ""
 
         if not texto.strip():
-            logging.warning("[OCR] No se detectó texto en la imagen.")
+            logging.warning("[OCR] ⚠️ No se detectó texto en la imagen (texto vacío).")
             return ""
 
-        logging.info("[OCR] Texto extraído:")
+        # Mostrar texto completo extraído
+        logging.info("[OCR RESULTADO] ✅ Texto extraído correctamente:")
         for i, linea in enumerate(texto.splitlines()):
             logging.info(f"[OCR LINEA {i}] → {repr(linea)}")
 
         return texto
 
     except Exception as e:
-        logging.exception("[OCR] Fallo crítico procesando imagen")
+        logging.exception("[OCR] 🔥 Excepción crítica procesando el comprobante")
         return ""
 
 def es_comprobante_valido(texto: str) -> bool:
