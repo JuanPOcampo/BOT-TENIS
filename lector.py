@@ -247,21 +247,26 @@ def extraer_texto_comprobante(path_local: str) -> str:
         logging.error(f"❌ Error extrayendo texto del comprobante: {e}")
         return ""
 
+import unicodedata
+import re
+
 def es_comprobante_valido(texto: str) -> bool:
-    texto = texto.lower()
+    # Log original
     logging.info("[OCR DEBUG] Texto detectado en comprobante:\n" + texto)
+
+    # 🔄 Normaliza: quita tildes, signos y pasa a minúsculas
+    texto_normalizado = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").lower()
+    texto_normalizado = re.sub(r"[^\w\s]", "", texto_normalizado)
 
     claves = [
         "pago exitoso",
-        "¡pago exitoso!",
         "transferencia exitosa",
-        "¡transferencia exitosa!",
         "comprobante",
         "recibo"
     ]
 
     for clave in claves:
-        if clave in texto:
+        if clave in texto_normalizado:
             logging.info(f"[OCR DEBUG] Coincidencia encontrada: '{clave}'")
             return True
 
