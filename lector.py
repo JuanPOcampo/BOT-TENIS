@@ -198,6 +198,37 @@ def identify_model_from_stream(path: str) -> str | None:
     # ───────────────────────────────────────
 
     return modelo
+def convertir_palabras_a_numero(texto):  
+    mapa = {
+        "cero": "0", "uno": "1", "una": "1", "dos": "2", "tres": "3", "cuatro": "4",
+        "cinco": "5", "seis": "6", "siete": "7", "ocho": "8", "nueve": "9",
+        "diez": "10", "once": "11", "doce": "12", "trece": "13", "catorce": "14",
+        "quince": "15", "dieciséis": "16", "diecisiete": "17", "dieciocho": "18", "diecinueve": "19",
+        "veinte": "20", "treinta": "30", "cuarenta": "40", "cincuenta": "50",
+        "sesenta": "60", "setenta": "70", "ochenta": "80", "noventa": "90"
+    }
+
+    texto = texto.lower().replace("y", " ")  # ejemplo: "treinta y nueve" → "treinta nueve"
+    partes = texto.split()
+    numero = ""
+
+    for palabra in partes:
+        if palabra in mapa:
+            numero += mapa[palabra]
+        elif palabra.isdigit():
+            numero += palabra
+
+    return numero if numero else None
+
+def menciona_catalogo(texto: str) -> bool:
+    texto = normalize(texto)
+    claves = [
+        "catalogo", "catálogo", "ver catálogo", "mostrar catálogo",
+        "quiero ver", "ver productos", "mostrar productos",
+        "ver lo que tienes", "ver tenis", "muéstrame",
+        "mostrar lo que tienes", "tenis disponibles"
+    ]
+    return any(palabra in texto for palabra in claves)
 
 # ——— VARIABLES DE ENTORNO ——————————————————————————————————————————————
 OPENAI_API_KEY        = os.environ["OPENAI_API_KEY"]
@@ -746,6 +777,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ])
         )
         return
+    if menciona_catalogo(txt_raw):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=CATALOG_MESSAGE
+        ) 
+        est["fase"] = "inicio"
+        return
 
 # ─────────── Preguntas frecuentes (FAQ) ───────────
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
@@ -1230,16 +1268,44 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         print("🧪 ENTRÓ AL BLOQUE DE PAGO ✅")
 
         opciones = {
-            "transferencia": "transferencia",
-            "transf": "transferencia",
-            "trans": "transferencia",
-            "pago inmediato": "transferencia",
-            "qr": "transferencia",
-            "contraentrega": "contraentrega",
-            "contra entrega": "contraentrega",
-            "contra": "contraentrega",
-            "contrapago": "contraentrega"
+            "transferencia": ["transferencia", "trasferencia", "transf", "trans", "pago inmediato", "qr"],
+            "contraentrega": ["contraentrega", "contra entrega", "contra", "contrapago"]
         }
+
+        txt_normalizado = normalize(txt_raw)
+
+        metodo_detectado = None
+        for metodo, variantes in opciones.items():
+            coincidencias = difflib.get_close_matches(txt_normalizado, variantes, n=1, cutoff=0.6)
+            if coincidencias:
+                metodo_detectado = metodo
+                break
+
+        if not metodo_detectado:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="💳 No entendí el método de pago. Puedes escribir *transferencia* o *contraentrega* 😊"
+            )
+            return
+
+        est["metodo_pago"] = metodo_detectado
+        print("💰 MÉTODO DETECTADO:", metodo_detectado)
+
+        if metodo_detectado == "transferencia":
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="Perfecto. Puedes hacer la transferencia a la cuenta **Nequi 3007607245** a nombre de X100. Luego, envíame una foto del comprobante. 📸"
+            )
+            est["fase"] = "esperando_comprobante"
+
+        elif metodo_detectado == "contraentrega":
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="✅ Listo. Para procesar el pedido *contraentrega*, por favor confirma tu dirección completa. 🏡"
+            )
+            est["fase"] = "esperando_direccion"
+
+        return
 
         txt_norm = normalize(txt_raw).lower().strip()
         op_detectada = next((v for k, v in opciones.items() if k in txt_norm), None)
@@ -1548,7 +1614,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     # 🎬 Si pide videos normales
-    if any(frase in txt for frase in ("videos", "quiero videos", "ver videos")):
+    if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video", )):
         await ctx.bot.send_message(
             chat_id=cid,
             text=(
@@ -1772,7 +1838,6 @@ async def manejar_precio(update, ctx, inventario):
                 f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
                 f"{respuesta_final}"
                 "¿Te gustaría proseguir con la compra?\n\n"
-                "👉 Escribe: *sí quiero comprar* o *no, gracias*"
             ),
             parse_mode="Markdown"
         )
