@@ -15,7 +15,7 @@ import difflib
 import asyncio
 from types import SimpleNamespace
 from collections import defaultdict
-
+import unicodedata
 # ——— Librerías externas ———
 from dotenv import load_dotenv
 from PIL import Image
@@ -346,6 +346,13 @@ def es_comprobante_valido(texto: str) -> bool:
 
     logging.warning("[OCR DEBUG] ❌ No se encontró ninguna clave válida en el texto extraído.")
     return False
+
+def normalize(txt):
+    if not isinstance(txt, str):
+        return ""
+    txt = unicodedata.normalize("NFKC", txt)
+    return txt.strip().lower()
+
 # ——— UTILIDADES DE INVENTARIO —————————————————————————————————————————
 estado_usuario: dict[int, dict] = {}
 inventario_cache = None
@@ -1374,10 +1381,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ------------------------------------------------------------------------
     # ✅ Funciones de interpretación de respuestas cortas
     # ------------------------------------------------------------------------
-    def normalize(txt):
-        txt = unicodedata.normalize("NFKD", txt)
-        txt = "".join([c for c in txt if not unicodedata.combining(c)])
-        return txt.lower()
 
     def es_afirmativo(texto: str) -> bool:
         texto = texto.lower().strip()
