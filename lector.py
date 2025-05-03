@@ -1807,11 +1807,13 @@ api = FastAPI(title="AYA Bot – WhatsApp")
 def wa_chat_id(wa_from: str) -> str:
     return re.sub(r"\D", "", wa_from)
 
-async def responder_con_openai(mensaje_usuario):
-    openai.api_key = os.getenv("OPENAI_API_KEY")
+from openai import AsyncOpenAI
 
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+async def responder_con_openai(mensaje_usuario):
     try:
-        respuesta = await openai.ChatCompletion.acreate(
+        respuesta = await client.chat.completions.create(
             model="gpt-4-1106-preview",
             messages=[
                 {
@@ -1842,9 +1844,10 @@ async def responder_con_openai(mensaje_usuario):
             temperature=0.5,
             max_tokens=300
         )
-        return respuesta['choices'][0]['message']['content']
+        return respuesta.choices[0].message.content.strip()
+
     except Exception as e:
-        print(f"Error al consultar OpenAI: {e}")
+        logging.error(f"Error al consultar OpenAI: {e}")
         return "Disculpa, estamos teniendo un inconveniente en este momento. ¿Puedes intentar de nuevo más tarde?"
 
 
