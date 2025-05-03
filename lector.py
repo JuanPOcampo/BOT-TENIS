@@ -1374,6 +1374,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ------------------------------------------------------------------------
     # ✅ Funciones de interpretación de respuestas cortas
     # ------------------------------------------------------------------------
+    def normalize(txt):
+        txt = unicodedata.normalize("NFKD", txt)
+        txt = "".join([c for c in txt if not unicodedata.combining(c)])
+        return txt.lower()
 
     def es_afirmativo(texto: str) -> bool:
         texto = texto.lower().strip()
@@ -1386,30 +1390,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return any(palabra in texto for palabra in [
             "no", "nop", "noup", "nunca", "ni loco", "no gracias", "nel", "ni por el putas"
         ])
-
-    # ------------------------------------------------------------------------
-    # 🔁 Cierre de conversación
-    # ------------------------------------------------------------------------
-    if est.get("fase") == "esperando_cierre":
-        if es_afirmativo(txt_raw):
-            est["fase"] = "inicio"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="¡Perfecto! ¿Te puedo ayudar en algo más? 😊"
-            )
-        elif es_negativo(txt_raw):
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="Gracias por tu compra en X100 🫶 Si necesitas algo más, estaré por aquí."
-            )
-            reset_estado(cid)
-            estado_usuario.pop(cid, None)
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="¿Te gustaría hacer otra consulta? Responde *sí* o *no* 😊"
-            )
-        return
 
     # ------------------------------------------------------------------------
     # 🔁 Cierre de conversación
