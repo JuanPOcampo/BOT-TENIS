@@ -15,7 +15,7 @@ import difflib
 import asyncio
 from types import SimpleNamespace
 from collections import defaultdict
-import unicodedata
+
 # ——— Librerías externas ———
 from dotenv import load_dotenv
 from PIL import Image
@@ -346,52 +346,6 @@ def es_comprobante_valido(texto: str) -> bool:
 
     logging.warning("[OCR DEBUG] ❌ No se encontró ninguna clave válida en el texto extraído.")
     return False
-
-import unicodedata
-
-# ✅ Normaliza texto
-def normalize(txt):
-    if not isinstance(txt, str):
-        return ""
-    txt = unicodedata.normalize("NFKC", txt)
-    return txt.strip().lower()
-
-# ✅ Respuestas afirmativas
-def es_afirmativo(texto: str) -> bool:
-    texto = texto.lower().strip()
-    return any(palabra in texto for palabra in [
-        "sí", "si", "sii", "claro", "sisas", "dale", "de una", "ok", "va", "vamos", "vale", "obvio", "hágale", "acepto"
-    ])
-
-# ✅ Respuestas negativas
-def es_negativo(texto: str) -> bool:
-    texto = texto.lower().strip()
-    return any(palabra in texto for palabra in [
-        "no", "nop", "noup", "nunca", "ni loco", "no gracias", "nel", "ni por el putas"
-    ])
-
-# ✅ Convierte palabras como "dos nueve ocho" → "298"
-def convertir_palabras_a_numero(texto):
-    mapa = {
-        "cero": "0", "uno": "1", "una": "1", "dos": "2", "tres": "3", "cuatro": "4",
-        "cinco": "5", "seis": "6", "siete": "7", "ocho": "8", "nueve": "9",
-        "diez": "10", "once": "11", "doce": "12", "trece": "13", "catorce": "14",
-        "quince": "15", "diez y seis": "16", "diez y siete": "17", "diez y ocho": "18", "diez y nueve": "19",
-        "veinte": "20", "treinta": "30", "cuarenta": "40", "cincuenta": "50",
-        "sesenta": "60", "setenta": "70", "ochenta": "80", "noventa": "90"
-    }
-
-    texto = texto.lower()
-    partes = texto.split()
-    numero = ""
-
-    for palabra in partes:
-        if palabra in mapa:
-            numero += mapa[palabra]
-        elif palabra.isdigit():
-            numero += palabra
-
-    return numero if numero else None
 # ——— UTILIDADES DE INVENTARIO —————————————————————————————————————————
 estado_usuario: dict[int, dict] = {}
 inventario_cache = None
@@ -405,6 +359,11 @@ def menciona_imagen(texto: str) -> bool:
         "la tengo guardada", "foto del tenis", "foto del zapato"
     ]
     return any(palabra in texto for palabra in claves)
+
+def normalize(text) -> str:
+    s = "" if text is None else str(text)
+    t = unicodedata.normalize('NFKD', s.strip().lower())
+    return "".join(ch for ch in t if not unicodedata.combining(ch))
 
 CONVERSION_TALLAS = {
     "usa": {
@@ -530,15 +489,15 @@ os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
 
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-async def transcribe_audio(file_path: str) -> str:
+async def transcribe_audio(file_path: str) -> str | None:
     """
     Envía el .ogg a Whisper-1 (idioma ES) y devuelve la transcripción.
-    Si falla, devuelve "[INAUDIBLE]".
+    Si falla, devuelve None.
     """
     try:
         with open(file_path, "rb") as f:
             audio_bytes = io.BytesIO(f.read())
-            audio_bytes.name = "audio.ogg"  # ayuda a Whisper con el tipo
+            audio_bytes.name = os.path.basename(file_path)  # necesario para Whisper
 
             rsp = await client.audio.transcriptions.create(
                 model="whisper-1",
@@ -548,15 +507,11 @@ async def transcribe_audio(file_path: str) -> str:
                 prompt="Español Colombia, jerga: parce, mano, ñero, buenos días, buenas, hola"
             )
 
-        texto = rsp.strip() if isinstance(rsp, str) else str(rsp).strip()
-        if not texto:
-            logging.warning("📭 Transcripción vacía. Se devolverá '[INAUDIBLE]'")
-            return "[INAUDIBLE]"
-        return texto
-
+        if isinstance(rsp, str) and rsp.strip():
+            return rsp.strip()
     except Exception as e:
         logging.error(f"❌ Whisper error: {e}")
-        return "[INAUDIBLE]"
+    return None
 
 # ───────────────────────────────────────────────────────────────
 
@@ -1405,36 +1360,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             text="✅ ¡Pago registrado exitosamente! Tu pedido está en proceso. 🚚"
         )
 
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="¿Quieres hacer otra consulta? Responde *sí* o *no* 😊"
-        )
-
-        est["fase"] = "esperando_cierre"
-        return
-
-    # ------------------------------------------------------------------------
-    # 🔁 Cierre de conversación
-    # ------------------------------------------------------------------------
-    if est.get("fase") == "esperando_cierre":
-        if es_afirmativo(txt_raw):
-            est["fase"] = "inicio"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="¡Perfecto! ¿Te puedo ayudar en algo más? 😊"
-            )
-        elif es_negativo(txt_raw):
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="Gracias por tu compra en X100 🫶 Si necesitas algo más, estaré por aquí."
-            )
-            reset_estado(cid)
-            estado_usuario.pop(cid, None)
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="¿Te gustaría hacer otra consulta? Responde *sí* o *no* 😊"
-            )
+        reset_estado(cid)
+        estado_usuario.pop(cid, None)
         return
 
 
@@ -1840,13 +1767,14 @@ async def manejar_precio(update, ctx, inventario):
         logging.debug(f"[manejar_precio] Guardado modelo: {primer_producto['modelo']}, color: {primer_producto['color']}")
 
         await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
-                    f"{respuesta_final}"
-                    "¿Te gustaría proseguir con la compra?"
-                ),
-                parse_mode="Markdown"
+            chat_id=cid,
+            text=(
+                f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
+                f"{respuesta_final}"
+                "¿Te gustaría proseguir con la compra?\n\n"
+                "👉 Escribe: *sí quiero comprar* o *no, gracias*"
+            ),
+            parse_mode="Markdown"
         )
         return True
 
@@ -2122,7 +2050,7 @@ async def venom_webhook(req: Request):
                 logging.info("🧠 Enviando audio a transcripción Whisper...")
                 texto_transcrito = await transcribe_audio(audio_path)
 
-                if texto_transcrito and texto_transcrito != "[INAUDIBLE]":
+                if texto_transcrito:
                     logging.info(f"📝 Transcripción completa:\n{texto_transcrito}")
                     logging.info("➡️ Reenviando texto transcrito a procesador de flujo (procesar_wa)")
                     reply = await procesar_wa(cid, texto_transcrito)
