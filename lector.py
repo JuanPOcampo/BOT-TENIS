@@ -489,15 +489,15 @@ os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
 
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-async def transcribe_audio(file_path: str) -> str | None:
+async def transcribe_audio(file_path: str) -> str:
     """
     Envía el .ogg a Whisper-1 (idioma ES) y devuelve la transcripción.
-    Si falla, devuelve None.
+    Si falla, devuelve "[INAUDIBLE]".
     """
     try:
         with open(file_path, "rb") as f:
             audio_bytes = io.BytesIO(f.read())
-            audio_bytes.name = os.path.basename(file_path)  # necesario para Whisper
+            audio_bytes.name = os.path.basename(file_path)
 
             rsp = await client.audio.transcriptions.create(
                 model="whisper-1",
@@ -507,11 +507,15 @@ async def transcribe_audio(file_path: str) -> str | None:
                 prompt="Español Colombia, jerga: parce, mano, ñero, buenos días, buenas, hola"
             )
 
-        if isinstance(rsp, str) and rsp.strip():
-            return rsp.strip()
+        texto = rsp.strip() if isinstance(rsp, str) else ""
+        if not texto:
+            logging.warning("📭 Transcripción vacía. Se devolverá '[INAUDIBLE]'")
+            return "[INAUDIBLE]"
+        return texto
+
     except Exception as e:
         logging.error(f"❌ Whisper error: {e}")
-    return None
+        return "[INAUDIBLE]"
 
 # ───────────────────────────────────────────────────────────────
 
@@ -1360,8 +1364,75 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             text="✅ ¡Pago registrado exitosamente! Tu pedido está en proceso. 🚚"
         )
 
-        reset_estado(cid)
-        estado_usuario.pop(cid, None)
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="¿Quieres hacer otra consulta? Responde *sí* o *no* 😊"
+        )
+
+        est["fase"] = "esperando_cierre"
+        return
+    # ------------------------------------------------------------------------
+    # ✅ Funciones de interpretación de respuestas cortas
+    # ------------------------------------------------------------------------
+
+    def es_afirmativo(texto: str) -> bool:
+        texto = texto.lower().strip()
+        return any(palabra in texto for palabra in [
+            "sí", "si", "sii", "claro", "sisas", "dale", "de una", "ok", "va", "vamos", "vale", "obvio", "hágale", "acepto"
+        ])
+
+    def es_negativo(texto: str) -> bool:
+        texto = texto.lower().strip()
+        return any(palabra in texto for palabra in [
+            "no", "nop", "noup", "nunca", "ni loco", "no gracias", "nel", "ni por el putas"
+        ])
+
+    # ------------------------------------------------------------------------
+    # 🔁 Cierre de conversación
+    # ------------------------------------------------------------------------
+    if est.get("fase") == "esperando_cierre":
+        if es_afirmativo(txt_raw):
+            est["fase"] = "inicio"
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="¡Perfecto! ¿Te puedo ayudar en algo más? 😊"
+            )
+        elif es_negativo(txt_raw):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="Gracias por tu compra en X100 🫶 Si necesitas algo más, estaré por aquí."
+            )
+            reset_estado(cid)
+            estado_usuario.pop(cid, None)
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="¿Te gustaría hacer otra consulta? Responde *sí* o *no* 😊"
+            )
+        return
+
+    # ------------------------------------------------------------------------
+    # 🔁 Cierre de conversación
+    # ------------------------------------------------------------------------
+    if est.get("fase") == "esperando_cierre":
+        if es_afirmativo(txt_raw):
+            est["fase"] = "inicio"
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="¡Perfecto! ¿Te puedo ayudar en algo más? 😊"
+            )
+        elif es_negativo(txt_raw):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="Gracias por tu compra en X100 🫶 Si necesitas algo más, estaré por aquí."
+            )
+            reset_estado(cid)
+            estado_usuario.pop(cid, None)
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="¿Te gustaría hacer otra consulta? Responde *sí* o *no* 😊"
+            )
         return
 
 
@@ -1767,14 +1838,13 @@ async def manejar_precio(update, ctx, inventario):
         logging.debug(f"[manejar_precio] Guardado modelo: {primer_producto['modelo']}, color: {primer_producto['color']}")
 
         await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
-                f"{respuesta_final}"
-                "¿Te gustaría proseguir con la compra?\n\n"
-                "👉 Escribe: *sí quiero comprar* o *no, gracias*"
-            ),
-            parse_mode="Markdown"
+                chat_id=cid,
+                text=(
+                    f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
+                    f"{respuesta_final}"
+                    "¿Te gustaría proseguir con la compra?"
+                ),
+                parse_mode="Markdown"
         )
         return True
 
@@ -1823,13 +1893,12 @@ async def responder_con_openai(mensaje_usuario):
                         "Solo vendemos nuestra propia marca *X100* (no manejamos marcas como Skechers, Adidas, Nike, etc.). "
                         "Nuestros productos son 100% colombianos 🇨🇴 y hechos en Bucaramanga.\n\n"
                         "Tu objetivo principal es:\n"
-                        "- Ayudar al cliente a consultar el catálogo 📋\n"
+                        "- Si preguntan por precio di, dime que referencia exacta buscas\n"
                         "- Siempre que puedas pedir la referencia del teni\n"
                         "- Pedir que envíe una imagen del zapato que busca 📸\n"
                         "Siempre que puedas, invita amablemente al cliente a enviarte el número de referencia o una imagen para agilizar el pedido.\n"
                         "Si el cliente pregunta por marcas externas, responde cálidamente explicando que solo manejamos X100.\n\n"
                         "Cuando no entiendas muy bien la intención, ofrece opciones como:\n"
-                        "- '¿Te gustaría ver nuestro catálogo? 📋'\n"
                         "- '¿Me puedes enviar la referencia del modelo que te interesa? 📋✨'\n"
                         "- '¿Quieres enviarme una imagen para ayudarte mejor? 📸'\n\n"
                         "Responde de forma CÁLIDA, POSITIVA, BREVE (máximo 2 o 3 líneas), usando emojis amistosos 🎯👟🚀✨.\n"
@@ -2051,7 +2120,7 @@ async def venom_webhook(req: Request):
                 logging.info("🧠 Enviando audio a transcripción Whisper...")
                 texto_transcrito = await transcribe_audio(audio_path)
 
-                if texto_transcrito:
+                if texto_transcrito and texto_transcrito != "[INAUDIBLE]":
                     logging.info(f"📝 Transcripción completa:\n{texto_transcrito}")
                     logging.info("➡️ Reenviando texto transcrito a procesador de flujo (procesar_wa)")
                     reply = await procesar_wa(cid, texto_transcrito)
