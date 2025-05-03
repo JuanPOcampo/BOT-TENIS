@@ -1,4 +1,5 @@
 # ——— Librerías estándar de Python ———
+import openai
 import os
 import io
 import base64
@@ -495,13 +496,17 @@ async def transcribe_audio(file_path: str) -> str | None:
     """
     try:
         with open(file_path, "rb") as f:
+            audio_bytes = io.BytesIO(f.read())
+            audio_bytes.name = os.path.basename(file_path)  # necesario para Whisper
+
             rsp = await client.audio.transcriptions.create(
                 model="whisper-1",
-                file=f,
-                language="es",               # fuerza español
-                response_format="text",      # devuelve texto plano
+                file=audio_bytes,
+                language="es",
+                response_format="text",
                 prompt="Español Colombia, jerga: parce, mano, ñero, buenos días, buenas, hola"
             )
+
         if isinstance(rsp, str) and rsp.strip():
             return rsp.strip()
     except Exception as e:
