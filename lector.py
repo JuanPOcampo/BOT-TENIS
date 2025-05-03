@@ -22,7 +22,7 @@ import imagehash
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 import nest_asyncio
-import openai
+from openai import AsyncOpenAI
 
 # Google Cloud
 from google.cloud import vision
@@ -53,6 +53,7 @@ load_dotenv()
 # FastAPI instance
 api = FastAPI()
 
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ✅ Desde el mismo JSON base
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
@@ -481,8 +482,11 @@ def obtener_tallas_por_color(inv: list[dict], modelo: str, color: str) -> list[s
 
 #  TRANSCRIPCIÓN DE AUDIO (WHISPER)
 # ───────────────────────────────────────────────────────────────
+
 TEMP_AUDIO_DIR = "temp_audio"
 os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
+
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 async def transcribe_audio(file_path: str) -> str | None:
     """
