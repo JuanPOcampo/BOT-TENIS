@@ -82,8 +82,8 @@ def generar_embeddings():
 
     print("✅ Embeddings generados. Guardando archivo JSON...")
 
-    os.makedirs("var/data", exist_ok=True)
-    with open("var/data/embeddings.json", "w") as f:
+    os.makedirs("/var/data", exist_ok=True)
+    with open("/var/data/embeddings.json", "w") as f:
         json.dump(embeddings, f)
 
     print("🎉 Archivo embeddings.json creado con éxito.")
