@@ -161,26 +161,26 @@ def generar_embedding_imagen(img: Image.Image) -> np.ndarray:
         vec = clip_model.get_image_features(**inputs)  # (1, 512)
     return vec[0].cpu().numpy()  # → ndarray de shape (512,)
 
-# 🔍 Comparar imagen del cliente con base de modelos
+# 🔍 Comparar imagen del cliente con base de modelos
 async def identificar_modelo_desde_imagen(base64_img: str) -> str:
     print("🧠 Identificando modelo con CLIP...")
 
     try:
-        # 1️⃣ Cargar embeddings precalculados
+        # 1️⃣ Cargar embeddings precalculados
         base_embeddings = cargar_embeddings_desde_cache()
 
-        # 2️⃣ Embedding de la imagen del cliente
+        # 2️⃣ Embedding de la imagen del cliente
         img_pil     = decodificar_imagen_base64(base64_img)
         emb_cliente = generar_embedding_imagen(img_pil)
 
         mejor_sim, mejor_modelo = 0.0, "No identificado"
 
-        # 3️⃣ Buscar la coincidencia más parecida
+        # 3️⃣ Buscar la coincidencia más parecida
         for modelo, lista in base_embeddings.items():
             for emb_ref in lista:
                 emb_ref = np.array(emb_ref)
-                sim = np.dot(emb_cliente, emb_ref) / (
-                       np.linalg.norm(emb_cliente) * np.linalg.norm(emb_ref))
+                sim = np.dot(emb_cliente, emb_ref).item() / (
+                      np.linalg.norm(emb_cliente) * np.linalg.norm(emb_ref))
                 if sim > mejor_sim:
                     mejor_sim, mejor_modelo = sim, modelo
 
