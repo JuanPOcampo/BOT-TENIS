@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from collections import defaultdict
 from transformers import CLIPModel, CLIPProcessor
 import subprocess
-
+import torch
 # Ejecuta el script al iniciar el bot
 subprocess.run(["python", "generar_embeddings.py"])
 
@@ -151,14 +151,15 @@ def decodificar_imagen_base64(base64_str):
     image = Image.open(io.BytesIO(image_data)).convert("RGB")
     return image
 
-# 🧠 Embedding de imagen con CLIP (OpenAI)
-async def generar_embedding_imagen(img: Image.Image):
-    client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # aislado por si colapsa
-    response = await client.embeddings.create(
-        input=img,
-        model="vision-embedding-001"
-    )
-    return np.array(response.data[0].embedding)
+# 🧠 Embedding de imagen con CLIP (local, sin OpenAI)
+def generar_embedding_imagen(img: Image.Image) -> np.ndarray:
+    """
+    Devuelve el embedding de la imagen usando el modelo CLIP local.
+    """
+    inputs = clip_processor(images=img, return_tensors="pt")
+    with torch.no_grad():
+        vec = clip_model.get_image_features(**inputs)  # (1, 512)
+    return vec[0].cpu().numpy()  # → ndarray de shape (512,)
 
 # 🔍 Comparar imagen del cliente con base de modelos
 async def identificar_modelo_desde_imagen(base64_img: str) -> str:
@@ -170,7 +171,7 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
 
         # 2️⃣ Embedding de la imagen del cliente
         img_pil     = decodificar_imagen_base64(base64_img)
-        emb_cliente = await generar_embedding_imagen(img_pil)
+        emb_cliente = generar_embedding_imagen(img_pil)
 
         mejor_sim, mejor_modelo = 0.0, "No identificado"
 
