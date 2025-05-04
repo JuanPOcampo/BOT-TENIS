@@ -171,7 +171,7 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
 
         # 2️⃣ Embedding de la imagen del cliente
         img_pil = decodificar_imagen_base64(base64_img)
-        emb_cliente = await generar_embedding_imagen(img_pil)
+        emb_cliente = generar_embedding_imagen(img_pil)  # ❌ NO lleva await
         emb_cliente_np = emb_cliente.detach().cpu().numpy() if hasattr(emb_cliente, "detach") else np.array(emb_cliente)
 
         mejor_sim, mejor_modelo = 0.0, "No identificado"
@@ -194,7 +194,6 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
     except Exception as e:
         logging.error(f"[CLIP] Error: {e}")
         return "⚠️ Ocurrió un problema analizando la imagen."
-
 
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 
