@@ -161,7 +161,9 @@ def generar_embedding_imagen(img: Image.Image) -> np.ndarray:
         vec = clip_model.get_image_features(**inputs)  # (1, 512)
     return vec[0].cpu().numpy()  # → ndarray de shape (512,)
 
-# 🔍 Comparar imagen del cliente con base de modelos
+# ------------------------------------------------------------------
+# 🔍 Comparar imagen del cliente con base de modelos  (VERSIÓN FIJA)
+# ------------------------------------------------------------------
 async def identificar_modelo_desde_imagen(base64_img: str) -> str:
     logging.debug("🧠 [CLIP] Iniciando identificación de modelo...")
 
@@ -172,51 +174,41 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
 
         # 2️⃣ Embedding de la imagen del cliente
         img_pil = decodificar_imagen_base64(base64_img)
-        logging.debug("🖼️ [CLIP] Imagen cliente decodificada correctamente")
+        logging.debug("🖼️ [CLIP] Imagen cliente decodificada")
 
-        emb_cliente = generar_embedding_imagen(img_pil)   # 👈 sin await
-        logging.debug("🧠 [CLIP] Embedding de cliente generado")
-
+        emb_cliente = generar_embedding_imagen(img_pil)          # ← SIN await
         emb_cliente_np = (
             emb_cliente.detach().cpu().numpy()
             if hasattr(emb_cliente, "detach")
-            else np.array(emb_cliente)
+            else np.asarray(emb_cliente)
         )
-        logging.debug(f"📊 [CLIP] Embedding cliente shape: {emb_cliente_np.shape}")
+        logging.debug("🧠 [CLIP] Embedding cliente → numpy OK")
 
-        mejor_sim, mejor_modelo = 0.0, "No identificado"
+        mejor_sim: float   = 0.0
+        mejor_modelo: str  = "No identificado"
 
         # 3️⃣ Buscar la coincidencia más parecida
         for modelo, lista in base_embeddings.items():
             for emb_ref in lista:
-                emb_ref_np = np.array(emb_ref)
+                emb_ref_np = np.asarray(emb_ref)
+                sim_raw    = np.dot(emb_cliente_np, emb_ref_np) / (
+                             np.linalg.norm(emb_cliente_np) * np.linalg.norm(emb_ref_np)
+                             )
 
-                # Debug de shapes
-                logging.debug(
-                    f"📏 [CLIP] Shapes — cliente: {emb_cliente_np.shape}, ref: {emb_ref_np.shape}"
-                )
+                # 🪄 Asegura que sim_val sea ESCALAR float
+                sim_val = float(sim_raw.squeeze())   # .squeeze() quita dimensiones 0‑D/1‑D
+                logging.debug(f"🔍 [CLIP] Similitud con {modelo}: {sim_val:.4f}")
 
-                sim = np.dot(emb_cliente_np, emb_ref_np) / (
-                    np.linalg.norm(emb_cliente_np) * np.linalg.norm(emb_ref_np)
-                )
-                # Convertir a escalar robustamente
-                sim = float(sim) if np.isscalar(sim) else float(sim.squeeze())
+                if sim_val > mejor_sim:
+                    mejor_sim, mejor_modelo = sim_val, modelo
+                    logging.debug(f"✅ [CLIP] Nuevo mejor → {mejor_modelo} ({mejor_sim:.4f})")
 
-                logging.debug(f"🔍 [CLIP] Similitud con {modelo}: {sim:.4f}")
-
-                if sim > mejor_sim:
-                    mejor_sim, mejor_modelo = sim, modelo
-                    logging.debug(
-                        f"✅ [CLIP] Nuevo mejor modelo → {mejor_modelo} ({mejor_sim:.4f})"
-                    )
-
-        logging.info(
-            f"🎯 [CLIP] Coincidencia final: {mejor_modelo} (similitud {mejor_sim:.2f})"
-        )
+        logging.info(f"🎯 [CLIP] Coincidencia final: {mejor_modelo} ({mejor_sim:.2f})")
 
         if mejor_sim >= 0.80:
             return f"✅ La imagen coincide con *{mejor_modelo}* (confianza {mejor_sim:.2f})"
-        return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
+        else:
+            return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
 
     except Exception as e:
         logging.error(f"[CLIP] Error: {e}")
