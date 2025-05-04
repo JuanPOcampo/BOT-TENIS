@@ -1,0 +1,20 @@
+# Usa una imagen base optimizada
+FROM python:3.10-slim
+
+# Evita prompts de Debian
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Crea carpeta de trabajo
+WORKDIR /app
+
+# Copia requirements y usa caché
+COPY requirements.txt .
+
+# Instala dependencias
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
+
+# Copia el resto del código
+COPY . .
+
+# Comando de inicio del bot
+CMD ["uvicorn", "lector:api", "--host=0.0.0.0", "--port=10000"]
