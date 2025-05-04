@@ -160,51 +160,38 @@ async def generar_embedding_imagen(img: Image.Image):
     )
     return np.array(response.data[0].embedding)
 
-# 🔍 Comparar imagen del cliente con base de modelos
-async def identificar_modelo_desde_imagen(base64_img):
+# 🔍 Comparar imagen del cliente con base de modelos
+async def identificar_modelo_desde_imagen(base64_img: str) -> str:
     print("🧠 Identificando modelo con CLIP...")
 
     try:
-        # Paso 1: cargar base
+        # 1️⃣ Cargar embeddings precalculados
         base_embeddings = cargar_embeddings_desde_cache()
 
-        # Paso 2: procesar imagen cliente
-        img_pil = decodificar_imagen_base64(base64_img)
+        # 2️⃣ Embedding de la imagen del cliente
+        img_pil     = decodificar_imagen_base64(base64_img)
         emb_cliente = await generar_embedding_imagen(img_pil)
 
-        mejor_similitud = 0
-        mejor_modelo = "No identificado"
+        mejor_sim, mejor_modelo = 0.0, "No identificado"
 
-        # Paso 3: comparar contra todos los modelos en base
-        for modelo, lista_embeddings in base_embeddings.items():
-            for emb_ref in lista_embeddings:
-                emb_ref_np = np.array(emb_ref)
-                sim = np.dot(emb_cliente, emb_ref_np) / (
-                    np.linalg.norm(emb_cliente) * np.linalg.norm(emb_ref_np)
-                )
-                if sim > mejor_similitud:
-                    mejor_similitud = sim
-                    mejor_modelo = modelo
+        # 3️⃣ Buscar la coincidencia más parecida
+        for modelo, lista in base_embeddings.items():
+            for emb_ref in lista:
+                emb_ref = np.array(emb_ref)
+                sim = np.dot(emb_cliente, emb_ref) / (
+                       np.linalg.norm(emb_cliente) * np.linalg.norm(emb_ref))
+                if sim > mejor_sim:
+                    mejor_sim, mejor_modelo = sim, modelo
 
-        print(f"✅ Coincidencia más cercana: {mejor_modelo} ({round(mejor_similitud, 2)})")
+        print(f"✅ Coincidencia más cercana: {mejor_modelo} ({mejor_sim:.2f})")
 
-        if mejor_similitud >= 0.80:
-            return {
-                "modelo": mejor_modelo,
-                "confianza": round(mejor_similitud, 2)
-            }
-        else:
-            return {
-                "modelo": "No identificado",
-                "confianza": round(mejor_similitud, 2)
-            }
+        if mejor_sim >= 0.80:
+            return f"✅ La imagen coincide con *{mejor_modelo}* (confianza {mejor_sim:.2f})"
+        return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
 
     except Exception as e:
-        logging.error(f"❌ Error al identificar modelo con CLIP: {e}")
-        return {
-            "modelo": "Error",
-            "confianza": 0
-        }
+        logging.error(f"[CLIP] Error: {e}")
+        return "⚠️ Ocurrió un problema analizando la imagen."
 
 
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
@@ -642,36 +629,58 @@ async def manejar_imagen(update, ctx):
         base64_img = base64.b64encode(f_img.read()).decode("utf-8")
     os.remove(tmp_path)
 
-    # Identificar modelo con CLIP
+    # 🔍 Identificar modelo con CLIP
     try:
         mensaje = await identificar_modelo_desde_imagen(base64_img)
 
         if "coincide con *" in mensaje.lower():
+            # extrae el texto entre asteriscos *
             modelo_detectado = re.findall(r"\*(.*?)\*", mensaje)
             if modelo_detectado:
                 partes = modelo_detectado[0].split("_")
-                marca = partes[0] if len(partes) > 0 else "Desconocida"
+                marca  = partes[0] if len(partes) > 0 else "Desconocida"
                 modelo = partes[1] if len(partes) > 1 else "Desconocido"
-                color = partes[2] if len(partes) > 2 else "Desconocido"
+                color  = partes[2] if len(partes) > 2 else "Desconocido"
 
                 est.update({
-                    "marca": marca,
+                    "marca":  marca,
                     "modelo": modelo,
-                    "color": color,
-                    "fase": "imagen_detectada"
+                    "color":  color,
+                    "fase":   "imagen_detectada"
                 })
 
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text=f"📸 La imagen coincide con:\n"
-                         f"*Marca:* {marca}\n"
-                         f"*Modelo:* {modelo}\n"
-                         f"*Color:* {color}\n\n"
-                         "¿Deseas continuar tu compra con este modelo? (SI/NO)",
-                    parse_mode="Markdown",
-                    reply_markup=menu_botones(["SI", "NO"])
-                )
-                return
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    f"📸 La imagen coincide con:\n"
+                    f"*Marca:* {marca}\n"
+                    f"*Modelo:* {modelo}\n"
+                    f"*Color:* {color}\n\n"
+                    "¿Deseas continuar tu compra con este modelo? (SI/NO)"
+                ),
+                parse_mode="Markdown",
+                reply_markup=menu_botones(["SI", "NO"]),
+            )
+            return
+
+        # ⬇️ Si no hubo coincidencia satisfactoria
+        reset_estado(cid)
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=mensaje,   # contiene la respuesta 'no identificado…'
+            parse_mode="Markdown",
+            reply_markup=menu_botones(["Enviar otra imagen", "Ver catálogo"]),
+        )
+        return
+
+    except Exception as e:
+        logging.error(f"❌ Error usando CLIP en manejar_imagen: {e}")
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="⚠️ Hubo un problema procesando la imagen. ¿Puedes intentar de nuevo?",
+            reply_markup=menu_botones(["Enviar otra imagen"]),
+        )
+        return
 
         # Si no se detectó bien
         reset_estado(cid)
