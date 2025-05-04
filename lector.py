@@ -14,6 +14,7 @@ import difflib
 import asyncio
 from types import SimpleNamespace
 from collections import defaultdict
+from transformers import CLIPModel, CLIPProcessor
 
 # ——— Librerías externas ———
 from dotenv import load_dotenv
