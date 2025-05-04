@@ -78,7 +78,7 @@ def generar_embeddings():
 
     print("✅ Embeddings generados. Guardando archivo JSON...")
 
-    os.makedirs("/var/data", exist_ok=True)  # ✅ Ruta correcta del disco persistente
+    # 🔐 No crees la carpeta, ya existe: solo guarda
     with open("/var/data/embeddings.json", "w") as f:
         json.dump(embeddings, f)
 
