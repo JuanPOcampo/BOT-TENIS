@@ -164,31 +164,47 @@ async def generar_embedding_imagen(img: Image.Image):
 async def identificar_modelo_desde_imagen(base64_img):
     print("🧠 Identificando modelo con CLIP...")
 
-    # Paso 1: cargar base
-    base_embeddings = cargar_embeddings_desde_cache()
+    try:
+        # Paso 1: cargar base
+        base_embeddings = cargar_embeddings_desde_cache()
 
-    # Paso 2: procesar imagen cliente
-    img_pil = decodificar_imagen_base64(base64_img)
-    emb_cliente = await generar_embedding_imagen(img_pil)
+        # Paso 2: procesar imagen cliente
+        img_pil = decodificar_imagen_base64(base64_img)
+        emb_cliente = await generar_embedding_imagen(img_pil)
 
-    mejor_similitud = 0
-    mejor_modelo = "No identificado"
+        mejor_similitud = 0
+        mejor_modelo = "No identificado"
 
-    # Paso 3: comparar contra todos los modelos en base
-    for modelo, lista_embeddings in base_embeddings.items():
-        for emb_ref in lista_embeddings:
-            emb_ref_np = np.array(emb_ref)
-            sim = np.dot(emb_cliente, emb_ref_np) / (np.linalg.norm(emb_cliente) * np.linalg.norm(emb_ref_np))
-            if sim > mejor_similitud:
-                mejor_similitud = sim
-                mejor_modelo = modelo
+        # Paso 3: comparar contra todos los modelos en base
+        for modelo, lista_embeddings in base_embeddings.items():
+            for emb_ref in lista_embeddings:
+                emb_ref_np = np.array(emb_ref)
+                sim = np.dot(emb_cliente, emb_ref_np) / (
+                    np.linalg.norm(emb_cliente) * np.linalg.norm(emb_ref_np)
+                )
+                if sim > mejor_similitud:
+                    mejor_similitud = sim
+                    mejor_modelo = modelo
 
-    print(f"✅ Coincidencia más cercana: {mejor_modelo} ({round(mejor_similitud, 2)})")
+        print(f"✅ Coincidencia más cercana: {mejor_modelo} ({round(mejor_similitud, 2)})")
 
-    if mejor_similitud >= 0.80:
-        return f"La imagen coincide con *{mejor_modelo}* (confianza {round(mejor_similitud, 2)})"
-    else:
-        return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
+        if mejor_similitud >= 0.80:
+            return {
+                "modelo": mejor_modelo,
+                "confianza": round(mejor_similitud, 2)
+            }
+        else:
+            return {
+                "modelo": "No identificado",
+                "confianza": round(mejor_similitud, 2)
+            }
+
+    except Exception as e:
+        logging.error(f"❌ Error al identificar modelo con CLIP: {e}")
+        return {
+            "modelo": "Error",
+            "confianza": 0
+        }
 
 
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
