@@ -171,7 +171,7 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
 
         # 2️⃣ Embedding de la imagen del cliente
         img_pil = decodificar_imagen_base64(base64_img)
-        emb_cliente = generar_embedding_imagen(img_pil)  # ❌ NO lleva await
+        emb_cliente = await generar_embedding_imagen(img_pil)
         emb_cliente_np = emb_cliente.detach().cpu().numpy() if hasattr(emb_cliente, "detach") else np.array(emb_cliente)
 
         mejor_sim, mejor_modelo = 0.0, "No identificado"
@@ -181,7 +181,9 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
             for emb_ref in lista:
                 emb_ref_np = np.array(emb_ref)
                 sim = np.dot(emb_cliente_np, emb_ref_np) / (
-                    np.linalg.norm(emb_cliente_np) * np.linalg.norm(emb_ref_np))
+                    np.linalg.norm(emb_cliente_np) * np.linalg.norm(emb_ref_np)
+                )
+                sim = sim.item() if hasattr(sim, "item") else float(sim)  # 🔥 Línea clave para evitar el error
                 if sim > mejor_sim:
                     mejor_sim, mejor_modelo = sim, modelo
 
