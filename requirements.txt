@@ -12,6 +12,8 @@ pydub
 ffmpeg-python
 pillow
 numpy
-imagehash
-openai>=1.3.5
+openai>=1.14.0
 google-cloud-vision
+aiohttp
+transformers
+torch
