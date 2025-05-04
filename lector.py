@@ -1,5 +1,4 @@
 # ——— Librerías estándar de Python ———
-import openai
 import os
 import io
 import base64
@@ -19,11 +18,11 @@ from collections import defaultdict
 # ——— Librerías externas ———
 from dotenv import load_dotenv
 from PIL import Image
-import imagehash
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 import nest_asyncio
 from openai import AsyncOpenAI
+import numpy as np
 
 # Google Cloud
 from google.cloud import vision
@@ -54,8 +53,6 @@ load_dotenv()
 # FastAPI instance
 api = FastAPI()
 
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
 # ✅ Desde el mismo JSON base
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
 
@@ -72,132 +69,128 @@ vision_creds = service_account.Credentials.from_service_account_info(creds_info)
 drive_service = build("drive", "v3", credentials=drive_creds)
 vision_client = vision.ImageAnnotatorClient(credentials=vision_creds)
 
-DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
-def precargar_imagenes_drive(service, root_id):
-    """
-    Recorre recursivamente la carpeta raíz de Drive (root_id),
-    descarga cada imagen, calcula su hash perceptual
-    y devuelve un dict {hash: (marca, modelo, color)}.
-    """
-    imagenes = []
+# ————————————————————————————————————————————————————————————————
+# CLIP 🔍 Identificación de modelo por imagen base64 con embeddings
+# ————————————————————————————————————————————————————————————————
 
+# Cargar modelo CLIP (una vez al iniciar el bot)
+clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
+# 🧠 Buscar el modelo más parecido en Drive con CLIP
+def buscar_similar_en_drive_con_clip(imagen_cliente_path, drive_service, carpeta_padre_id):
+    mejor_similitud = -1
+    mejor_modelo = None
 
-    def _walk(current_id, ruta):
-        query = f"'{current_id}' in parents and trashed=false"
-        page_token = None
-        while True:
-            resp = service.files().list(
-                q=query,
-                fields="nextPageToken, files(id,name,mimeType)",
-                pageToken=page_token
-            ).execute()
+    # Paso 1: listar subcarpetas (modelos)
+    respuesta = drive_service.files().list(
+        q=f"'{carpeta_padre_id}' in parents and mimeType = 'application/vnd.google-apps.folder'",
+        fields="files(id, name)"
+    ).execute()
 
-            for f in resp.get("files", []):
-                if f["mimeType"] == "application/vnd.google-apps.folder":
-                    _walk(f["id"], ruta + [f["name"]])
-                elif f["mimeType"].startswith("image/"):
-                    imagenes.append((f["id"], ruta, f["name"]))
-            page_token = resp.get("nextPageToken")
-            if page_token is None:
-                break
+    subcarpetas = respuesta.get("files", [])
 
-    _walk(root_id, [])  # inicia el recorrido
+    # Paso 2: para cada subcarpeta, descargar una imagen y comparar
+    for carpeta in subcarpetas:
+        carpeta_id = carpeta["id"]
+        nombre_modelo = carpeta["name"]
 
-    cache = {}
-    for file_id, ruta, filename in imagenes:
-        try:
-            url = f"https://drive.google.com/uc?export=download&id={file_id}"
-            res = requests.get(url)
-            res.raise_for_status()
-            img = Image.open(io.BytesIO(res.content))
-            h = str(imagehash.phash(img))
-            marca, modelo, color = (ruta + ["", "", ""])[:3]
-            cache[h] = (marca, modelo, color)
-        except Exception as e:
-            print(f"⚠️  No se pudo procesar {filename}: {e}")
+        # Buscar imágenes dentro de la carpeta
+        imagenes = drive_service.files().list(
+            q=f"'{carpeta_id}' in parents and mimeType contains 'image/'",
+            fields="files(id, name)",
+            pageSize=1  # solo una imagen
+        ).execute().get("files", [])
 
-    print(f"✅ Hashes precargados: {len(cache)} imágenes")
-    return cache
+        if not imagenes:
+            continue
 
+        imagen_id = imagenes[0]["id"]
 
-PHASH_THRESHOLD = 20
-AHASH_THRESHOLD = 18
+        # Descargar imagen a memoria
+        request = drive_service.files().get_media(fileId=imagen_id)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        fh.seek(0)
 
-def precargar_hashes_from_drive(folder_id: str) -> dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]]:
-    """
-    Descarga todas las imágenes de la carpeta de Drive, extrae SKU=modelo_color,
-    calcula phash/ahash y agrupa por SKU.
-    """
-    model_hashes: dict[str, list[tuple[imagehash.ImageHash, imagehash.ImageHash]]] = {}
-    page_token = None
+        # Abrir la imagen del Drive
+        imagen_drive = Image.open(fh).convert("RGB")
+        imagen_cliente = Image.open(imagen_cliente_path).convert("RGB")
 
-    while True:
-        resp = drive_service.files().list(
-            q=f"'{folder_id}' in parents and mimeType contains 'image/'",
-            spaces="drive",
-            fields="nextPageToken, files(id, name)",
-            pageToken=page_token
-        ).execute()
+        # Comparar usando CLIP
+        inputs = clip_processor(images=[imagen_cliente, imagen_drive], return_tensors="pt", padding=True)
+        outputs = clip_model.get_image_features(**inputs)
+        similitud = torch.cosine_similarity(outputs[0], outputs[1], dim=0).item()
 
-        for f in resp.get("files", []):
-            fid, name = f["id"], f["name"]
-            base = os.path.splitext(name)[0]
-            parts = base.split('_')
-            sku = parts[0]
-            if len(parts) > 1:
-                sku += "_" + parts[1]
-            if len(parts) > 2:
-                sku += "_" + parts[2]
+        if similitud > mejor_similitud:
+            mejor_similitud = similitud
+            mejor_modelo = nombre_modelo
 
-            request = drive_service.files().get_media(fileId=fid)
-            fh = io.BytesIO()
-            downloader = MediaIoBaseDownload(fh, request)
-            done = False
-            while not done:
-                _, done = downloader.next_chunk()
-            fh.seek(0)
+    return mejor_modelo
+# Ruta del archivo de embeddings precargados
+EMBEDDINGS_PATH = "/var/data/embeddings.json"
 
-            try:
-                img = Image.open(fh)
-                ph = imagehash.phash(img)
-                ah = imagehash.average_hash(img)
-                model_hashes.setdefault(sku, []).append((ph, ah))
-            except Exception as e:
-                logging.error(f"No pude procesar {name}: {e}")
+# 🧠 Cargar base de embeddings guardados
+def cargar_embeddings_desde_cache():
+    if not os.path.exists(EMBEDDINGS_PATH):
+        raise FileNotFoundError("❌ No se encontró embeddings.json. Debes generarlo primero.")
+    with open(EMBEDDINGS_PATH, "r") as f:
+        return json.load(f)
 
-        page_token = resp.get("nextPageToken")
-        if not page_token:
-            break
+# 🖼️ Convertir base64 a imagen PIL
+def decodificar_imagen_base64(base64_str):
+    image_data = base64.b64decode(base64_str + "===")
+    image = Image.open(io.BytesIO(image_data)).convert("RGB")
+    return image
 
-    logging.info(f"▶ Precargados hashes para {len(model_hashes)} SKUs")
-    return model_hashes
-
-MODEL_HASHES = precargar_imagenes_drive(drive_service, DRIVE_FOLDER_ID)
-
-for h, ref in MODEL_HASHES.items():
-    print(f"HASH precargado: {h} → {ref}")
-
-def identify_model_from_stream(path: str) -> str | None:
-    """
-    Abre la imagen subida, calcula su hash y busca directamente
-    en MODEL_HASHES cuál es el modelo (marca_modelo_color).
-    """
-    try:
-        img_up = Image.open(path)
-    except Exception as e:
-        logging.error(f"No pude leer la imagen subida: {e}")
-        return None
-
-    # ─── Aquí calculas y buscas el hash ───
-    img_hash = str(imagehash.phash(img_up))
-    modelo = next(
-        (m for m, hashes in MODEL_HASHES.items() if img_hash in hashes),
-        None
+# 🧠 Embedding de imagen con CLIP (OpenAI)
+async def generar_embedding_imagen(img: Image.Image):
+    client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # aislado por si colapsa
+    response = await client.embeddings.create(
+        input=img,
+        model="vision-embedding-001"
     )
+    return np.array(response.data[0].embedding)
+
+# 🔍 Comparar imagen del cliente con base de modelos
+async def identificar_modelo_desde_imagen(base64_img):
+    print("🧠 Identificando modelo con CLIP...")
+
+    # Paso 1: cargar base
+    base_embeddings = cargar_embeddings_desde_cache()
+
+    # Paso 2: procesar imagen cliente
+    img_pil = decodificar_imagen_base64(base64_img)
+    emb_cliente = await generar_embedding_imagen(img_pil)
+
+    mejor_similitud = 0
+    mejor_modelo = "No identificado"
+
+    # Paso 3: comparar contra todos los modelos en base
+    for modelo, lista_embeddings in base_embeddings.items():
+        for emb_ref in lista_embeddings:
+            emb_ref_np = np.array(emb_ref)
+            sim = np.dot(emb_cliente, emb_ref_np) / (np.linalg.norm(emb_cliente) * np.linalg.norm(emb_ref_np))
+            if sim > mejor_similitud:
+                mejor_similitud = sim
+                mejor_modelo = modelo
+
+    print(f"✅ Coincidencia más cercana: {mejor_modelo} ({round(mejor_similitud, 2)})")
+
+    if mejor_similitud >= 0.80:
+        return f"La imagen coincide con *{mejor_modelo}* (confianza {round(mejor_similitud, 2)})"
+    else:
+        return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
+
+
+DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
+
+
     # ───────────────────────────────────────
 
-    return modelo
 def convertir_palabras_a_numero(texto):  
     mapa = {
         "cero": "0", "uno": "1", "una": "1", "dos": "2", "tres": "3", "cuatro": "4",
@@ -612,7 +605,7 @@ async def manejar_pqrs(update, ctx) -> bool:
 
     return False
 
-# 🔥 Manejar imagen enviada por el usuario
+# 🔥 Manejar imagen enviada por el usuario (ahora con CLIP)
 async def manejar_imagen(update, ctx):
     cid = update.effective_chat.id
     est = estado_usuario.setdefault(cid, reset_estado(cid))
@@ -623,35 +616,43 @@ async def manejar_imagen(update, ctx):
     os.makedirs("temp", exist_ok=True)
     await f.download_to_drive(tmp_path)
 
-    # Buscar el modelo usando hashing
-    ref = identify_model_from_stream(tmp_path)
+    # Leer imagen como base64
+    with open(tmp_path, "rb") as f_img:
+        base64_img = base64.b64encode(f_img.read()).decode("utf-8")
     os.remove(tmp_path)
 
-    if ref:
-        try:
-            marca, modelo, color = ref.split('_')
-        except Exception as e:
-            logging.error(f"Error al desempaquetar referencia: {e}")
-            marca, modelo, color = "Desconocido", ref, ""
+    # Identificar modelo con CLIP
+    try:
+        mensaje = await identificar_modelo_desde_imagen(base64_img)
 
-        est.update({
-            "marca": marca,
-            "modelo": modelo,
-            "color": color,
-            "fase": "imagen_detectada"
-        })
+        if "coincide con *" in mensaje.lower():
+            modelo_detectado = re.findall(r"\*(.*?)\*", mensaje)
+            if modelo_detectado:
+                partes = modelo_detectado[0].split("_")
+                marca = partes[0] if len(partes) > 0 else "Desconocida"
+                modelo = partes[1] if len(partes) > 1 else "Desconocido"
+                color = partes[2] if len(partes) > 2 else "Desconocido"
 
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=f"📸 La imagen coincide con:\n"
-                 f"*Marca:* {marca}\n"
-                 f"*Modelo:* {modelo}\n"
-                 f"*Color:* {color}\n\n"
-                 "¿Deseas continuar tu compra con este modelo? (SI/NO)",
-            parse_mode="Markdown",
-            reply_markup=menu_botones(["SI", "NO"])
-        )
-    else:
+                est.update({
+                    "marca": marca,
+                    "modelo": modelo,
+                    "color": color,
+                    "fase": "imagen_detectada"
+                })
+
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=f"📸 La imagen coincide con:\n"
+                         f"*Marca:* {marca}\n"
+                         f"*Modelo:* {modelo}\n"
+                         f"*Color:* {color}\n\n"
+                         "¿Deseas continuar tu compra con este modelo? (SI/NO)",
+                    parse_mode="Markdown",
+                    reply_markup=menu_botones(["SI", "NO"])
+                )
+                return
+
+        # Si no se detectó bien
         reset_estado(cid)
         await ctx.bot.send_message(
             chat_id=cid,
@@ -660,46 +661,13 @@ async def manejar_imagen(update, ctx):
             reply_markup=menu_botones(["Enviar otra imagen", "Ver catálogo"])
         )
 
-# ───────────────────────────────────────────────────────────────
-
-# 🔥 Mostrar imágenes del modelo detectado
-async def mostrar_imagenes_modelo(cid, ctx, marca, tipo_modelo):
-    sku = f"{marca.replace(' ', '_')}_{tipo_modelo}"
-    resp = drive_service.files().list(
-        q=(
-            f"'{DRIVE_FOLDER_ID}' in parents "
-            f"and name contains '{sku}' "
-            "and mimeType contains 'image/'"
-        ),
-        spaces="drive",
-        fields="files(id, name)"
-    ).execute()
-
-    files = resp.get("files", [])
-    if not files:
-        await ctx.bot.send_message(cid, "Lo siento, no encontré imágenes de ese modelo.")
-        return
-
-    media = []
-    for f in files[:5]:
-        url = f"https://drive.google.com/uc?id={f['id']}"
-        caption = f["name"].split("_", 2)[-1]
-        media.append(InputMediaPhoto(media=url, caption=caption))
-
-    await ctx.bot.send_chat_action(cid, action=ChatAction.UPLOAD_PHOTO)
-    await ctx.bot.send_media_group(chat_id=cid, media=media)
-
-    est = estado_usuario[cid]
-    est["fase"] = "esperando_color"
-    est["modelo"] = tipo_modelo
-
-    await ctx.bot.send_message(
-        chat_id=cid,
-        text="¿Qué color te gustaría?",
-        reply_markup=menu_botones(
-            obtener_colores_por_modelo(obtener_inventario(), est["marca"], tipo_modelo)
+    except Exception as e:
+        logging.error(f"❌ Error usando CLIP en manejar_imagen: {e}")
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="❌ Hubo un error al procesar la imagen. ¿Puedes intentar de nuevo?",
+            reply_markup=menu_botones(["Enviar otra imagen"])
         )
-    )
 
 # ───────────────────────────────────────────────────────────────
 
@@ -1000,27 +968,34 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         os.makedirs("temp", exist_ok=True)
         await f.download_to_drive(tmp)
 
-        ref = identify_model_from_stream(tmp)
+        #   ➜ convert to base64 and usar CLIP
+        with open(tmp, "rb") as f_img:
+            base64_img = base64.b64encode(f_img.read()).decode("utf-8")
         os.remove(tmp)
 
-        if ref:
-            marca, modelo, color = ref.split('_')
-            est.update({
-                "marca": marca,
-                "modelo": modelo,
-                "color": color,
-                "fase": "imagen_detectada"
-            })
+        mensaje = await identificar_modelo_desde_imagen(base64_img)
+
+        if "coincide con *" in mensaje.lower():
+            modelo_detectado = re.findall(r"\*(.*?)\*", mensaje)
+            if modelo_detectado:
+                p = modelo_detectado[0].split("_")
+                est.update({
+                    "marca":  p[0] if len(p) > 0 else "Desconocida",
+                    "modelo": p[1] if len(p) > 1 else "Desconocido",
+                    "color":  p[2] if len(p) > 2 else "Desconocido",
+                    "fase":   "imagen_detectada",
+                })
             await ctx.bot.send_message(
                 chat_id=cid,
-                text=f"La imagen coincide con {marca} {modelo} color {color}. ¿Continuamos? (SI/NO)",
+                text=mensaje + "\n¿Continuamos? (SI/NO)",
                 reply_markup=menu_botones(["SI", "NO"]),
+                parse_mode="Markdown"
             )
         else:
             reset_estado(cid)
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="😕 No reconocí el modelo. Escribe /start para reiniciar.",
+                text="😕 No reconocí el modelo. Puedes intentar con otra imagen o escribir /start.",
                 parse_mode="Markdown"
             )
         return
@@ -1649,27 +1624,33 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         os.makedirs("temp", exist_ok=True)
         await f.download_to_drive(tmp)
 
-        ref_detectada = identify_model_from_stream(tmp)
+        with open(tmp, "rb") as f_img:
+            base64_img = base64.b64encode(f_img.read()).decode("utf-8")
         os.remove(tmp)
 
-        if ref_detectada:
-            marca, modelo, color = ref_detectada.split('_')
-            est.update({
-                "marca": marca,
-                "modelo": modelo,
-                "color": color,
-                "fase": "imagen_detectada"
-            })
+        mensaje = await identificar_modelo_desde_imagen(base64_img)
+
+        if "coincide con *" in mensaje.lower():
+            modelo_detectado = re.findall(r"\*(.*?)\*", mensaje)
+            if modelo_detectado:
+                p = modelo_detectado[0].split("_")
+                est.update({
+                    "marca":  p[0] if len(p) > 0 else "Desconocida",
+                    "modelo": p[1] if len(p) > 1 else "Desconocido",
+                    "color":  p[2] if len(p) > 2 else "Desconocido",
+                    "fase":   "imagen_detectada",
+                })
             await ctx.bot.send_message(
                 chat_id=cid,
-                text=f"La imagen coincide con {marca} {modelo} color {color}. ¿Continuamos? (SI/NO)",
+                text=mensaje + "\n¿Continuamos? (SI/NO)",
                 reply_markup=menu_botones(["SI", "NO"]),
+                parse_mode="Markdown"
             )
         else:
             reset_estado(cid)
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="😕 No reconocí el modelo en la imagen. ¿Puedes intentar otra imagen o escribir /start?",
+                text="😕 No reconocí el modelo en la imagen. Intenta con otra o escribe /start.",
                 parse_mode="Markdown"
             )
         return
@@ -2056,31 +2037,40 @@ async def venom_webhook(req: Request):
                     logging.error(f"❌ Error al procesar comprobante: {e}")
                     return JSONResponse({"type": "text", "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."})
 
-            # 4️⃣ Si no es comprobante → Detectar modelo por hash
+            # 4️⃣ Si no es comprobante → Detectar modelo con CLIP
             try:
-                h_in = str(imagehash.phash(img))
-                ref = MODEL_HASHES.get(h_in)
-                logging.info(f"🔍 Hash calculado: {h_in} → {ref}")
+                base64_str = body.split(",", 1)[1] if "," in body else body
+                mensaje = await identificar_modelo_desde_imagen(base64_str)
 
-                if ref:
-                    marca, modelo, color = ref
-                    estado_usuario.setdefault(cid, reset_estado(cid))
-                    estado_usuario[cid].update(fase="imagen_detectada", marca=marca, modelo=modelo, color=color)
+                if "coincide con *" in mensaje.lower():
+                    modelo_detectado = re.findall(r"\*(.*?)\*", mensaje)
+                    if modelo_detectado:
+                        partes = modelo_detectado[0].split("_")
+                        marca = partes[0] if len(partes) > 0 else "Desconocida"
+                        modelo = partes[1] if len(partes) > 1 else "Desconocido"
+                        color = partes[2] if len(partes) > 2 else "Desconocido"
+
+                        estado_usuario.setdefault(cid, reset_estado(cid))
+                        estado_usuario[cid].update(fase="imagen_detectada", marca=marca, modelo=modelo, color=color)
+
                     return JSONResponse({
                         "type": "text",
-                        "text": f"La imagen coincide con {marca} {modelo} color {color}. ¿Deseas continuar tu compra? (SI/NO)"
+                        "text": mensaje + "\n¿Deseas continuar tu compra? (SI/NO)"
                     })
+
                 else:
-                    logging.warning("❌ No se detectó ninguna coincidencia de modelo para esta imagen.")
                     reset_estado(cid)
                     return JSONResponse({
                         "type": "text",
-                        "text": "❌ No reconocí el modelo. Puedes intentar con otra imagen clara."
+                        "text": mensaje
                     })
 
             except Exception as e:
-                logging.error(f"❌ Error al identificar modelo: {e}")
-                return JSONResponse({"type": "text", "text": "❌ Ocurrió un error al intentar detectar el modelo."})
+                logging.error(f"❌ Error al identificar modelo con CLIP: {e}")
+                return JSONResponse({
+                    "type": "text",
+                    "text": "❌ Ocurrió un error al intentar detectar el modelo con IA."
+                })
 
         # 5️⃣ Si es texto
         elif mtype == "chat":
