@@ -555,6 +555,10 @@ async def manejar_pqrs(update, ctx) -> bool:
 
     return False
 
+def decodificar_imagen_base64(base64_str: str) -> Image.Image:
+    data = base64.b64decode(base64_str + "===")
+    return Image.open(io.BytesIO(data)).convert("RGB")
+
 # 🧠 Cargar base de embeddings guardados
 EMBEDDINGS_PATH = "/var/data/embeddings.json"
 
