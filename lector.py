@@ -17,6 +17,7 @@ from collections import defaultdict
 from transformers import CLIPModel, CLIPProcessor
 import subprocess
 import torch
+from torchvision import transforms
 # Ejecuta el script al iniciar el bot
 subprocess.run(["python", "generar_embeddings.py"])
 
@@ -1978,8 +1979,7 @@ async def venom_webhook(req: Request):
             try:
                 b64_str = body.split(",", 1)[1] if "," in body else body
                 img_bytes = base64.b64decode(b64_str + "===")
-                img = Image.open(io.BytesIO(img_bytes))
-                img.load()
+                img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
                 logging.info(f"✅ Imagen decodificada correctamente. Tamaño: {img.size}")
             except Exception as e:
                 logging.error(f"❌ No pude leer la imagen: {e}")
@@ -2006,8 +2006,13 @@ async def venom_webhook(req: Request):
                         resumen = est.get("resumen", {})
                         registrar_orden(resumen)
 
-                        enviar_correo(est["correo"], f"Pago recibido {resumen.get('Número Venta')}", json.dumps(resumen, indent=2))
-                        enviar_correo_con_adjunto(EMAIL_JEFE, f"Comprobante {resumen.get('Número Venta')}", json.dumps(resumen, indent=2), temp_path)
+                        enviar_correo(est["correo"],
+                                     f"Pago recibido {resumen.get('Número Venta')}",
+                                     json.dumps(resumen, indent=2))
+                        enviar_correo_con_adjunto(EMAIL_JEFE,
+                                                  f"Comprobante {resumen.get('Número Venta')}",
+                                                  json.dumps(resumen, indent=2),
+                                                  temp_path)
                         os.remove(temp_path)
                         reset_estado(cid)
                         return JSONResponse({
@@ -2023,79 +2028,81 @@ async def venom_webhook(req: Request):
                         })
                 except Exception as e:
                     logging.error(f"❌ Error al procesar comprobante: {e}")
-                    return JSONResponse({"type": "text", "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."})
+                    return JSONResponse({
+                        "type": "text",
+                        "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."
+                    })
 
-            # 4️⃣ Si no es comprobante → Detectar modelo con CLIP (nuevo)
-            try:
-                from torchvision import transforms
+            # 4️⃣ Si no es comprobante → Detectar modelo con CLIP
+            else:
+                #            🆕 CLIP con embeddings cacheados
+                try:
+                    logging.info("[CLIP] 🚀 Iniciando identificación de modelo")
 
-                logging.info("[CLIP] 🚀 Iniciando comparación CLIP")
+                    # 4.1️⃣ Cargar embeddings
+                    embeddings = cargar_embeddings_desde_cache()
+                    logging.debug(f"[CLIP] Embeddings cargados: {len(embeddings)} modelos")
 
-                # 📂 Cargar embeddings
-                with open("/var/data/embeddings.json", "r") as f:
-                    embeddings = json.load(f)
-                logging.info(f"[CLIP] ✅ {len(embeddings)} modelos cargados desde embeddings.json")
+                    # 4.2️⃣ Decodificar imagen del cliente
+                    b64 = body.split(",", 1)[1] if "," in body else body
+                    img = decodificar_imagen_base64(b64)
+                    logging.debug(f"[CLIP] Imagen cliente tamaño: {img.size}")
 
-                # 📸 Decodificar imagen del cliente
-                base64_str = body.split(",", 1)[1] if "," in body else body
-                img_bytes = base64.b64decode(base64_str + "===")
-                img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-                logging.info(f"[CLIP] 🖼️ Imagen de usuario procesada. Tamaño: {img.size}")
+                    # 4.3️⃣ Embedding del cliente
+                    emb_u = generar_embedding_imagen(img)
+                    emb_u = emb_u / np.linalg.norm(emb_u)
+                    logging.debug("[CLIP] Embedding cliente listo")
 
-                # 🧠 Generar embedding del usuario
-                inputs = clip_processor(images=img, return_tensors="pt")
-                with torch.no_grad():
-                    embedding_u = clip_model.get_image_features(**inputs)[0]
-                embedding_u = embedding_u / embedding_u.norm()
-                logging.debug(f"[CLIP] ✅ Embedding generado para usuario")
+                    # 4.4️⃣ Comparar vs todos los embeddings
+                    mejor_sim, mejor_modelo = 0.0, None
+                    for modelo, lista in embeddings.items():
+                        for i, emb_ref in enumerate(lista):
+                            emb_r = np.asarray(emb_ref, dtype=float)
+                            emb_r /= np.linalg.norm(emb_r)
 
-                # 🔍 Comparar contra cada embedding guardado
-                mejor_modelo = None
-                mejor_sim = -1
-
-                for modelo, lista_embeddings in embeddings.items():
-                    for idx, emb in enumerate(lista_embeddings):
-                        try:
-                            emb_tensor = torch.tensor(emb, dtype=torch.float32)
-                            emb_tensor = emb_tensor / emb_tensor.norm()
-
-                            sim = torch.dot(embedding_u, emb_tensor).item()
-                            logging.debug(f"[CLIP] Similitud con {modelo} [{idx}]: {sim:.4f}")
+                            sim = float(np.dot(emb_u, emb_r))
+                            logging.debug(f"[CLIP] Sim {modelo}[{i}]: {sim:.4f}")
 
                             if sim > mejor_sim:
-                                mejor_sim = sim
-                                mejor_modelo = modelo
-                        except Exception as err:
-                            logging.warning(f"[CLIP] ⚠️ Error con {modelo}[{idx}]: {err}")
+                                mejor_sim, mejor_modelo = sim, modelo
 
-                if mejor_modelo:
-                    logging.info(f"[CLIP] 🎯 Mejor coincidencia: {mejor_modelo} (Similitud: {mejor_sim:.4f})")
+                    # 4.5️⃣ Responder
+                    if mejor_modelo and mejor_sim >= 0.80:
+                        logging.info(f"[CLIP] 🎯 Mejor: {mejor_modelo} ({mejor_sim:.2f})")
+                        p = mejor_modelo.split("_")
+                        marca = p[0]
+                        mod = p[1] if len(p) > 1 else "Des."
+                        color = "_".join(p[2:]) if len(p) > 2 else "Des."
+                        estado_usuario.setdefault(cid, reset_estado(cid))
+                        estado_usuario[cid].update(
+                            fase="imagen_detectada",
+                            marca=marca,
+                            modelo=mod,
+                            color=color
+                        )
+                        return JSONResponse({
+                            "type": "text",
+                            "text": (
+                                f"✅ La imagen coincide con *{mejor_modelo}* "
+                                f"(confianza {mejor_sim:.2f})\n¿Continuamos? (SI/NO)"
+                            )
+                        })
+                    else:
+                        reset_estado(cid)
+                        return JSONResponse({
+                            "type": "text",
+                            "text": (
+                                "❌ No identifiqué un modelo con confianza suficiente. "
+                                "Intenta otra foto."
+                            )
+                        })
 
-                    partes = mejor_modelo.split("_")
-                    marca = partes[0] if len(partes) > 0 else "Desconocida"
-                    modelo = partes[1] if len(partes) > 1 else "Desconocido"
-                    color = "_".join(partes[2:]) if len(partes) > 2 else "Desconocido"
-
-                    estado_usuario.setdefault(cid, reset_estado(cid))
-                    estado_usuario[cid].update(fase="imagen_detectada", marca=marca, modelo=modelo, color=color)
-
+                except Exception:
+                    logging.exception("[CLIP] Error en identificación:")
                     return JSONResponse({
                         "type": "text",
-                        "text": f"📸 La imagen coincide con *{mejor_modelo}*.\n¿Deseas continuar tu compra? (SI/NO)"
+                        "text": "⚠️ Ocurrió un error analizando la imagen."
                     })
-                else:
-                    reset_estado(cid)
-                    return JSONResponse({
-                        "type": "text",
-                        "text": "⚠️ No encontré una coincidencia con nuestros modelos. Intenta con otra imagen."
-                    })
-
-            except Exception as e:
-                logging.exception("❌ Error CLIP al comparar imagen:")
-                return JSONResponse({
-                    "type": "text",
-                    "text": "❌ Ocurrió un error al intentar detectar el modelo con IA."
-                })
 
         # 5️⃣ Si es texto
         elif mtype == "chat":
@@ -2163,7 +2170,6 @@ async def venom_webhook(req: Request):
             {"type": "text", "text": "⚠️ Error interno procesando el mensaje."},
             status_code=200
         )
-
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
