@@ -74,6 +74,27 @@ vision_creds = service_account.Credentials.from_service_account_info(creds_info)
 # Servicios
 drive_service = build("drive", "v3", credentials=drive_creds)
 vision_client = vision.ImageAnnotatorClient(credentials=vision_creds)
+# 📂 Ruta donde están los embeddings generados
+EMBEDDINGS_PATH = "/var/data/embeddings.json"
+
+# 🧠 Cargar base de embeddings guardados
+def cargar_embeddings_desde_cache():
+    if not os.path.exists(EMBEDDINGS_PATH):
+        raise FileNotFoundError("No se encontró embeddings.json; ejecuta generar_embeddings.py primero.")
+    with open(EMBEDDINGS_PATH, "r") as f:
+        return json.load(f)
+
+# 🖼️ Convertir base64 a imagen PIL
+def decodificar_imagen_base64(base64_str: str) -> Image.Image:
+    data = base64.b64decode(base64_str + "===")
+    return Image.open(io.BytesIO(data)).convert("RGB")
+
+# 🧠 Embedding de imagen con CLIP (local, sin OpenAI)
+def generar_embedding_imagen(img: Image.Image) -> np.ndarray:
+    inputs = clip_processor(images=img, return_tensors="pt")
+    with torch.no_grad():
+        vec = clip_model.get_image_features(**inputs)[0]
+    return vec.cpu().numpy()  # → ndarray de shape (512,)
 
 # ————————————————————————————————————————————————————————————————
 # 🔍 Comparar imagen del cliente con base de modelos
