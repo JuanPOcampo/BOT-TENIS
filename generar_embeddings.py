@@ -9,17 +9,18 @@ from googleapiclient.http import MediaIoBaseDownload
 
 import torch
 from transformers import CLIPProcessor, CLIPModel
+from torch.nn.functional import normalize
 
 # Configuración
 logging.basicConfig(level=logging.INFO)
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-FOLDER_ID = '1OXHjSG82RO9KGkNIZIRVusFpFhZlujQE'  # Tu carpeta raíz de modelos
+FOLDER_ID = '1OXHjSG82RO9KGkNIZIRVusFpFhZlujQE'  # ID de la carpeta raíz en Google Drive
 
 # 🔐 Cargar credenciales desde variable de entorno (Render)
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
 creds = service_account.Credentials.from_service_account_info(creds_info, scopes=SCOPES)
 
-# CLIP
+# Cargar modelo CLIP
 clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
 clip_model.eval()
 clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
@@ -28,6 +29,7 @@ def generar_embedding(image: Image.Image):
     inputs = clip_processor(images=image, return_tensors="pt")
     with torch.no_grad():
         emb = clip_model.get_image_features(**inputs)
+        emb = normalize(emb, dim=-1)  # ✅ Normalizar para usar similitud coseno correctamente
     return emb[0].numpy().tolist()
 
 def cargar_servicio_drive():
