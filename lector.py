@@ -2172,7 +2172,7 @@ async def venom_webhook(req: Request):
                         if not isinstance(vecs, list):
                             continue
                         if len(vecs) == 512 and all(isinstance(x, (int, float)) for x in vecs):
-                            embeddings[modelo] = [vecs]                # vector único
+                            embeddings[modelo] = [vecs]  # vector único
                         else:
                             limpios = [v for v in vecs if isinstance(v, list) and len(v) == 512]
                             if limpios:
@@ -2184,7 +2184,7 @@ async def venom_webhook(req: Request):
                     img = decodificar_imagen_base64(b64)
                     logging.debug(f"[CLIP] Imagen cliente tamaño: {img.size}")
 
-                    # 4.3️⃣ Embedding del cliente (vector unitario 512‑D)
+                    # 4.3️⃣ Embedding del cliente
                     emb_u = generar_embedding_imagen(img)
                     emb_u = np.asarray(emb_u, dtype=float).reshape(-1)
                     emb_u = emb_u / np.linalg.norm(emb_u)
@@ -2192,7 +2192,7 @@ async def venom_webhook(req: Request):
                         raise ValueError(f"Embedding cliente tamaño {emb_u.size} ≠ 512")
                     logging.debug(f"[CLIP] Embedding cliente listo — Shape: {emb_u.shape}")
 
-                    # 4.4️⃣ Comparar vs todos los embeddings
+                    # 4.4️⃣ Comparar
                     mejor_sim, mejor_modelo = 0.0, None
                     for modelo, lista in embeddings.items():
                         for i, emb_ref in enumerate(lista):
@@ -2201,10 +2201,8 @@ async def venom_webhook(req: Request):
                                 logging.warning(f"[CLIP] Vector inválido en {modelo}[{i}]")
                                 continue
                             arr_ref /= np.linalg.norm(arr_ref)
-
                             sim = float((emb_u * arr_ref).sum())
                             logging.debug(f"[CLIP] Sim {modelo}[{i}]: {sim:.4f}")
-
                             if sim > mejor_sim:
                                 mejor_sim, mejor_modelo = sim, modelo
 
@@ -2212,15 +2210,15 @@ async def venom_webhook(req: Request):
                     if mejor_modelo and mejor_sim >= 0.80:
                         logging.info(f"[CLIP] 🎯 Mejor: {mejor_modelo} ({mejor_sim:.2f})")
                         p = mejor_modelo.split("_")
-                        marca  = p[0]
-                        mod    = p[1] if len(p) > 1 else "Des."
-                        color  = "_".join(p[2:]) if len(p) > 2 else "Des."
+                        marca = p[0]
+                        mod = p[1] if len(p) > 1 else "Des."
+                        color = "_".join(p[2:]) if len(p) > 2 else "Des."
                         estado_usuario.setdefault(cid, reset_estado(cid))
                         estado_usuario[cid].update(
-                            fase   = "imagen_detectada",
-                            marca  = marca,
-                            modelo = mod,
-                            color  = color
+                            fase="imagen_detectada",
+                            marca=marca,
+                            modelo=mod,
+                            color=color
                         )
                         return JSONResponse({
                             "type": "text",
