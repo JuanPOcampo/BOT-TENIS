@@ -131,18 +131,20 @@ import torch.nn.functional as F
 # 🔍 Comparar embedding de la imagen con los embeddings precargados
 def comparar_embeddings_clip(embedding_cliente: np.ndarray, embeddings_dict: dict):
     embedding_cliente = torch.tensor(embedding_cliente)
-    embedding_cliente = F.normalize(embedding_cliente, dim=-1)  # ✅ MUY IMPORTANTE
+    embedding_cliente = F.normalize(embedding_cliente, dim=-1)
 
     mejores = []
 
-    for nombre_modelo, info in embeddings_dict.items():
+    for nombre_modelo, lista_vecs in embeddings_dict.items():
         try:
-            vec = info["vector"]
-            embedding_modelo = torch.tensor(vec)
-            embedding_modelo = F.normalize(embedding_modelo, dim=-1)
-
-            similitud = torch.dot(embedding_cliente, embedding_modelo).item()
-            mejores.append((nombre_modelo, similitud))
+            max_sim = 0.0
+            for vec in lista_vecs:  # 🔁 Compara contra todas las imágenes del modelo
+                emb_modelo = torch.tensor(vec)
+                emb_modelo = F.normalize(emb_modelo, dim=-1)
+                sim = torch.dot(embedding_cliente, emb_modelo).item()
+                if sim > max_sim:
+                    max_sim = sim
+            mejores.append((nombre_modelo, max_sim))
         except Exception as e:
             print(f"[ERROR EMBEDDING] {nombre_modelo}: {e}")
 
