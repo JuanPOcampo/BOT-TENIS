@@ -56,6 +56,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 # CLIP: cargar modelo una sola vez
 clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+clip_model.eval()
 clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
 # Inicializa dotenv
@@ -2119,37 +2120,34 @@ async def procesar_wa(cid: str, body: str) -> dict:
             return {"type": "text", "text": "⚠️ Hubo un error inesperado. Por favor intenta de nuevo."}
 @api.post("/venom")
 async def venom_webhook(req: Request):
-    """Webhook principal que recibe los mensajes de Venom."""
+    """Webhook principal que recibe los mensajes de Venom y procesa imagen, audio o texto."""
     try:
         # 1️⃣ Leer JSON ------------------------------------------------------
-        data      = await req.json()
-        cid       = wa_chat_id(data.get("from", ""))
-        body      = data.get("body", "") or ""
-        mtype     = (data.get("type") or "").lower()
-        mimetype  = (data.get("mimetype") or "").lower()
+        data = await req.json()
+        cid = wa_chat_id(data.get("from", ""))
+        body = data.get("body", "") or ""
+        mtype = (data.get("type") or "").lower()
+        mimetype = (data.get("mimetype") or "").lower()
 
-        logging.info(
-            f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype} — MIME: {mimetype}"
-        )
+        logging.info(f"📩 Mensaje recibido — CID: {cid} — Tipo: {mtype} — MIME: {mimetype}")
 
-        # 2️⃣ IMAGEN ----------------------------------------------------------
+        # 2️⃣ IMAGEN ---------------------------------------------------------
         if mtype == "image" or mimetype.startswith("image"):
             try:
-                # Decodificar imagen Base64
-                b64_str  = body.split(",", 1)[1] if "," in body else body
+                b64_str = body.split(",", 1)[1] if "," in body else body
                 img_bytes = base64.b64decode(b64_str + "===")
-                img       = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+                img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
                 logging.info(f"✅ Imagen decodificada correctamente. Tamaño: {img.size}")
             except Exception as e:
                 logging.error(f"❌ No pude leer la imagen: {e}")
                 return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
 
-            # Estado del usuario --------------------------------------------
-            est  = estado_usuario.get(cid, {})
+            # 🧠 Estado actual del usuario
+            est = estado_usuario.get(cid, {})
             fase = est.get("fase", "")
             logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
 
-            # 3️⃣ COMPROBANTE -------------------------------------------------
+            # 3️⃣ COMPROBANTE -------------------------------------------------
             if fase == "esperando_comprobante":
                 try:
                     os.makedirs("temp", exist_ok=True)
@@ -2158,7 +2156,7 @@ async def venom_webhook(req: Request):
                         f.write(img_bytes)
 
                     texto = extraer_texto_comprobante(temp_path)
-                    logging.info(f"[OCR] Texto extraído (500 chars):\n{texto[:500]}")
+                    logging.info(f"[OCR] Texto extraído (500 chars):\n{texto[:500]}")
 
                     if es_comprobante_valido(texto):
                         logging.info("✅ Comprobante válido por OCR")
@@ -2188,6 +2186,7 @@ async def venom_webhook(req: Request):
                             "type": "text",
                             "text": "⚠️ No pude verificar el comprobante. Asegúrate que diga 'Pago exitoso'."
                         })
+
                 except Exception as e:
                     logging.error(f"❌ Error al procesar comprobante: {e}")
                     return JSONResponse({
@@ -2195,28 +2194,26 @@ async def venom_webhook(req: Request):
                         "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."
                     })
 
-            # 4️⃣ CLIP --------------------------------------------------------
+            # 4️⃣ CLIP --------------------------------------------------------
             else:
                 try:
                     logging.info("[CLIP] 🚀 Iniciando identificación de modelo")
 
-                    # 4.1️⃣ Cargar embeddings
+                    # 4.1️⃣ Cargar embeddings
                     embeddings_raw = cargar_embeddings_desde_cache()
                     logging.debug(f"[CLIP] Embeddings cargados: {len(embeddings_raw)} modelos")
 
-                    # Sanitizar estructura ---------------------------------
                     embeddings: dict[str, list[list[float]]] = {}
                     for modelo, vecs in embeddings_raw.items():
-                        if not isinstance(vecs, list):
-                            continue
-                        if len(vecs) == 512 and all(isinstance(x, (int, float)) for x in vecs):
-                            embeddings[modelo] = [vecs]
-                        else:
-                            limpios = [v for v in vecs if isinstance(v, list) and len(v) == 512]
-                            if limpios:
-                                embeddings[modelo] = limpios
+                        if isinstance(vecs, list):
+                            if len(vecs) == 512 and all(isinstance(x, (int, float)) for x in vecs):
+                                embeddings[modelo] = [vecs]
+                            else:
+                                limpios = [v for v in vecs if isinstance(v, list) and len(v) == 512]
+                                if limpios:
+                                    embeddings[modelo] = limpios
 
-                    # 4.2️⃣ Guardar imagen temporal
+                    # 4.2️⃣ Guardar imagen temporal
                     os.makedirs("temp", exist_ok=True)
                     path_img = f"temp/{cid}_img.jpg"
                     with open(path_img, "wb") as f:
@@ -2224,15 +2221,16 @@ async def venom_webhook(req: Request):
 
                     logging.debug(f"[CLIP] Imagen cliente tamaño: {img.size}")
 
-                    # 4.3️⃣ Embedding del cliente -------------------------
+                    # 4.3️⃣ Generar embedding cliente
                     emb_u = generar_embedding_imagen(img)
                     emb_u = torch.tensor(emb_u, dtype=torch.float32)
                     emb_u = torch.nn.functional.normalize(emb_u, dim=-1)
                     if emb_u.shape[0] != 512:
                         raise ValueError(f"Embedding cliente tamaño {emb_u.shape} ≠ 512")
                     logging.debug(f"[CLIP] Embedding cliente listo — Shape: {emb_u.shape}")
+                    logging.info(f"[DEBUG] Embedding usuario (primeros 5): {emb_u[:5]}")
 
-                    # 4.4️⃣ Comparar --------------------------------------
+                    # 4.4️⃣ Comparar con embeddings existentes
                     mejor_sim, mejor_modelo = 0.0, None
                     for modelo, lista in embeddings.items():
                         for i, emb_ref in enumerate(lista):
@@ -2246,11 +2244,10 @@ async def venom_webhook(req: Request):
                             except Exception as e:
                                 logging.warning(f"[CLIP] Error en {modelo}[{i}]: {e}")
 
-                    # Logs extra -----------------------------------------
                     logging.info(f"[DEBUG] Mejor modelo obtenido: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
                     logging.info(f"🔍 Modelo detectado: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
 
-                    # 4.5️⃣ Responder -------------------------------------
+                    # 4.5️⃣ Respuesta final
                     if mejor_modelo and mejor_sim >= 0.18:
                         logging.info(f"[CLIP] 🎯 Mejor: {mejor_modelo} ({mejor_sim:.2f})")
                         p = mejor_modelo.split("_")
@@ -2285,21 +2282,21 @@ async def venom_webhook(req: Request):
                         "text": "⚠️ Ocurrió un error analizando la imagen."
                     })
 
-        # 5️⃣ TEXTO ---------------------------------------------------------
+        # 5️⃣ TEXTO ----------------------------------------------------------
         elif mtype == "chat":
             fase_actual = estado_usuario.get(cid, {}).get("fase", "")
             logging.info(f"💬 Texto recibido en fase: {fase_actual or 'NO DEFINIDA'}")
             reply = await procesar_wa(cid, body)
             return JSONResponse(reply)
 
-        # 6️⃣ AUDIO ---------------------------------------------------------
+        # 6️⃣ AUDIO ----------------------------------------------------------
         elif mtype in ("audio", "ptt") or mimetype.startswith("audio"):
             try:
                 logging.info("🎙️ Audio recibido. Iniciando procesamiento...")
                 if not body:
                     return JSONResponse({"type": "text", "text": "❌ No recibí un audio válido."})
 
-                b64_str     = body.split(",", 1)[1] if "," in body else body
+                b64_str = body.split(",", 1)[1] if "," in body else body
                 audio_bytes = base64.b64decode(b64_str + "===")
 
                 os.makedirs("temp_audio", exist_ok=True)
@@ -2313,6 +2310,7 @@ async def venom_webhook(req: Request):
                     return JSONResponse(reply)
                 else:
                     return JSONResponse({"type": "text", "text": "⚠️ No pude entender bien el audio. ¿Podrías repetirlo?"})
+
             except Exception:
                 logging.exception("❌ Error durante el procesamiento del audio")
                 return JSONResponse({
@@ -2320,14 +2318,17 @@ async def venom_webhook(req: Request):
                     "text": "❌ Ocurrió un error al procesar tu audio. Intenta de nuevo."
                 })
 
-        # 7️⃣ Tipo no manejado ---------------------------------------------
+        # 7️⃣ TIPO NO MANEJADO -----------------------------------------------
         else:
             logging.warning(f"🤷‍♂️ Tipo de mensaje no manejado: {mtype}")
             return JSONResponse({"type": "text", "text": f"⚠️ Tipo no manejado: {mtype}"})
 
     except Exception:
         logging.exception("🔥 Error general en venom_webhook")
-        return JSONResponse({"type": "text", "text": "⚠️ Error interno procesando el mensaje."}, status_code=200)
+        return JSONResponse(
+            {"type": "text", "text": "⚠️ Error interno procesando el mensaje."},
+            status_code=200
+        )
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
