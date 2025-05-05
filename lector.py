@@ -76,38 +76,6 @@ drive_service = build("drive", "v3", credentials=drive_creds)
 vision_client = vision.ImageAnnotatorClient(credentials=vision_creds)
 
 # ————————————————————————————————————————————————————————————————
-# CLIP 🔍 Identificación de modelo por imagen base64 con embeddings
-# ————————————————————————————————————————————————————————————————
-
-# Cargar modelo CLIP (una vez al iniciar el bot)
-clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
-
-# Ruta donde tu script de generación volcó el JSON
-EMBEDDINGS_PATH = "/var/data/embeddings.json"
-
-# 🧠 Cargar base de embeddings guardados
-def cargar_embeddings_desde_cache():
-    if not os.path.exists(EMBEDDINGS_PATH):
-        raise FileNotFoundError("No se encontró embeddings.json; ejecuta generar_embeddings.py primero.")
-    with open(EMBEDDINGS_PATH, "r") as f:
-        return json.load(f)
-
-# 🖼️ Convertir base64 a imagen PIL
-def decodificar_imagen_base64(base64_str: str) -> Image.Image:
-    data = base64.b64decode(base64_str + "===")
-    return Image.open(io.BytesIO(data)).convert("RGB")
-
-# 🧠 Embedding de imagen con CLIP (local, sin OpenAI)
-def generar_embedding_imagen(img: Image.Image) -> np.ndarray:
-    """
-    Devuelve el embedding de la imagen usando el modelo CLIP local.
-    """
-    inputs = clip_processor(images=img, return_tensors="pt")
-    with torch.no_grad():
-        vec = clip_model.get_image_features(**inputs)[0]
-    return vec.cpu().numpy()  # → ndarray de shape (512,)
-
 # 🔍 Comparar imagen del cliente con base de modelos
 async def identificar_modelo_desde_imagen(base64_img: str) -> str:
     logging.debug("🧠 [CLIP] Iniciando identificación de modelo...")
@@ -122,6 +90,12 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
         logging.debug("🖼️ [CLIP] Imagen cliente decodificada")
 
         emb_cliente = generar_embedding_imagen(img_pil)
+
+        # 🚫 Validación contra embeddings corruptos
+        if emb_cliente is None or not isinstance(emb_cliente, (np.ndarray, list)) or len(emb_cliente) != 512:
+            logging.error("[CLIP] ❌ El embedding del cliente es inválido o malformado")
+            return "⚠️ Hubo un problema con la imagen enviada. ¿Puedes intentar con otra?"
+
         emb_cliente_np = np.asarray(emb_cliente, dtype=float)
         emb_cliente_np /= np.linalg.norm(emb_cliente_np)
         logging.debug("🧠 [CLIP] Embedding cliente listo")
@@ -132,16 +106,25 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
         # 3️⃣  Buscar la coincidencia más parecida
         for modelo, lista in base_embeddings.items():
             for emb_ref in lista:
-                emb_ref_np = np.asarray(emb_ref, dtype=float)
-                emb_ref_np /= np.linalg.norm(emb_ref_np)
+                try:
+                    emb_ref_np = np.asarray(emb_ref, dtype=float)
 
-                sim = float(np.dot(emb_cliente_np, emb_ref_np))
-                logging.debug(f"🔍 [CLIP] Similitud con {modelo}: {sim:.4f}")
+                    # 🚫 Validar que el embedding de referencia tenga la forma correcta
+                    if emb_ref_np.shape != (512,):
+                        logging.warning(f"[CLIP] ❌ Shapes no compatibles: {emb_ref_np.shape} vs (512,)")
+                        continue
 
-                if sim > mejor_sim:
-                    mejor_sim = sim
-                    mejor_modelo = modelo
-                    logging.debug(f"✅ [CLIP] Nuevo mejor: {mejor_modelo} ({mejor_sim:.4f})")
+                    emb_ref_np /= np.linalg.norm(emb_ref_np)
+                    sim = float(np.dot(emb_cliente_np, emb_ref_np))
+                    logging.debug(f"🔍 [CLIP] Similitud con {modelo}: {sim:.4f}")
+
+                    if sim > mejor_sim:
+                        mejor_sim = sim
+                        mejor_modelo = modelo
+                        logging.debug(f"✅ [CLIP] Nuevo mejor: {mejor_modelo} ({mejor_sim:.4f})")
+                except Exception as err:
+                    logging.warning(f"[CLIP] ⚠️ Error comparando con {modelo}: {err}")
+                    continue
 
         logging.info(f"🎯 [CLIP] Coincidencia: {mejor_modelo} ({mejor_sim:.2f})")
 
