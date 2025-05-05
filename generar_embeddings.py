@@ -13,7 +13,6 @@ from transformers import CLIPProcessor, CLIPModel
 # Configuración
 logging.basicConfig(level=logging.INFO)
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-CREDENTIALS_FILE = 'credenciales.json'
 FOLDER_ID = '1OXHjSG82RO9KGkNIZIRVusFpFhZlujQE'  # Tu carpeta raíz de modelos
 
 # CLIP
@@ -27,8 +26,9 @@ def generar_embedding(image: Image.Image):
     return emb[0].numpy().tolist()
 
 def cargar_servicio_drive():
-    creds = service_account.Credentials.from_service_account_file(
-        CREDENTIALS_FILE, scopes=SCOPES
+    creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
+    creds = service_account.Credentials.from_service_account_info(
+        creds_dict, scopes=SCOPES
     )
     return build('drive', 'v3', credentials=creds)
 
