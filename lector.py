@@ -2245,43 +2245,43 @@ async def venom_webhook(req: Request):
 
                     logging.info(f"[DEBUG] Mejor modelo obtenido: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
 
-                    # 4.5️⃣ Responder
-                    if mejor_modelo and mejor_sim >= 0.25:
-                        logging.info(f"[CLIP] 🎯 Mejor: {mejor_modelo} ({mejor_sim:.2f})")
-                        p = mejor_modelo.split("_")
-                        marca = p[0]
-                        mod = p[1] if len(p) > 1 else "Des."
-                        color = "_".join(p[2:]) if len(p) > 2 else "Des."
-                        estado_usuario.setdefault(cid, reset_estado(cid))
-                        estado_usuario[cid].update(
-                            fase="imagen_detectada",
-                            marca=marca,
-                            modelo=mod,
-                            color=color
-                        )
-                        return JSONResponse({
-                            "type": "text",
-                            "text": (
-                                f"✅ La imagen coincide con *{mejor_modelo}* "
-                                f"(confianza {mejor_sim:.2f})\n¿Continuamos? (SI/NO)"
-                            )
-                        })
-                    else:
-                        reset_estado(cid)
-                        return JSONResponse({
-                            "type": "text",
-                            "text": (
-                                "❌ No identifiqué un modelo con confianza suficiente. "
-                                "Intenta otra foto."
-                            )
-                        })
+            # 4.5️⃣ Responder
+            if mejor_modelo and mejor_sim >= 0.18:
+                logging.info(f"[CLIP] 🎯 Mejor: {mejor_modelo} ({mejor_sim:.2f})")
+                p = mejor_modelo.split("_")
+                marca = p[0]
+                mod   = p[1] if len(p) > 1 else "Des."
+                color = "_".join(p[2:]) if len(p) > 2 else "Des."
+                estado_usuario.setdefault(cid, reset_estado(cid))
+                estado_usuario[cid].update(
+                    fase="imagen_detectada",
+                    marca=marca,
+                    modelo=mod,
+                    color=color
+                )
+                return JSONResponse({
+                    "type": "text",
+                    "text": (
+                        f"✅ La imagen coincide con *{mejor_modelo}* "
+                        f"(confianza {mejor_sim:.2f})\n¿Continuamos? (SI/NO)"
+                    )
+                })
+            else:
+                reset_estado(cid)
+                return JSONResponse({
+                    "type": "text",
+                    "text": (
+                        "❌ No identifiqué un modelo con confianza suficiente. "
+                        "Intenta otra foto."
+                    )
+                })
 
-                except Exception:
-                    logging.exception("[CLIP] Error en identificación:")
-                    return JSONResponse({
-                        "type": "text",
-                        "text": "⚠️ Ocurrió un error analizando la imagen."
-                    })
+        except Exception:
+            logging.exception("[CLIP] Error en identificación:")
+            return JSONResponse({
+                "type": "text",
+                "text": "⚠️ Ocurrió un error analizando la imagen."
+            })
 
         # 5️⃣ Si es texto
         elif mtype == "chat":
