@@ -126,51 +126,56 @@ def generar_embedding_imagen(img: Image.Image) -> np.ndarray:
 
 # ————————————————————————————————————————————————————————————————
 # 🔍 Comparar imagen del cliente con base de modelos
+import numpy as np
+import logging
+
+# ──────────────────────────────────────────────────────────
+# 🔧  Helper: normaliza y verifica que el vector tenga 512 dim
+def _a_unit(vec) -> np.ndarray:
+    arr = np.asarray(vec, dtype=float).reshape(-1)
+    if arr.size != 512:
+        raise ValueError(f"Vector tamaño {arr.size} ≠ 512")
+    n = np.linalg.norm(arr)
+    if n == 0:
+        raise ValueError("Vector con norma 0")
+    return arr / n
+
+# ──────────────────────────────────────────────────────────
+# 🔍  Detectar modelo con CLIP
 async def identificar_modelo_desde_imagen(base64_img: str) -> str:
     logging.debug("🧠 [CLIP] Iniciando identificación de modelo...")
 
     try:
-        # 1️⃣  Cargar embeddings precalculados
-        base_embeddings = cargar_embeddings_desde_cache()
-        logging.debug(f"📂 [CLIP] Embeddings cargados: {len(base_embeddings)} modelos")
+        # 1️⃣  Cargar y **sanitizar** embeddings
+        base = cargar_embeddings_desde_cache()
+        embeddings: dict[str, list[list[float]]] = {}
+        corruptos = []
+
+        for modelo, vecs in base.items():
+            if not isinstance(vecs, list):
+                corruptos.append((modelo, "no_lista"))
+                continue
+            limpios = [v for v in vecs if isinstance(v, list) and len(v) == 512]
+            if limpios:
+                embeddings[modelo] = limpios
+            else:
+                corruptos.append((modelo, "sin_vectores_validos"))
+
+        if corruptos:
+            logging.warning(f"[CLIP] ⚠️ Embeddings corruptos filtrados: {corruptos[:5]} (total {len(corruptos)})")
 
         # 2️⃣  Embedding de la imagen del cliente
         img_pil = decodificar_imagen_base64(base64_img)
-        logging.debug("🖼️ [CLIP] Imagen cliente decodificada")
+        emb_cliente = _a_unit(generar_embedding_imagen(img_pil))
 
-        emb_cliente = generar_embedding_imagen(img_pil)
-
-        # 🚫 Validación contra embeddings corruptos
-        if emb_cliente is None or not isinstance(emb_cliente, (np.ndarray, list)) or len(emb_cliente) != 512:
-            logging.error("[CLIP] ❌ El embedding del cliente es inválido o malformado")
-            return "⚠️ Hubo un problema con la imagen enviada. ¿Puedes intentar con otra?"
-
-        emb_cliente_np = np.asarray(emb_cliente, dtype=float)
-        emb_cliente_np /= np.linalg.norm(emb_cliente_np)
-        logging.debug("🧠 [CLIP] Embedding cliente listo")
-
-        mejor_sim: float = 0.0
-        mejor_modelo: str = None
-
-        # 3️⃣  Buscar la coincidencia más parecida
-        for modelo, lista in base_embeddings.items():
+        # 3️⃣  Buscar la mejor coincidencia
+        mejor_sim, mejor_modelo = 0.0, None
+        for modelo, lista in embeddings.items():
             for emb_ref in lista:
                 try:
-                    emb_ref_np = np.asarray(emb_ref, dtype=float)
-
-                    # 🚫 Validar que el embedding de referencia tenga la forma correcta
-                    if emb_ref_np.shape != (512,):
-                        logging.warning(f"[CLIP] ❌ Shapes no compatibles: {emb_ref_np.shape} vs (512,)")
-                        continue
-
-                    emb_ref_np /= np.linalg.norm(emb_ref_np)
-                    sim = float(np.dot(emb_cliente_np, emb_ref_np))
-                    logging.debug(f"🔍 [CLIP] Similitud con {modelo}: {sim:.4f}")
-
+                    sim = float(np.dot(emb_cliente, _a_unit(emb_ref)))
                     if sim > mejor_sim:
-                        mejor_sim = sim
-                        mejor_modelo = modelo
-                        logging.debug(f"✅ [CLIP] Nuevo mejor: {mejor_modelo} ({mejor_sim:.4f})")
+                        mejor_sim, mejor_modelo = sim, modelo
                 except Exception as err:
                     logging.warning(f"[CLIP] ⚠️ Error comparando con {modelo}: {err}")
                     continue
@@ -183,7 +188,7 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
             return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
 
     except Exception as e:
-        logging.error(f"[CLIP] Error: {e}")
+        logging.error(f"[CLIP] Error general: {e}")
         return "⚠️ Ocurrió un problema analizando la imagen."
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 
