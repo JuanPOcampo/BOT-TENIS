@@ -2210,9 +2210,14 @@ async def venom_webhook(req: Request):
                                 embeddings[modelo] = limpios
                     # --------------------------------
 
-                    # 4.2️⃣ Decodificar imagen del cliente
+                    # 4.2️⃣ Decodificar imagen del cliente y GUARDARLA en temp/
+                    os.makedirs("temp", exist_ok=True)                              # ✅ crea carpeta
                     b64 = body.split(",", 1)[1] if "," in body else body
-                    img = decodificar_imagen_base64(b64)
+                    img_bytes = base64.b64decode(b64 + "===")
+                    path_img = f"temp/{cid}_img.jpg"
+                    with open(path_img, "wb") as f:
+                        f.write(img_bytes)                                          # ✅ la guardamos
+                    img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
                     logging.debug(f"[CLIP] Imagen cliente tamaño: {img.size}")
 
                     # 4.3️⃣ Embedding del cliente
