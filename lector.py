@@ -185,18 +185,17 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
         corruptos = []
 
         for modelo, vecs in base.items():
-            if not isinstance(vecs, list):
-                corruptos.append((modelo, "no_lista"))
-                continue
-
-            if len(vecs) == 512 and all(isinstance(x, (int, float)) for x in vecs):
-                embeddings[modelo] = [vecs]
-            else:
-                limpios = [v for v in vecs if isinstance(v, list) and len(v) == 512]
-                if limpios:
-                    embeddings[modelo] = limpios
+            if isinstance(vecs, list):
+                if len(vecs) == 512 and all(isinstance(x, (int, float)) for x in vecs):
+                    embeddings[modelo] = [vecs]
                 else:
-                    corruptos.append((modelo, "sin_vectores_validos"))
+                    limpios = [v for v in vecs if isinstance(v, list) and len(v) == 512]
+                    if limpios:
+                        embeddings[modelo] = limpios
+                    else:
+                        corruptos.append((modelo, "sin_vectores_validos"))
+            else:
+                corruptos.append((modelo, "no_lista"))
 
         if corruptos:
             logging.warning(f"[CLIP] ⚠️ Embeddings corruptos filtrados: {corruptos[:5]} (total {len(corruptos)})")
