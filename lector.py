@@ -2249,9 +2249,10 @@ async def venom_webhook(req: Request):
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
-if __name__ == "__main__":
-    import uvicorn, os
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(api, host="0.0.0.0", port=port)
+import os
+import uvicorn
+
+port = int(os.environ.get("PORT", 8000))
+uvicorn.run("lector:api", host="0.0.0.0", port=port, reload=False)
 
 
