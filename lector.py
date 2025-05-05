@@ -62,6 +62,27 @@ load_dotenv()
 # FastAPI instance
 api = FastAPI()
 
+from fastapi.responses import JSONResponse
+
+@api.get("/ver_embeddings")
+async def ver_embeddings():
+    try:
+        with open("/var/data/embeddings.json", "r") as f:
+            data = json.load(f)
+
+        resultados = {}
+        for modelo, vectores in data.items():
+            estado = []
+            for i, v in enumerate(vectores):
+                if not v or len(v) != 512:
+                    estado.append(f"❌ [{i}] MAL → len = {len(v) if v else 'VACÍO'}")
+            if estado:
+                resultados[modelo] = estado
+
+        return JSONResponse(content=resultados or {"ok": "✅ Todos los vectores tienen shape 512"})
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)})
+
 # ✅ Desde el mismo JSON base
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
 
