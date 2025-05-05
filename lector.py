@@ -2052,16 +2052,20 @@ async def venom_webhook(req: Request):
 
                     # 4.3️⃣ Embedding del cliente
                     emb_u = generar_embedding_imagen(img)
+                    emb_u = np.asarray(emb_u, dtype=float).squeeze()
                     emb_u = emb_u / np.linalg.norm(emb_u)
-                    emb_u = emb_u.flatten()
-                    logging.debug("[CLIP] Embedding cliente listo")
+                    logging.debug(f"[CLIP] Embedding cliente listo — Shape: {emb_u.shape}")
 
                     # 4.4️⃣ Comparar vs todos los embeddings
                     mejor_sim, mejor_modelo = 0.0, None
                     for modelo, lista in embeddings.items():
                         for i, emb_ref in enumerate(lista):
                             emb_r = np.asarray(emb_ref, dtype=float).squeeze()
-                            emb_r /= np.linalg.norm(emb_r)
+                            emb_r = emb_r / np.linalg.norm(emb_r)
+
+                            if emb_u.shape != emb_r.shape:
+                                logging.warning(f"[CLIP] ❌ Shapes no compatibles: {emb_u.shape} vs {emb_r.shape}")
+                                continue
 
                             sim = float(np.dot(emb_u, emb_r))
                             logging.debug(f"[CLIP] Sim {modelo}[{i}]: {sim:.4f}")
