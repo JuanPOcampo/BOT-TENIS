@@ -2193,6 +2193,7 @@ async def venom_webhook(req: Request):
                     if emb_u.size != 512:
                         raise ValueError(f"Embedding cliente tamaño {emb_u.size} ≠ 512")
                     logging.debug(f"[CLIP] Embedding cliente listo — Shape: {emb_u.shape}")
+                    logging.info(f"[DEBUG] Embedding usuario (primeros 5): {emb_u[:5]}")
 
                     # 4.4️⃣ Comparar
                     mejor_sim, mejor_modelo = 0.0, None
@@ -2207,6 +2208,8 @@ async def venom_webhook(req: Request):
                             logging.debug(f"[CLIP] Sim {modelo}[{i}]: {sim:.4f}")
                             if sim > mejor_sim:
                                 mejor_sim, mejor_modelo = sim, modelo
+
+                    logging.info(f"[DEBUG] Mejor modelo obtenido: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
 
                     # 4.5️⃣ Responder
                     if mejor_modelo and mejor_sim >= 0.40:
