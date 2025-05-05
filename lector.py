@@ -67,21 +67,25 @@ from fastapi.responses import JSONResponse
 @api.get("/ver_embeddings")
 async def ver_embeddings():
     try:
-        with open("/var/data/embeddings.json", "r") as f:
+        with open("var/data/embeddings.json", "r") as f:
             data = json.load(f)
 
-        resultados = {}
-        for modelo, vectores in data.items():
-            estado = []
-            for i, v in enumerate(vectores):
-                if not v or len(v) != 512:
-                    estado.append(f"❌ [{i}] MAL → len = {len(v) if v else 'VACÍO'}")
-            if estado:
-                resultados[modelo] = estado
+        if not isinstance(data, dict):
+            return {"error": "Estructura inválida en embeddings.json"}
 
-        return JSONResponse(content=resultados or {"ok": "✅ Todos los vectores tienen shape 512"})
+        resumen = {
+            nombre: len(v) if isinstance(v, list) else 0
+            for nombre, v in data.items()
+        }
+
+        return {
+            "total_modelos": len(resumen),
+            "modelos": resumen  # ejemplo: {"DS_277_NEGRO": 4, "SUPER_BLANCO": 3}
+        }
+
     except Exception as e:
-        return JSONResponse(content={"error": str(e)})
+        logging.error(f"[EMBEDDINGS] Error al leer embeddings.json: {e}")
+        return {"error": str(e)}
 
 # ✅ Desde el mismo JSON base
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
