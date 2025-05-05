@@ -125,6 +125,34 @@ def generar_embedding_imagen(img: Image.Image) -> np.ndarray:
     with torch.no_grad():
         vec = clip_model.get_image_features(**inputs)[0]
     return vec.cpu().numpy()  # → ndarray de shape (512,)
+import torch
+import torch.nn.functional as F
+
+# 🔍 Comparar embedding de la imagen con los embeddings precargados
+def comparar_embeddings_clip(embedding_cliente: np.ndarray, embeddings_dict: dict):
+    embedding_cliente = torch.tensor(embedding_cliente)
+    embedding_cliente = F.normalize(embedding_cliente, dim=-1)  # ✅ MUY IMPORTANTE
+
+    mejores = []
+
+    for nombre_modelo, info in embeddings_dict.items():
+        try:
+            vec = info["vector"]
+            embedding_modelo = torch.tensor(vec)
+            embedding_modelo = F.normalize(embedding_modelo, dim=-1)
+
+            similitud = torch.dot(embedding_cliente, embedding_modelo).item()
+            mejores.append((nombre_modelo, similitud))
+        except Exception as e:
+            print(f"[ERROR EMBEDDING] {nombre_modelo}: {e}")
+
+    if not mejores:
+        return None, 0.0
+
+    mejores.sort(key=lambda x: x[1], reverse=True)
+    mejor_modelo, mejor_score = mejores[0]
+
+    return mejor_modelo, mejor_score
 
 # ————————————————————————————————————————————————————————————————
 # 🔍 Comparar imagen del cliente con base de modelos
@@ -2189,31 +2217,31 @@ async def venom_webhook(req: Request):
 
                     # 4.3️⃣ Embedding del cliente
                     emb_u = generar_embedding_imagen(img)
-                    emb_u = np.asarray(emb_u, dtype=float).reshape(-1)
-                    emb_u = emb_u / np.linalg.norm(emb_u)
-                    if emb_u.size != 512:
-                        raise ValueError(f"Embedding cliente tamaño {emb_u.size} ≠ 512")
+                    emb_u = torch.tensor(emb_u, dtype=torch.float32)
+                    emb_u = torch.nn.functional.normalize(emb_u, dim=-1)
+                    if emb_u.shape[0] != 512:
+                        raise ValueError(f"Embedding cliente tamaño {emb_u.shape} ≠ 512")
                     logging.debug(f"[CLIP] Embedding cliente listo — Shape: {emb_u.shape}")
                     logging.info(f"[DEBUG] Embedding usuario (primeros 5): {emb_u[:5]}")
 
-                    # 4.4️⃣ Comparar
+                    # 4.4️⃣ Comparar con todos
                     mejor_sim, mejor_modelo = 0.0, None
                     for modelo, lista in embeddings.items():
                         for i, emb_ref in enumerate(lista):
-                            arr_ref = np.asarray(emb_ref, dtype=float).reshape(-1)
-                            if arr_ref.size != 512:
-                                logging.warning(f"[CLIP] Vector inválido en {modelo}[{i}]")
-                                continue
-                            arr_ref /= np.linalg.norm(arr_ref)
-                            sim = float((emb_u * arr_ref).sum())
-                            logging.debug(f"[CLIP] Sim {modelo}[{i}]: {sim:.4f}")
-                            if sim > mejor_sim:
-                                mejor_sim, mejor_modelo = sim, modelo
+                            try:
+                                arr_ref = torch.tensor(emb_ref, dtype=torch.float32)
+                                arr_ref = torch.nn.functional.normalize(arr_ref, dim=-1)
+                                sim = torch.dot(emb_u, arr_ref).item()
+                                logging.debug(f"[CLIP] Sim {modelo}[{i}]: {sim:.4f}")
+                                if sim > mejor_sim:
+                                    mejor_sim, mejor_modelo = sim, modelo
+                            except Exception as e:
+                                logging.warning(f"[CLIP] Error en {modelo}[{i}]: {e}")
 
                     logging.info(f"[DEBUG] Mejor modelo obtenido: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
 
                     # 4.5️⃣ Responder
-                    if mejor_modelo and mejor_sim >= 0.40:
+                    if mejor_modelo and mejor_sim >= 0.25:
                         logging.info(f"[CLIP] 🎯 Mejor: {mejor_modelo} ({mejor_sim:.2f})")
                         p = mejor_modelo.split("_")
                         marca = p[0]
