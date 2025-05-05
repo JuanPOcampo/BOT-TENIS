@@ -1,51 +1,91 @@
+import os
+import io
 import json
-import torch
-import numpy as np
 import logging
+from PIL import Image
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 
-def cargar_embeddings(path="embeddings.json"):
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-        logging.info(f"[CLIP] Embeddings cargados: {len(data)} modelos")
-        return data
-    except Exception as e:
-        logging.error(f"[CLIP] ❌ Error cargando embeddings: {e}")
-        return {}
+import torch
+from transformers import CLIPProcessor, CLIPModel
 
-def comparar_clip(embedding_usuario, embeddings_data):
-    try:
-        emb_usuario = torch.tensor(embedding_usuario, dtype=torch.float32)
-        emb_usuario = emb_usuario / emb_usuario.norm()
+# Configuración
+logging.basicConfig(level=logging.INFO)
+SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+CREDENTIALS_FILE = 'credenciales.json'
+FOLDER_ID = '1OXHjSG82RO9KGkNIZIRVusFpFhZlujQE'  # Tu carpeta raíz de modelos
 
-        mejor_modelo = None
-        mejor_similitud = -1
+# CLIP
+clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
-        for modelo, vectores in embeddings_data.items():
-            if not vectores:
-                continue
+def generar_embedding(image: Image.Image):
+    inputs = clip_processor(images=image, return_tensors="pt")
+    with torch.no_grad():
+        emb = clip_model.get_image_features(**inputs)
+    return emb[0].numpy().tolist()
 
-            for idx, emb_ref in enumerate(vectores):
-                try:
-                    emb_tensor = torch.tensor(emb_ref, dtype=torch.float32)
-                    emb_tensor = emb_tensor / emb_tensor.norm()
+def cargar_servicio_drive():
+    creds = service_account.Credentials.from_service_account_file(
+        CREDENTIALS_FILE, scopes=SCOPES
+    )
+    return build('drive', 'v3', credentials=creds)
 
-                    similitud = torch.dot(emb_usuario, emb_tensor).item()
-                    logging.debug(f"[CLIP] {modelo} [{idx}] → Sim: {similitud:.4f}")
+def listar_carpetas(service, folder_id):
+    resultados = service.files().list(
+        q=f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed = false",
+        fields="files(id, name)").execute()
+    return resultados.get('files', [])
 
-                    if similitud > mejor_similitud:
-                        mejor_similitud = similitud
-                        mejor_modelo = modelo
-                except Exception as err:
-                    logging.warning(f"[CLIP] ⚠️ Error comparando con {modelo}[{idx}]: {err}")
+def listar_imagenes(service, folder_id):
+    resultados = service.files().list(
+        q=f"'{folder_id}' in parents and mimeType contains 'image/' and trashed = false",
+        fields="files(id, name)").execute()
+    return resultados.get('files', [])
 
-        if mejor_modelo:
-            logging.info(f"[CLIP] ✅ Mejor match: {mejor_modelo} ({mejor_similitud:.4f})")
-            return mejor_modelo, mejor_similitud
-        else:
-            logging.warning("[CLIP] 😕 No se encontró coincidencia")
-            return None, 0.0
+def descargar_imagen(service, file_id):
+    request = service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    fh.seek(0)
+    return Image.open(fh).convert("RGB")
 
-    except Exception as e:
-        logging.error(f"[CLIP] ❌ Error en comparación: {e}")
-        return None, 0.0
+def main():
+    service = cargar_servicio_drive()
+    carpetas = listar_carpetas(service, FOLDER_ID)
+    logging.info(f"📦 Se encontraron {len(carpetas)} carpetas de modelos.")
+
+    embeddings = {}
+
+    for carpeta in carpetas:
+        modelo = carpeta["name"]
+        carpeta_id = carpeta["id"]
+        logging.info(f"📁 Modelo: {modelo}")
+        imagenes = listar_imagenes(service, carpeta_id)
+
+        modelo_embeddings = []
+        for img in imagenes:
+            try:
+                logging.info(f"   ⬇️ Procesando imagen: {img['name']}")
+                imagen = descargar_imagen(service, img["id"])
+                emb = generar_embedding(imagen)
+                modelo_embeddings.append(emb)
+            except Exception as e:
+                logging.warning(f"⚠️ Error con {img['name']}: {e}")
+        
+        if modelo_embeddings:
+            embeddings[modelo] = modelo_embeddings
+
+    # Guardar como embeddings.json
+    os.makedirs("var/data", exist_ok=True)
+    with open("var/data/embeddings.json", "w") as f:
+        json.dump(embeddings, f)
+
+    logging.info("🎉 Archivo embeddings.json creado con éxito en /var/data/")
+
+if __name__ == "__main__":
+    main()
