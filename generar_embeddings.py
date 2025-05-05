@@ -15,8 +15,13 @@ logging.basicConfig(level=logging.INFO)
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 FOLDER_ID = '1OXHjSG82RO9KGkNIZIRVusFpFhZlujQE'  # Tu carpeta raíz de modelos
 
+# 🔐 Cargar credenciales desde variable de entorno (Render)
+creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
+creds = service_account.Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+
 # CLIP
 clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+clip_model.eval()
 clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
 def generar_embedding(image: Image.Image):
@@ -26,10 +31,6 @@ def generar_embedding(image: Image.Image):
     return emb[0].numpy().tolist()
 
 def cargar_servicio_drive():
-    creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
-    creds = service_account.Credentials.from_service_account_info(
-        creds_dict, scopes=SCOPES
-    )
     return build('drive', 'v3', credentials=creds)
 
 def listar_carpetas(service, folder_id):
