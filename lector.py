@@ -555,6 +555,15 @@ async def manejar_pqrs(update, ctx) -> bool:
 
     return False
 
+# 🧠 Cargar base de embeddings guardados
+EMBEDDINGS_PATH = "/var/data/embeddings.json"
+
+def cargar_embeddings_desde_cache():
+    if not os.path.exists(EMBEDDINGS_PATH):
+        raise FileNotFoundError("No se encontró embeddings.json; ejecuta generar_embeddings.py primero.")
+    with open(EMBEDDINGS_PATH, "r") as f:
+        return json.load(f)
+
 # 🔥 Manejar imagen enviada por el usuario (ahora con CLIP)
 async def manejar_imagen(update, ctx):
     cid = update.effective_chat.id
@@ -571,7 +580,58 @@ async def manejar_imagen(update, ctx):
         base64_img = base64.b64encode(f_img.read()).decode("utf-8")
     os.remove(tmp_path)
 
+    try:
+        mensaje = await identificar_modelo_desde_imagen(base64_img)
+
+        if "coincide con *" in mensaje.lower():
+            modelo_detectado = re.findall(r"\*(.*?)\*", mensaje)
+            if modelo_detectado:
+                partes = modelo_detectado[0].split("_")
+                marca  = partes[0] if len(partes) > 0 else "Desconocida"
+                modelo = partes[1] if len(partes) > 1 else "Desconocido"
+                color  = partes[2] if len(partes) > 2 else "Desconocido"
+
+                est.update({
+                    "marca":  marca,
+                    "modelo": modelo,
+                    "color":  color,
+                    "fase":   "imagen_detectada"
+                })
+
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    f"📸 La imagen coincide con:\n"
+                    f"*Marca:* {marca}\n"
+                    f"*Modelo:* {modelo}\n"
+                    f"*Color:* {color}\n\n"
+                    "¿Deseas continuar tu compra con este modelo? (SI/NO)"
+                ),
+                parse_mode="Markdown",
+                reply_markup=menu_botones(["SI", "NO"]),
+            )
+            return
+
+        # Si no hubo coincidencia satisfactoria
+        reset_estado(cid)
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=mensaje,
+            parse_mode="Markdown",
+            reply_markup=menu_botones(["Enviar otra imagen", "Ver catálogo"]),
+        )
+
+    except Exception as e:
+        logging.error(f"❌ Error usando CLIP en manejar_imagen: {e}")
+        reset_estado(cid)
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="⚠️ Hubo un problema procesando la imagen. ¿Puedes intentar con otra?",
+            reply_markup=menu_botones(["Enviar otra imagen"]),
+        )
+
     # 🔍 Identificar modelo con CLIP
+
     try:
         mensaje = await identificar_modelo_desde_imagen(base64_img)
 
