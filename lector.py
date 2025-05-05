@@ -82,74 +82,20 @@ vision_client = vision.ImageAnnotatorClient(credentials=vision_creds)
 clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
 clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
-# 🧠 Buscar el modelo más parecido en Drive con CLIP
-def buscar_similar_en_drive_con_clip(imagen_cliente_path, drive_service, carpeta_padre_id):
-    mejor_similitud = -1
-    mejor_modelo = None
-
-    # Paso 1: listar subcarpetas (modelos)
-    respuesta = drive_service.files().list(
-        q=f"'{carpeta_padre_id}' in parents and mimeType = 'application/vnd.google-apps.folder'",
-        fields="files(id, name)"
-    ).execute()
-
-    subcarpetas = respuesta.get("files", [])
-
-    # Paso 2: para cada subcarpeta, descargar una imagen y comparar
-    for carpeta in subcarpetas:
-        carpeta_id = carpeta["id"]
-        nombre_modelo = carpeta["name"]
-
-        # Buscar imágenes dentro de la carpeta
-        imagenes = drive_service.files().list(
-            q=f"'{carpeta_id}' in parents and mimeType contains 'image/'",
-            fields="files(id, name)",
-            pageSize=1  # solo una imagen
-        ).execute().get("files", [])
-
-        if not imagenes:
-            continue
-
-        imagen_id = imagenes[0]["id"]
-
-        # Descargar imagen a memoria
-        request = drive_service.files().get_media(fileId=imagen_id)
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while not done:
-            _, done = downloader.next_chunk()
-        fh.seek(0)
-
-        # Abrir la imagen del Drive
-        imagen_drive = Image.open(fh).convert("RGB")
-        imagen_cliente = Image.open(imagen_cliente_path).convert("RGB")
-
-        # Comparar usando CLIP
-        inputs = clip_processor(images=[imagen_cliente, imagen_drive], return_tensors="pt", padding=True)
-        outputs = clip_model.get_image_features(**inputs)
-        similitud = torch.cosine_similarity(outputs[0], outputs[1], dim=0).item()
-
-        if similitud > mejor_similitud:
-            mejor_similitud = similitud
-            mejor_modelo = nombre_modelo
-
-    return mejor_modelo
-# Ruta del archivo de embeddings precargados
+# Ruta donde tu script de generación volcó el JSON
 EMBEDDINGS_PATH = "/var/data/embeddings.json"
 
 # 🧠 Cargar base de embeddings guardados
 def cargar_embeddings_desde_cache():
     if not os.path.exists(EMBEDDINGS_PATH):
-        raise FileNotFoundError("❌ No se encontró embeddings.json. Debes generarlo primero.")
+        raise FileNotFoundError("No se encontró embeddings.json; ejecuta generar_embeddings.py primero.")
     with open(EMBEDDINGS_PATH, "r") as f:
         return json.load(f)
 
 # 🖼️ Convertir base64 a imagen PIL
-def decodificar_imagen_base64(base64_str):
-    image_data = base64.b64decode(base64_str + "===")
-    image = Image.open(io.BytesIO(image_data)).convert("RGB")
-    return image
+def decodificar_imagen_base64(base64_str: str) -> Image.Image:
+    data = base64.b64decode(base64_str + "===")
+    return Image.open(io.BytesIO(data)).convert("RGB")
 
 # 🧠 Embedding de imagen con CLIP (local, sin OpenAI)
 def generar_embedding_imagen(img: Image.Image) -> np.ndarray:
@@ -158,10 +104,10 @@ def generar_embedding_imagen(img: Image.Image) -> np.ndarray:
     """
     inputs = clip_processor(images=img, return_tensors="pt")
     with torch.no_grad():
-        vec = clip_model.get_image_features(**inputs)  # (1, 512)
-    return vec[0].cpu().numpy()  # → ndarray de shape (512,)
+        vec = clip_model.get_image_features(**inputs)[0]
+    return vec.cpu().numpy()  # → ndarray de shape (512,)
 
-# 🔍 Comparar imagen del cliente con base de modelos
+# 🔍 Comparar imagen del cliente con base de modelos
 async def identificar_modelo_desde_imagen(base64_img: str) -> str:
     logging.debug("🧠 [CLIP] Iniciando identificación de modelo...")
 
@@ -174,42 +120,34 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
         img_pil = decodificar_imagen_base64(base64_img)
         logging.debug("🖼️ [CLIP] Imagen cliente decodificada")
 
-        emb_cliente = generar_embedding_imagen(img_pil)      # ← sin await
+        emb_cliente = generar_embedding_imagen(img_pil)
         emb_cliente_np = np.asarray(emb_cliente, dtype=float)
+        emb_cliente_np /= np.linalg.norm(emb_cliente_np)
         logging.debug("🧠 [CLIP] Embedding cliente listo")
 
-        mejor_sim: float   = 0.0
-        mejor_modelo: str  = "No identificado"
+        mejor_sim: float = 0.0
+        mejor_modelo: str = None
 
         # 3️⃣  Buscar la coincidencia más parecida
         for modelo, lista in base_embeddings.items():
             for emb_ref in lista:
                 emb_ref_np = np.asarray(emb_ref, dtype=float)
+                emb_ref_np /= np.linalg.norm(emb_ref_np)
 
-                sim = float(
-                    np.dot(emb_cliente_np, emb_ref_np) /
-                    (np.linalg.norm(emb_cliente_np) * np.linalg.norm(emb_ref_np))
-                )
-
+                sim = float(np.dot(emb_cliente_np, emb_ref_np))
                 logging.debug(f"🔍 [CLIP] Similitud con {modelo}: {sim:.4f}")
 
                 if sim > mejor_sim:
-                    mejor_sim      = sim           # ya es float
-                    mejor_modelo   = modelo
+                    mejor_sim = sim
+                    mejor_modelo = modelo
                     logging.debug(f"✅ [CLIP] Nuevo mejor: {mejor_modelo} ({mejor_sim:.4f})")
 
         logging.info(f"🎯 [CLIP] Coincidencia: {mejor_modelo} ({mejor_sim:.2f})")
 
-        if mejor_sim >= 0.80:
-            return (
-                f"✅ La imagen coincide con *{mejor_modelo}* "
-                f"(confianza {mejor_sim:.2f})"
-            )
+        if mejor_modelo and mejor_sim >= 0.80:
+            return f"✅ La imagen coincide con *{mejor_modelo}* (confianza {mejor_sim:.2f})"
         else:
-            return (
-                "❌ No pude identificar claramente el modelo. "
-                "¿Puedes enviar otra foto?"
-            )
+            return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
 
     except Exception as e:
         logging.error(f"[CLIP] Error: {e}")
@@ -2087,36 +2025,73 @@ async def venom_webhook(req: Request):
                     logging.error(f"❌ Error al procesar comprobante: {e}")
                     return JSONResponse({"type": "text", "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."})
 
-            # 4️⃣ Si no es comprobante → Detectar modelo con CLIP
+            # 4️⃣ Si no es comprobante → Detectar modelo con CLIP (nuevo)
             try:
+                from torchvision import transforms
+
+                logging.info("[CLIP] 🚀 Iniciando comparación CLIP")
+
+                # 📂 Cargar embeddings
+                with open("/var/data/embeddings.json", "r") as f:
+                    embeddings = json.load(f)
+                logging.info(f"[CLIP] ✅ {len(embeddings)} modelos cargados desde embeddings.json")
+
+                # 📸 Decodificar imagen del cliente
                 base64_str = body.split(",", 1)[1] if "," in body else body
-                mensaje = await identificar_modelo_desde_imagen(base64_str)
+                img_bytes = base64.b64decode(base64_str + "===")
+                img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+                logging.info(f"[CLIP] 🖼️ Imagen de usuario procesada. Tamaño: {img.size}")
 
-                if "coincide con *" in mensaje.lower():
-                    modelo_detectado = re.findall(r"\*(.*?)\*", mensaje)
-                    if modelo_detectado:
-                        partes = modelo_detectado[0].split("_")
-                        marca = partes[0] if len(partes) > 0 else "Desconocida"
-                        modelo = partes[1] if len(partes) > 1 else "Desconocido"
-                        color = partes[2] if len(partes) > 2 else "Desconocido"
+                # 🧠 Generar embedding del usuario
+                inputs = clip_processor(images=img, return_tensors="pt")
+                with torch.no_grad():
+                    embedding_u = clip_model.get_image_features(**inputs)[0]
+                embedding_u = embedding_u / embedding_u.norm()
+                logging.debug(f"[CLIP] ✅ Embedding generado para usuario")
 
-                        estado_usuario.setdefault(cid, reset_estado(cid))
-                        estado_usuario[cid].update(fase="imagen_detectada", marca=marca, modelo=modelo, color=color)
+                # 🔍 Comparar contra cada embedding guardado
+                mejor_modelo = None
+                mejor_sim = -1
+
+                for modelo, lista_embeddings in embeddings.items():
+                    for idx, emb in enumerate(lista_embeddings):
+                        try:
+                            emb_tensor = torch.tensor(emb, dtype=torch.float32)
+                            emb_tensor = emb_tensor / emb_tensor.norm()
+
+                            sim = torch.dot(embedding_u, emb_tensor).item()
+                            logging.debug(f"[CLIP] Similitud con {modelo} [{idx}]: {sim:.4f}")
+
+                            if sim > mejor_sim:
+                                mejor_sim = sim
+                                mejor_modelo = modelo
+                        except Exception as err:
+                            logging.warning(f"[CLIP] ⚠️ Error con {modelo}[{idx}]: {err}")
+
+                if mejor_modelo:
+                    logging.info(f"[CLIP] 🎯 Mejor coincidencia: {mejor_modelo} (Similitud: {mejor_sim:.4f})")
+
+                    partes = mejor_modelo.split("_")
+                    marca = partes[0] if len(partes) > 0 else "Desconocida"
+                    modelo = partes[1] if len(partes) > 1 else "Desconocido"
+                    color = "_".join(partes[2:]) if len(partes) > 2 else "Desconocido"
+
+                    estado_usuario.setdefault(cid, reset_estado(cid))
+                    estado_usuario[cid].update(fase="imagen_detectada", marca=marca, modelo=modelo, color=color)
 
                     return JSONResponse({
                         "type": "text",
-                        "text": mensaje + "\n¿Deseas continuar tu compra? (SI/NO)"
+                        "text": f"📸 La imagen coincide con *{mejor_modelo}*.\n¿Deseas continuar tu compra? (SI/NO)"
                     })
-
                 else:
                     reset_estado(cid)
                     return JSONResponse({
                         "type": "text",
-                        "text": mensaje
+                        "text": "⚠️ No encontré una coincidencia con nuestros modelos. Intenta con otra imagen."
                     })
 
             except Exception as e:
-                logging.error(f"❌ Error al identificar modelo con CLIP: {e}")
+                logging.exception("❌ Error CLIP al comparar imagen:")
                 return JSONResponse({
                     "type": "text",
                     "text": "❌ Ocurrió un error al intentar detectar el modelo con IA."
