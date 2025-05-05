@@ -1927,9 +1927,6 @@ async def manejar_precio(update, ctx, inventario):
 
 nest_asyncio.apply()
 
-# 1. Instancia FastAPI
-api = FastAPI(title="AYA Bot – WhatsApp")
-
 # 2. Conversión de número WhatsApp
 def wa_chat_id(wa_from: str) -> str:
     return re.sub(r"\D", "", wa_from)
