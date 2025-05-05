@@ -145,7 +145,7 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
     logging.debug("🧠 [CLIP] Iniciando identificación de modelo...")
 
     try:
-        # 1️⃣  Cargar y **sanitizar** embeddings  (ahora acepta 2 formatos)
+        # 1️⃣  Cargar y **sanitizar** embeddings (acepta ambos formatos)
         base = cargar_embeddings_desde_cache()
         embeddings: dict[str, list[list[float]]] = {}
         corruptos = []
@@ -156,10 +156,8 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
                 continue
 
             if len(vecs) == 512 and all(isinstance(x, (int, float)) for x in vecs):
-                # ➜  Caso «promedio único»: vecs YA es un solo vector de 512
-                embeddings[modelo] = [vecs]
+                embeddings[modelo] = [vecs]  # vector único
             else:
-                # ➜  Caso «lista de vectores»
                 limpios = [v for v in vecs if isinstance(v, list) and len(v) == 512]
                 if limpios:
                     embeddings[modelo] = limpios
@@ -169,23 +167,22 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
         if corruptos:
             logging.warning(f"[CLIP] ⚠️ Embeddings corruptos filtrados: {corruptos[:5]} (total {len(corruptos)})")
 
-        # 2️⃣  Embedding de la imagen del cliente
+        # 2️⃣ Embedding de la imagen del cliente
         img_pil = decodificar_imagen_base64(base64_img)
         emb_cliente = _a_unit(generar_embedding_imagen(img_pil))
 
-        # 3️⃣  Buscar la mejor coincidencia
+        # 3️⃣ Buscar la mejor coincidencia
         mejor_sim, mejor_modelo = 0.0, None
         for modelo, lista in embeddings.items():
             for emb_ref in lista:
                 try:
                     arr_ref = _a_unit(emb_ref)
-                    if arr_ref.shape != (512,):        # descarta vectores malos
+                    if arr_ref.shape != (512,):
                         logging.warning(
                             f"[CLIP] ⚠️ Vector shape {arr_ref.shape} en {modelo}, se omite"
                         )
                         continue
 
-                    # 🚀  Producto punto seguro sin np.dot
                     sim = float((emb_cliente * arr_ref).sum())
 
                     if sim > mejor_sim:
@@ -194,6 +191,19 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
                 except Exception as err:
                     logging.warning(f"[CLIP] ⚠️ Error comparando con {modelo}: {err}")
                     continue
+
+        logging.info(f"🎯 [CLIP] Coincidencia: {mejor_modelo} ({mejor_sim:.2f})")
+
+        if mejor_modelo and mejor_sim >= 0.80:
+            return f"✅ La imagen coincide con *{mejor_modelo}* (confianza {mejor_sim:.2f})"
+        else:
+            return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
+
+    except Exception as e:
+        logging.error(f"[CLIP] Error general: {e}")
+        return "⚠️ Ocurrió un problema analizando la imagen."
+
+
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 
 
