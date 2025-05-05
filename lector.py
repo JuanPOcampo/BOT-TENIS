@@ -2137,7 +2137,7 @@ async def venom_webhook(req: Request):
                 logging.error(f"❌ No pude leer la imagen: {e}")
                 return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
 
-            # 🧠 Obtener estado
+            # 🧠 Obtener estado del usuario
             est = estado_usuario.get(cid, {})
             fase = est.get("fase", "")
             logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
@@ -2145,8 +2145,8 @@ async def venom_webhook(req: Request):
             # 3️⃣ Si está esperando comprobante → OCR
             if fase == "esperando_comprobante":
                 try:
-                    temp_path = f"temp/{cid}_proof.jpg"
                     os.makedirs("temp", exist_ok=True)
+                    temp_path = f"temp/{cid}_proof.jpg"
                     with open(temp_path, "wb") as f:
                         f.write(img_bytes)
 
@@ -2210,14 +2210,12 @@ async def venom_webhook(req: Request):
                                 embeddings[modelo] = limpios
                     # --------------------------------
 
-                    # 4.2️⃣ Decodificar imagen del cliente y GUARDARLA en temp/
-                    os.makedirs("temp", exist_ok=True)                              # ✅ crea carpeta
-                    b64 = body.split(",", 1)[1] if "," in body else body
-                    img_bytes = base64.b64decode(b64 + "===")
+                    # 4.2️⃣ Decodificar imagen del cliente y guardarla en temp/
+                    os.makedirs("temp", exist_ok=True)
                     path_img = f"temp/{cid}_img.jpg"
                     with open(path_img, "wb") as f:
-                        f.write(img_bytes)                                          # ✅ la guardamos
-                    img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+                        f.write(img_bytes)  # ya lo teníamos de la decodificación anterior
+
                     logging.debug(f"[CLIP] Imagen cliente tamaño: {img.size}")
 
                     # 4.3️⃣ Embedding del cliente
@@ -2229,7 +2227,7 @@ async def venom_webhook(req: Request):
                     logging.debug(f"[CLIP] Embedding cliente listo — Shape: {emb_u.shape}")
                     logging.info(f"[DEBUG] Embedding usuario (primeros 5): {emb_u[:5]}")
 
-                    # 4.4️⃣ Comparar con todos
+                    # 4.4️⃣ Comparar con todos los embeddings
                     mejor_sim, mejor_modelo = 0.0, None
                     for modelo, lista in embeddings.items():
                         for i, emb_ref in enumerate(lista):
@@ -2245,43 +2243,43 @@ async def venom_webhook(req: Request):
 
                     logging.info(f"[DEBUG] Mejor modelo obtenido: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
 
-            # 4.5️⃣ Responder
-            if mejor_modelo and mejor_sim >= 0.18:
-                logging.info(f"[CLIP] 🎯 Mejor: {mejor_modelo} ({mejor_sim:.2f})")
-                p = mejor_modelo.split("_")
-                marca = p[0]
-                mod   = p[1] if len(p) > 1 else "Des."
-                color = "_".join(p[2:]) if len(p) > 2 else "Des."
-                estado_usuario.setdefault(cid, reset_estado(cid))
-                estado_usuario[cid].update(
-                    fase="imagen_detectada",
-                    marca=marca,
-                    modelo=mod,
-                    color=color
-                )
-                return JSONResponse({
-                    "type": "text",
-                    "text": (
-                        f"✅ La imagen coincide con *{mejor_modelo}* "
-                        f"(confianza {mejor_sim:.2f})\n¿Continuamos? (SI/NO)"
-                    )
-                })
-            else:
-                reset_estado(cid)
-                return JSONResponse({
-                    "type": "text",
-                    "text": (
-                        "❌ No identifiqué un modelo con confianza suficiente. "
-                        "Intenta otra foto."
-                    )
-                })
+                    # 4.5️⃣ Responder
+                    if mejor_modelo and mejor_sim >= 0.18:
+                        logging.info(f"[CLIP] 🎯 Mejor: {mejor_modelo} ({mejor_sim:.2f})")
+                        p = mejor_modelo.split("_")
+                        marca = p[0]
+                        mod = p[1] if len(p) > 1 else "Des."
+                        color = "_".join(p[2:]) if len(p) > 2 else "Des."
+                        estado_usuario.setdefault(cid, reset_estado(cid))
+                        estado_usuario[cid].update(
+                            fase="imagen_detectada",
+                            marca=marca,
+                            modelo=mod,
+                            color=color
+                        )
+                        return JSONResponse({
+                            "type": "text",
+                            "text": (
+                                f"✅ La imagen coincide con *{mejor_modelo}* "
+                                f"(confianza {mejor_sim:.2f})\n¿Continuamos? (SI/NO)"
+                            )
+                        })
+                    else:
+                        reset_estado(cid)
+                        return JSONResponse({
+                            "type": "text",
+                            "text": (
+                                "❌ No identifiqué un modelo con confianza suficiente. "
+                                "Intenta otra foto."
+                            )
+                        })
 
-        except Exception:
-            logging.exception("[CLIP] Error en identificación:")
-            return JSONResponse({
-                "type": "text",
-                "text": "⚠️ Ocurrió un error analizando la imagen."
-            })
+                except Exception:
+                    logging.exception("[CLIP] Error en identificación:")
+                    return JSONResponse({
+                        "type": "text",
+                        "text": "⚠️ Ocurrió un error analizando la imagen."
+                    })
 
         # 5️⃣ Si es texto
         elif mtype == "chat":
@@ -2325,7 +2323,10 @@ async def venom_webhook(req: Request):
 
     except Exception:
         logging.exception("🔥 Error general en venom_webhook")
-        return JSONResponse({"type": "text", "text": "⚠️ Error interno procesando el mensaje."}, status_code=200)
+        return JSONResponse(
+            {"type": "text", "text": "⚠️ Error interno procesando el mensaje."},
+            status_code=200
+        )
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
