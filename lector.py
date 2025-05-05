@@ -52,6 +52,9 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+# CLIP: cargar modelo una sola vez
+clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
 # Inicializa dotenv
 load_dotenv()
