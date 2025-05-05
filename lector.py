@@ -206,7 +206,7 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
 
         logging.info(f"🎯 [CLIP] Coincidencia final: {mejor_modelo} (sim={mejor_sim:.4f})")
 
-   if mejor_modelo and mejor_sim >= 0.40:
+        if mejor_modelo and mejor_sim >= 0.40:
             return f"✅ La imagen coincide con *{mejor_modelo}* (confianza {mejor_sim:.2f})"
         else:
             return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
@@ -217,6 +217,7 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
 
 
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
+
 
 
     # ───────────────────────────────────────
@@ -2174,7 +2175,7 @@ async def venom_webhook(req: Request):
                         if not isinstance(vecs, list):
                             continue
                         if len(vecs) == 512 and all(isinstance(x, (int, float)) for x in vecs):
-                            embeddings[modelo] = [vecs]  # vector único
+                            embeddings[modelo] = [vecs]
                         else:
                             limpios = [v for v in vecs if isinstance(v, list) and len(v) == 512]
                             if limpios:
