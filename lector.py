@@ -52,6 +52,8 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+logging.basicConfig(level=logging.DEBUG)
+
 # CLIP: cargar modelo una sola vez
 clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
 clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
@@ -204,7 +206,7 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
 
         logging.info(f"🎯 [CLIP] Coincidencia final: {mejor_modelo} (sim={mejor_sim:.4f})")
 
-        if mejor_modelo and mejor_sim >= 0.80:
+   if mejor_modelo and mejor_sim >= 0.40:
             return f"✅ La imagen coincide con *{mejor_modelo}* (confianza {mejor_sim:.2f})"
         else:
             return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
@@ -2207,7 +2209,7 @@ async def venom_webhook(req: Request):
                                 mejor_sim, mejor_modelo = sim, modelo
 
                     # 4.5️⃣ Responder
-                    if mejor_modelo and mejor_sim >= 0.80:
+                    if mejor_modelo and mejor_sim >= 0.40:
                         logging.info(f"[CLIP] 🎯 Mejor: {mejor_modelo} ({mejor_sim:.2f})")
                         p = mejor_modelo.split("_")
                         marca = p[0]
