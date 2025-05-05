@@ -16,4 +16,5 @@ openai>=1.14.0
 google-cloud-vision
 aiohttp
 transformers
-torch
+torch==2.1.0
+torchvision==0.16.0
