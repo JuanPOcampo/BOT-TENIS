@@ -2006,13 +2006,17 @@ async def venom_webhook(req: Request):
                         resumen = est.get("resumen", {})
                         registrar_orden(resumen)
 
-                        enviar_correo(est["correo"],
-                                     f"Pago recibido {resumen.get('Número Venta')}",
-                                     json.dumps(resumen, indent=2))
-                        enviar_correo_con_adjunto(EMAIL_JEFE,
-                                                  f"Comprobante {resumen.get('Número Venta')}",
-                                                  json.dumps(resumen, indent=2),
-                                                  temp_path)
+                        enviar_correo(
+                            est["correo"],
+                            f"Pago recibido {resumen.get('Número Venta')}",
+                            json.dumps(resumen, indent=2)
+                        )
+                        enviar_correo_con_adjunto(
+                            EMAIL_JEFE,
+                            f"Comprobante {resumen.get('Número Venta')}",
+                            json.dumps(resumen, indent=2),
+                            temp_path
+                        )
                         os.remove(temp_path)
                         reset_estado(cid)
                         return JSONResponse({
@@ -2020,7 +2024,6 @@ async def venom_webhook(req: Request):
                             "text": "✅ Comprobante verificado. Tu pedido está en proceso. 🚚"
                         })
                     else:
-                        logging.warning("⚠️ OCR no válido. Texto no contiene 'pago exitoso'")
                         os.remove(temp_path)
                         return JSONResponse({
                             "type": "text",
@@ -2032,9 +2035,9 @@ async def venom_webhook(req: Request):
                         "type": "text",
                         "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."
                     })
+
             # 4️⃣ Si no es comprobante → Detectar modelo con CLIP
             else:
-                #            🆕 CLIP con embeddings cacheados
                 try:
                     logging.info("[CLIP] 🚀 Iniciando identificación de modelo")
 
@@ -2057,7 +2060,7 @@ async def venom_webhook(req: Request):
                     mejor_sim, mejor_modelo = 0.0, None
                     for modelo, lista in embeddings.items():
                         for i, emb_ref in enumerate(lista):
-                            emb_r = np.asarray(emb_ref, dtype=float).flatten()
+                            emb_r = np.asarray(emb_ref, dtype=float).squeeze()
                             emb_r /= np.linalg.norm(emb_r)
 
                             sim = float(np.dot(emb_u, emb_r))
@@ -2115,41 +2118,24 @@ async def venom_webhook(req: Request):
         elif mtype in ("audio", "ptt") or mimetype.startswith("audio"):
             try:
                 logging.info("🎙️ Audio recibido. Iniciando procesamiento...")
-
-                # Validar base64
                 if not body:
-                    logging.warning("⚠️ Audio vacío o sin contenido base64.")
                     return JSONResponse({"type": "text", "text": "❌ No recibí un audio válido."})
 
-                logging.info("🧪 Intentando decodificar base64...")
                 b64_str = body.split(",", 1)[1] if "," in body else body
                 audio_bytes = base64.b64decode(b64_str + "===")
-                logging.info("✅ Audio decodificado correctamente.")
 
-                # Guardar archivo temporal
                 os.makedirs("temp_audio", exist_ok=True)
                 audio_path = f"temp_audio/{cid}_voice.ogg"
                 with open(audio_path, "wb") as f:
                     f.write(audio_bytes)
-                logging.info(f"✅ Audio guardado en disco: {audio_path}")
 
-                # Transcribir
-                logging.info("🧠 Enviando audio a transcripción Whisper...")
                 texto_transcrito = await transcribe_audio(audio_path)
-
                 if texto_transcrito:
-                    logging.info(f"📝 Transcripción completa:\n{texto_transcrito}")
-                    logging.info("➡️ Reenviando texto transcrito a procesador de flujo (procesar_wa)")
                     reply = await procesar_wa(cid, texto_transcrito)
                     return JSONResponse(reply)
                 else:
-                    logging.warning("⚠️ Whisper devolvió una transcripción vacía.")
-                    return JSONResponse({
-                        "type": "text",
-                        "text": "⚠️ No pude entender bien el audio. ¿Podrías repetirlo o escribirlo?"
-                    })
-
-            except Exception as e:
+                    return JSONResponse({"type": "text", "text": "⚠️ No pude entender bien el audio. ¿Podrías repetirlo?"})
+            except Exception:
                 logging.exception("❌ Error durante el procesamiento del audio")
                 return JSONResponse({
                     "type": "text",
@@ -2159,17 +2145,11 @@ async def venom_webhook(req: Request):
         # 7️⃣ Tipo no manejado
         else:
             logging.warning(f"🤷‍♂️ Tipo de mensaje no manejado: {mtype}")
-            return JSONResponse({
-                "type": "text",
-                "text": f"⚠️ Tipo de mensaje no manejado: {mtype}"
-            })
+            return JSONResponse({"type": "text", "text": f"⚠️ Tipo no manejado: {mtype}"})
 
-    except Exception as e:
+    except Exception:
         logging.exception("🔥 Error general en venom_webhook")
-        return JSONResponse(
-            {"type": "text", "text": "⚠️ Error interno procesando el mensaje."},
-            status_code=200
-        )
+        return JSONResponse({"type": "text", "text": "⚠️ Error interno procesando el mensaje."}, status_code=200)
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
