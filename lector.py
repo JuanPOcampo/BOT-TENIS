@@ -126,8 +126,7 @@ def generar_embedding_imagen(img: Image.Image) -> np.ndarray:
 
 # ————————————————————————————————————————————————————————————————
 # 🔍 Comparar imagen del cliente con base de modelos
-import numpy as np
-import logging
+
 
 # ──────────────────────────────────────────────────────────
 # 🔧  Helper: normaliza y verifica que el vector tenga 512 dim
@@ -179,23 +178,22 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
         for modelo, lista in embeddings.items():
             for emb_ref in lista:
                 try:
-                    sim = float(np.dot(emb_cliente, _a_unit(emb_ref)))
+                    arr_ref = _a_unit(emb_ref)
+                    if arr_ref.shape != (512,):        # descarta vectores malos
+                        logging.warning(
+                            f"[CLIP] ⚠️ Vector shape {arr_ref.shape} en {modelo}, se omite"
+                        )
+                        continue
+
+                    # 🚀  Producto punto seguro sin np.dot
+                    sim = float((emb_cliente * arr_ref).sum())
+
                     if sim > mejor_sim:
                         mejor_sim, mejor_modelo = sim, modelo
+
                 except Exception as err:
                     logging.warning(f"[CLIP] ⚠️ Error comparando con {modelo}: {err}")
                     continue
-
-        logging.info(f"🎯 [CLIP] Coincidencia: {mejor_modelo} ({mejor_sim:.2f})")
-
-        if mejor_modelo and mejor_sim >= 0.80:
-            return f"✅ La imagen coincide con *{mejor_modelo}* (confianza {mejor_sim:.2f})"
-        else:
-            return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
-
-    except Exception as e:
-        logging.error(f"[CLIP] Error general: {e}")
-        return "⚠️ Ocurrió un problema analizando la imagen."
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 
 
@@ -1836,7 +1834,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 PALABRAS_PRECIO = ['precio', 'vale', 'cuesta', 'valor', 'coste', 'precios', 'cuánto']
 
 async def manejar_precio(update, ctx, inventario):
-    import logging
     cid = update.effective_chat.id
     mensaje = (update.message.text or "").lower()
     txt = normalize(mensaje)
@@ -2146,32 +2143,46 @@ async def venom_webhook(req: Request):
                     logging.info("[CLIP] 🚀 Iniciando identificación de modelo")
 
                     # 4.1️⃣ Cargar embeddings
-                    embeddings = cargar_embeddings_desde_cache()
-                    logging.debug(f"[CLIP] Embeddings cargados: {len(embeddings)} modelos")
+                    embeddings_raw = cargar_embeddings_desde_cache()
+                    logging.debug(f"[CLIP] Embeddings cargados: {len(embeddings_raw)} modelos")
+
+                    # ---------- sanitizar ----------
+                    embeddings: dict[str, list[list[float]]] = {}
+                    for modelo, vecs in embeddings_raw.items():
+                        if not isinstance(vecs, list):
+                            continue
+                        if len(vecs) == 512 and all(isinstance(x, (int, float)) for x in vecs):
+                            embeddings[modelo] = [vecs]                # vector único
+                        else:
+                            limpios = [v for v in vecs if isinstance(v, list) and len(v) == 512]
+                            if limpios:
+                                embeddings[modelo] = limpios
+                    # --------------------------------
 
                     # 4.2️⃣ Decodificar imagen del cliente
                     b64 = body.split(",", 1)[1] if "," in body else body
                     img = decodificar_imagen_base64(b64)
                     logging.debug(f"[CLIP] Imagen cliente tamaño: {img.size}")
 
-                    # 4.3️⃣ Embedding del cliente
+                    # 4.3️⃣ Embedding del cliente (vector unitario 512‑D)
                     emb_u = generar_embedding_imagen(img)
-                    emb_u = np.asarray(emb_u, dtype=float).squeeze()
+                    emb_u = np.asarray(emb_u, dtype=float).reshape(-1)
                     emb_u = emb_u / np.linalg.norm(emb_u)
+                    if emb_u.size != 512:
+                        raise ValueError(f"Embedding cliente tamaño {emb_u.size} ≠ 512")
                     logging.debug(f"[CLIP] Embedding cliente listo — Shape: {emb_u.shape}")
 
                     # 4.4️⃣ Comparar vs todos los embeddings
                     mejor_sim, mejor_modelo = 0.0, None
                     for modelo, lista in embeddings.items():
                         for i, emb_ref in enumerate(lista):
-                            emb_r = np.asarray(emb_ref, dtype=float).squeeze()
-                            emb_r = emb_r / np.linalg.norm(emb_r)
-
-                            if emb_u.shape != emb_r.shape:
-                                logging.warning(f"[CLIP] ❌ Shapes no compatibles: {emb_u.shape} vs {emb_r.shape}")
+                            arr_ref = np.asarray(emb_ref, dtype=float).reshape(-1)
+                            if arr_ref.size != 512:
+                                logging.warning(f"[CLIP] Vector inválido en {modelo}[{i}]")
                                 continue
+                            arr_ref /= np.linalg.norm(arr_ref)
 
-                            sim = float(np.dot(emb_u, emb_r))
+                            sim = float((emb_u * arr_ref).sum())
                             logging.debug(f"[CLIP] Sim {modelo}[{i}]: {sim:.4f}")
 
                             if sim > mejor_sim:
@@ -2181,15 +2192,15 @@ async def venom_webhook(req: Request):
                     if mejor_modelo and mejor_sim >= 0.80:
                         logging.info(f"[CLIP] 🎯 Mejor: {mejor_modelo} ({mejor_sim:.2f})")
                         p = mejor_modelo.split("_")
-                        marca = p[0]
-                        mod = p[1] if len(p) > 1 else "Des."
-                        color = "_".join(p[2:]) if len(p) > 2 else "Des."
+                        marca  = p[0]
+                        mod    = p[1] if len(p) > 1 else "Des."
+                        color  = "_".join(p[2:]) if len(p) > 2 else "Des."
                         estado_usuario.setdefault(cid, reset_estado(cid))
                         estado_usuario[cid].update(
-                            fase="imagen_detectada",
-                            marca=marca,
-                            modelo=mod,
-                            color=color
+                            fase   = "imagen_detectada",
+                            marca  = marca,
+                            modelo = mod,
+                            color  = color
                         )
                         return JSONResponse({
                             "type": "text",
