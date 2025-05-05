@@ -2032,7 +2032,6 @@ async def venom_webhook(req: Request):
                         "type": "text",
                         "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."
                     })
-
             # 4️⃣ Si no es comprobante → Detectar modelo con CLIP
             else:
                 #            🆕 CLIP con embeddings cacheados
@@ -2051,13 +2050,14 @@ async def venom_webhook(req: Request):
                     # 4.3️⃣ Embedding del cliente
                     emb_u = generar_embedding_imagen(img)
                     emb_u = emb_u / np.linalg.norm(emb_u)
+                    emb_u = emb_u.flatten()
                     logging.debug("[CLIP] Embedding cliente listo")
 
                     # 4.4️⃣ Comparar vs todos los embeddings
                     mejor_sim, mejor_modelo = 0.0, None
                     for modelo, lista in embeddings.items():
                         for i, emb_ref in enumerate(lista):
-                            emb_r = np.asarray(emb_ref, dtype=float)
+                            emb_r = np.asarray(emb_ref, dtype=float).flatten()
                             emb_r /= np.linalg.norm(emb_r)
 
                             sim = float(np.dot(emb_u, emb_r))
