@@ -1403,7 +1403,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         estado_usuario[cid] = est
         return
 
-
     # 💳 Método de pago
     if est.get("fase") == "esperando_pago":
         print("🧪 ENTRÓ AL BLOQUE DE PAGO ✅")
@@ -1430,6 +1429,34 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
 
         est["metodo_pago"] = metodo_detectado
+        print("💰 MÉTODO DETECTADO:", metodo_detectado)
+
+        if metodo_detectado == "transferencia":
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="Perfecto. Puedes hacer la transferencia a la cuenta **Nequi 3007607245** a nombre de X100. Luego, envíame una foto del comprobante. 📸"
+            )
+            est["fase"] = "esperando_comprobante"
+
+        elif metodo_detectado == "contraentrega":
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="✅ Listo. Para procesar el pedido *contraentrega*, por favor confirma tu dirección completa. 🏡"
+            )
+            est["fase"] = "esperando_direccion"
+
+        return
+
+        txt_norm = normalize(txt_raw).lower().strip()
+        op_detectada = next((v for k, v in opciones.items() if k in txt_norm), None)
+
+        print("🧪 opción detectada:", op_detectada)
+
+        if not op_detectada:
+            print("❌ Opción inválida detectada")
+            await ctx.bot.send_message(chat_id=cid, text="⚠️ Opción no válida. Escribe Transferencia o Contraentrega.")
+            return
+
         resumen = est.get("resumen")
         precio_original = est.get("precio_total")
 
@@ -1442,7 +1469,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         precio_original = int(precio_original)
 
-        if metodo_detectado == "transferencia":
+        if op_detectada == "transferencia":
             est["fase"] = "esperando_comprobante"
             resumen["Pago"] = "Transferencia"
             descuento = round(precio_original * 0.05)
@@ -1462,7 +1489,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "- Daviplata 3004141021\n\n"
                 "📸 Envía la foto del comprobante aquí."
             )
+
+            print("🧪 MENSAJE A ENVIAR:\n", msg)
             await ctx.bot.send_message(chat_id=cid, text=msg)
+            print("✅ MENSAJE ENVIADO (transferencia)")
             return
 
         else:
@@ -1480,6 +1510,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "- Daviplata 3004141021\n\n"
                 "📸 Envía la foto del comprobante aquí."
             )
+
+            print("💬 Enviando mensaje:\n", msg)
             await ctx.bot.send_message(chat_id=cid, text=msg)
             return
 
