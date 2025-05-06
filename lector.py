@@ -18,8 +18,6 @@ from transformers import CLIPModel, CLIPProcessor
 import subprocess
 import torch
 from torchvision import transforms
-# Ejecuta el script al iniciar el bot
-subprocess.run(["python", "generar_embeddings.py"])
 
 # ——— Librerías externas ———
 from dotenv import load_dotenv
