@@ -14,15 +14,13 @@ from torch.nn.functional import normalize
 # Configuración
 logging.basicConfig(level=logging.INFO)
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-FOLDER_ID = '1OXHjSG82RO9KGkNIZIRVusFpFhZlujQE'
-CACHE_DIR = "/var/data/drive"
-EMBEDDINGS_PATH = "/var/data/embeddings.json"
+FOLDER_ID = '1OXHjSG82RO9KGkNIZIRVusFpFhZlujQE'  # ID de la carpeta raíz en Google Drive
 
-# Credenciales
+# 🔐 Cargar credenciales desde variable de entorno (Render)
 creds_info = json.loads(os.environ["GOOGLE_CREDS_JSON"])
 creds = service_account.Credentials.from_service_account_info(creds_info, scopes=SCOPES)
 
-# CLIP
+# Cargar modelo CLIP
 clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
 clip_model.eval()
 clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
@@ -31,7 +29,7 @@ def generar_embedding(image: Image.Image):
     inputs = clip_processor(images=image, return_tensors="pt")
     with torch.no_grad():
         emb = clip_model.get_image_features(**inputs)
-        emb = normalize(emb, dim=-1)
+        emb = normalize(emb, dim=-1)  # ✅ Normalizar para usar similitud coseno correctamente
     return emb[0].numpy().tolist()
 
 def cargar_servicio_drive():
@@ -49,7 +47,7 @@ def listar_imagenes(service, folder_id):
         fields="files(id, name)").execute()
     return resultados.get('files', [])
 
-def descargar_imagen(service, file_id, destino):
+def descargar_imagen(service, file_id):
     request = service.files().get_media(fileId=file_id)
     fh = io.BytesIO()
     downloader = MediaIoBaseDownload(fh, request)
@@ -57,56 +55,40 @@ def descargar_imagen(service, file_id, destino):
     while not done:
         _, done = downloader.next_chunk()
     fh.seek(0)
-    with open(destino, "wb") as f:
-        f.write(fh.read())
+    return Image.open(fh).convert("RGB")
 
 def main():
-    if os.path.exists(EMBEDDINGS_PATH):
-        logging.info("✅ embeddings.json ya existe. No se regenera.")
-        return
-
     service = cargar_servicio_drive()
     carpetas = listar_carpetas(service, FOLDER_ID)
     logging.info(f"📦 Se encontraron {len(carpetas)} carpetas de modelos.")
 
-    os.makedirs(CACHE_DIR, exist_ok=True)
     embeddings = {}
 
     for carpeta in carpetas:
         modelo = carpeta["name"]
         carpeta_id = carpeta["id"]
         logging.info(f"📁 Modelo: {modelo}")
-
-        modelo_dir = os.path.join(CACHE_DIR, modelo)
-        os.makedirs(modelo_dir, exist_ok=True)
-
         imagenes = listar_imagenes(service, carpeta_id)
+
         modelo_embeddings = []
-
         for img in imagenes:
-            path_local = os.path.join(modelo_dir, img["name"])
             try:
-                if not os.path.exists(path_local):
-                    logging.info(f"⬇️ Descargando imagen: {img['name']}")
-                    descargar_imagen(service, img["id"], path_local)
-                else:
-                    logging.info(f"✅ Ya existe: {img['name']}")
-
-                imagen = Image.open(path_local).convert("RGB")
+                logging.info(f"   ⬇️ Procesando imagen: {img['name']}")
+                imagen = descargar_imagen(service, img["id"])
                 emb = generar_embedding(imagen)
                 modelo_embeddings.append(emb)
-
             except Exception as e:
                 logging.warning(f"⚠️ Error con {img['name']}: {e}")
 
         if modelo_embeddings:
-            embeddings[modelo] = modelo_embeddings
+            embeddings[modelo] = modelo_embeddings if len(modelo_embeddings) > 1 else [modelo_embeddings[0]]
 
+    # ✅ Guardar como embeddings.json en disco de Render
     os.makedirs("/var/data", exist_ok=True)
-    with open(EMBEDDINGS_PATH, "w") as f:
+    with open("/var/data/embeddings.json", "w") as f:
         json.dump(embeddings, f)
 
-    logging.info(f"🎉 Archivo embeddings.json creado con éxito en {EMBEDDINGS_PATH}")
+    logging.info("🎉 Archivo embeddings.json creado con éxito en /var/data/")
 
-# Este archivo solo se ejecuta a mano, desde shell
-# No se ejecuta automáticamente desde Render
+if __name__ == "__main__":
+    main()
