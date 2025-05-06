@@ -79,13 +79,13 @@ def main():
                 modelo_embeddings.append(emb)
             except Exception as e:
                 logging.warning(f"⚠️ Error con {img['name']}: {e}")
-        
-        if modelo_embeddings:
-            embeddings[modelo] = modelo_embeddings
 
-    # Guardar como embeddings.json
-    os.makedirs("var/data", exist_ok=True)
-    with open("var/data/embeddings.json", "w") as f:
+        if modelo_embeddings:
+            embeddings[modelo] = modelo_embeddings if len(modelo_embeddings) > 1 else [modelo_embeddings[0]]
+
+    # ✅ Guardar como embeddings.json en disco de Render
+    os.makedirs("/var/data", exist_ok=True)
+    with open("/var/data/embeddings.json", "w") as f:
         json.dump(embeddings, f)
 
     logging.info("🎉 Archivo embeddings.json creado con éxito en /var/data/")
