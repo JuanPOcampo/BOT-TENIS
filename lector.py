@@ -1111,7 +1111,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         os.makedirs("temp", exist_ok=True)
         await f.download_to_drive(tmp)
 
-        #   ➜ convert to base64 and usar CLIP
+        # ➜ convert to base64 y usar CLIP
         with open(tmp, "rb") as f_img:
             base64_img = base64.b64encode(f_img.read()).decode("utf-8")
         os.remove(tmp)
@@ -1123,10 +1123,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if modelo_detectado:
                 p = modelo_detectado[0].split("_")
                 est.update({
-                    "marca":  p[0] if len(p) > 0 else "Desconocida",
+                    "marca": p[0] if len(p) > 0 else "Desconocida",
                     "modelo": p[1] if len(p) > 1 else "Desconocido",
-                    "color":  p[2] if len(p) > 2 else "Desconocido",
-                    "fase":   "imagen_detectada",
+                    "color": p[2] if len(p) > 2 else "Desconocido",
+                    "fase": "imagen_detectada",
                 })
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -1150,10 +1150,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
             if isinstance(tallas, (int, float, str)):
                 tallas = [str(tallas)]
+
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="¡Perfecto! 🎯 ¿Qué talla deseas?",
-                reply_markup=menu_botones(tallas),
+                text=(
+                    f"Perfecto 🎯 ¿Qué talla deseas para el modelo *{est['modelo']}* color *{est['color']}*?\n\n"
+                    f"👉 Opciones: {', '.join(tallas)}"
+                ),
+                parse_mode="Markdown"
             )
             return
         else:
@@ -1164,6 +1168,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             reset_estado(cid)
             return
+
 
     # 🛒 Flujo manual si está buscando modelo
     if est.get("fase") == "esperando_modelo":
@@ -1233,7 +1238,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 👟 Elegir talla
     if est.get("fase") == "esperando_talla":
         tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
-        
         if isinstance(tallas, (int, float, str)):
             tallas = [str(tallas)]
 
@@ -1285,11 +1289,28 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-
     # 📞 Teléfono del cliente
     if est.get("fase") == "esperando_telefono":
         if re.match(r"^\+?\d{7,15}$", txt_raw):
             est["telefono"] = txt_raw
+            est["fase"] = "esperando_cedula"
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="¿Tu número de cédula? 🪪",
+                parse_mode="Markdown"
+            )
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="⚠️ Teléfono inválido. Intenta de nuevo.",
+                parse_mode="Markdown"
+            )
+        return
+
+    # 🪪 Cédula del cliente
+    if est.get("fase") == "esperando_cedula":
+        if re.match(r"^\d{5,15}$", txt_raw):
+            est["cedula"] = txt_raw
             est["fase"] = "esperando_ciudad"
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -1299,7 +1320,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="⚠️ Teléfono inválido. Intenta de nuevo.",
+                text="⚠️ Cédula inválida. Intenta de nuevo solo con números.",
                 parse_mode="Markdown"
             )
         return
@@ -1326,7 +1347,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ------------------------------------------------------------------------
     # 🏡 Dirección de envío
     if est.get("fase") == "esperando_direccion":
         est["direccion"] = txt_raw.strip()
@@ -1340,6 +1360,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ),
             None
         )
+
         if precio is None:
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -1355,6 +1376,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Fecha Venta": datetime.datetime.now().isoformat(),
             "Cliente": est["nombre"],
             "Teléfono": est["telefono"],
+            "Cédula": est["cedula"],
             "Producto": est["modelo"],
             "Color": est["color"],
             "Talla": est["talla"],
@@ -1380,6 +1402,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "esperando_pago"
         estado_usuario[cid] = est
         return
+
 
     # 💳 Método de pago
     if est.get("fase") == "esperando_pago":
@@ -1407,34 +1430,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
 
         est["metodo_pago"] = metodo_detectado
-        print("💰 MÉTODO DETECTADO:", metodo_detectado)
-
-        if metodo_detectado == "transferencia":
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="Perfecto. Puedes hacer la transferencia a la cuenta **Nequi 3007607245** a nombre de X100. Luego, envíame una foto del comprobante. 📸"
-            )
-            est["fase"] = "esperando_comprobante"
-
-        elif metodo_detectado == "contraentrega":
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="✅ Listo. Para procesar el pedido *contraentrega*, por favor confirma tu dirección completa. 🏡"
-            )
-            est["fase"] = "esperando_direccion"
-
-        return
-
-        txt_norm = normalize(txt_raw).lower().strip()
-        op_detectada = next((v for k, v in opciones.items() if k in txt_norm), None)
-
-        print("🧪 opción detectada:", op_detectada)
-
-        if not op_detectada:
-            print("❌ Opción inválida detectada")
-            await ctx.bot.send_message(chat_id=cid, text="⚠️ Opción no válida. Escribe Transferencia o Contraentrega.")
-            return
-
         resumen = est.get("resumen")
         precio_original = est.get("precio_total")
 
@@ -1447,7 +1442,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         precio_original = int(precio_original)
 
-        if op_detectada == "transferencia":
+        if metodo_detectado == "transferencia":
             est["fase"] = "esperando_comprobante"
             resumen["Pago"] = "Transferencia"
             descuento = round(precio_original * 0.05)
@@ -1467,10 +1462,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "- Daviplata 3004141021\n\n"
                 "📸 Envía la foto del comprobante aquí."
             )
-
-            print("🧪 MENSAJE A ENVIAR:\n", msg)
             await ctx.bot.send_message(chat_id=cid, text=msg)
-            print("✅ MENSAJE ENVIADO (transferencia)")
             return
 
         else:
@@ -1488,8 +1480,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "- Daviplata 3004141021\n\n"
                 "📸 Envía la foto del comprobante aquí."
             )
-
-            print("💬 Enviando mensaje:\n", msg)
             await ctx.bot.send_message(chat_id=cid, text=msg)
             return
 
