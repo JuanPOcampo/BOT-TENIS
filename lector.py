@@ -237,7 +237,7 @@ async def identificar_modelo_desde_imagen(base64_img: str) -> str:
 
         logging.info(f"🎯 [CLIP] Coincidencia final: {mejor_modelo} (sim={mejor_sim:.4f})")
 
-        if mejor_modelo and mejor_sim >= 0.40:
+        if mejor_modelo and mejor_sim >= 0.85:
             return f"✅ La imagen coincide con *{mejor_modelo}* (confianza {mejor_sim:.2f})"
         else:
             return "❌ No pude identificar claramente el modelo. ¿Puedes enviar otra foto?"
@@ -675,9 +675,10 @@ def decodificar_imagen_base64(base64_str: str) -> Image.Image:
 EMBEDDINGS_PATH = "/var/data/embeddings.json"
 
 def cargar_embeddings_desde_cache():
-    if not os.path.exists(EMBEDDINGS_PATH):
+    path = "var/data/embeddings.json"
+    if not os.path.exists(path):
         raise FileNotFoundError("No se encontró embeddings.json; ejecuta generar_embeddings.py primero.")
-    with open(EMBEDDINGS_PATH, "r") as f:
+    with open(path, "r") as f:
         return json.load(f)
 
 # 🔥 Manejar imagen enviada por el usuario (ahora con CLIP)
@@ -2247,7 +2248,7 @@ async def venom_webhook(req: Request):
                     logging.info(f"🔍 Modelo detectado: {mejor_modelo} — Similitud: {mejor_sim:.4f}")
 
                     # 4.5️⃣ Respuesta final
-                    if mejor_modelo and mejor_sim >= 0.18:
+                    if mejor_modelo and mejor_sim >= 0.85:
                         logging.info(f"[CLIP] 🎯 Mejor: {mejor_modelo} ({mejor_sim:.2f})")
                         p = mejor_modelo.split("_")
                         estado_usuario.setdefault(cid, reset_estado(cid))
