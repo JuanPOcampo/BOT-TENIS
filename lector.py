@@ -1408,57 +1408,81 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if est.get("fase") == "esperando_pago":
         print("🧪 ENTRÓ AL BLOQUE DE PAGO ✅")
 
-        alias_pagos = {
-            "transferencia": [
-                "transferencia", "trasferencia",
-                "transf", "trans",
-                "pago inmediato", "qr"
-            ],
-            "contraentrega": [
-                "contraentrega", "contra entrega",
-                "contra", "contrapago"
-            ]
+        # Sinónimos que reconocemos
+        opciones = {
+            "transferencia": ["transferencia", "trasferencia", "transf", "trans", "pago inmediato", "qr"],
+            "contraentrega": ["contraentrega", "contra entrega", "contra", "contrapago"]
         }
 
-        txt_norm = normalize(txt_raw)
+        txt_normalizado = normalize(txt_raw)
 
-        metodo_detectado = next((
-            metodo
-            for metodo, aliases in alias_pagos.items()
-            if any(txt_norm.startswith(a) or a in txt_norm for a in aliases)
-        ), None)
+        # ── Detectar método ────────────────────────────────────────────────────
+        metodo_detectado = None
+        for metodo, variantes in opciones.items():
+            coincidencias = difflib.get_close_matches(txt_normalizado, variantes, n=1, cutoff=0.6)
+            if coincidencias:
+                metodo_detectado = metodo
+                break
 
+        # No entendimos
         if not metodo_detectado:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="💳 No entendí el método de pago. Escribe *transferencia* o *contraentrega* 😊",
+                text="💳 No entendí el método de pago. Escribe *transferencia* o *contraentrega* 😊",
                 parse_mode="Markdown"
             )
             return
 
+        # Guardar elección
         est["metodo_pago"] = metodo_detectado
+        resumen = est["resumen"]
+        precio_original = est.get("precio_total", 0)
+        precio_original = int(precio_original)
+
         print("💰 MÉTODO DETECTADO:", metodo_detectado)
 
+        # ── TRANSFERENCIA ─────────────────────────────────────────────────────
         if metodo_detectado == "transferencia":
             est["fase"] = "esperando_comprobante"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    "Perfecto 👌. Haz la transferencia a **Nequi 3007607245** "
-                    "a nombre de *X100* y envíame la foto del comprobante aquí. 📸"
-                ),
-                parse_mode="Markdown"
+            resumen["Pago"] = "Transferencia"
+            descuento = round(precio_original * 0.05)
+            valor_final = precio_original - descuento
+            resumen["Descuento"] = f"-{descuento} COP"
+            resumen["Valor Final"] = valor_final
+
+            msg = (
+                "🟢 Elegiste *TRANSFERENCIA*.\n\n"
+                f"💰 Valor original: {precio_original:,} COP\n"
+                f"🎉 Descuento 5 %: -{descuento:,} COP\n"
+                f"✅ Total a pagar: {valor_final:,} COP\n\n"
+                "💳 Cuentas disponibles:\n"
+                "- Bancolombia 30300002233 (X100 SAS)\n"
+                "- Nequi 3177171171\n"
+                "- Daviplata 3004141021\n\n"
+                "📸 Envía la foto del comprobante aquí."
             )
+
+            await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
+
+        # ── CONTRAENTREGA ─────────────────────────────────────────────────────
         else:  # contraentrega
-            est["fase"] = "esperando_direccion"
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    "✅ Listo. Para *contraentrega* adelanta **35 000 COP** para el envío "
-                    "(se descuenta del total). Confírmame tu dirección completa. 🏡"
-                ),
-                parse_mode="Markdown"
+            est["fase"] = "esperando_comprobante"
+            resumen["Pago"] = "Contra entrega"
+            resumen["Valor Anticipo"] = 35000
+
+            msg = (
+                "🟡 Elegiste *CONTRAENTREGA*.\n\n"
+                "Debes adelantar *35 000 COP* para el envío (se descuenta del total).\n\n"
+                "💳 Cuentas disponibles:\n"
+                "- Bancolombia 30300002233 (X100 SAS)\n"
+                "- Nequi 3177171171\n"
+                "- Daviplata 3004141021\n\n"
+                "📸 Envía la foto del comprobante aquí."
             )
+
+            await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
+
+        estado_usuario[cid] = est  # Guarda cambios
         return
 
 
