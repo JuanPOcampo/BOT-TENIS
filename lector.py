@@ -602,10 +602,9 @@ async def enviar_video_referencia(cid, ctx, referencia):
         ref = normalize(referencia.lower())
 
         if ref in referencias_soportadas:
-            ruta_video = "videos/referencias_top.mp4"  # <-- usa tu archivo local
+            ruta_video = "videosreferencias_top.MP4"  # Asegúrate que esté al mismo nivel del archivo .py
             if os.path.exists(ruta_video):
                 with open(ruta_video, "rb") as video:
-                    await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
                     await ctx.bot.send_video(
                         chat_id=cid,
                         video=video,
