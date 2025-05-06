@@ -669,7 +669,7 @@ def decodificar_imagen_base64(base64_str: str) -> Image.Image:
 EMBEDDINGS_PATH = "/var/data/embeddings.json"
 
 def cargar_embeddings_desde_cache():
-    path = "var/data/embeddings.json"
+    path = "/var/data/embeddings.json"
     if not os.path.exists(path):
         raise FileNotFoundError("No se encontró embeddings.json; ejecuta generar_embeddings.py primero.")
     with open(path, "r") as f:
