@@ -1722,14 +1722,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     # 🎬 Si pide videos normales
-    if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video", )):
+    if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video")):
         await ctx.bot.send_message(
             chat_id=cid,
             text=(
                 "🎬 ¡Claro! Aquí tienes videos de nuestras referencias más populares:\n\n"
-                "• DS 261🔥277🔥303🔥295🔥299: https://drive.google.com/file/d/1W7nMJ4RRYUvr9LiPDe5p_U6Mg_azyHLN/view?usp=drive_link\n"
-                "• PROMO 39%🔥: https://youtu.be/ID_DEL_VIDEO_288\n"
-                "• Referenicas niño🔥: https://youtu.be/ID_DEL_VIDEO_299\n\n"
+                "• DS 261🔥 277🔥 303🔥 295🔥 299\n"
+                "• PROMO 39%🔥\n"
+                "• Referencias niño🔥\n\n"
                 "¿Cuál te gustaría ver?"
             ),
             reply_markup=menu_botones(["DS 277", "DS 261", "DS 303"]),
