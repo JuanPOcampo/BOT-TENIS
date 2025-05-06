@@ -309,8 +309,9 @@ CLIP_INSTRUCTIONS = (
     "Para enviarme una imagen, pulsa el ícono de clip (📎), "
     "selecciona “Galería” o “Archivo” y elige la foto."
 )
-CATALOG_LINK    = "https://wa.me/c/573007607245🔝"
-CATALOG_MESSAGE = f"Aquí tienes el catálogo: {CATALOG_LINK}"
+CATALOG_LINK    = "https://wa.me/c/573007607245"
+CATALOG_MESSAGE = f"👇🏻AQUÍ ESTA EL CATÁLOGO 🆕
+Sigue este enlace para ver la ultima colección 👟 X💯: {CATALOG_LINK}"
 def fase_valida(fase: str) -> bool:
     fases_validas = [
         "esperando_color",
