@@ -90,5 +90,3 @@ def main():
 
     logging.info("🎉 Archivo embeddings.json creado con éxito en /var/data/")
 
-if __name__ == "__main__":
-    main()
