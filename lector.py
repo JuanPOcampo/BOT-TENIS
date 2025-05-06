@@ -595,38 +595,39 @@ async def transcribe_audio(file_path: str) -> str | None:
 
 # ───────────────────────────────────────────────────────────────
 
-# 🔥 Enviar video de referencia
+# 🔥 Enviar video de referencia (un solo archivo para varias referencias)
 async def enviar_video_referencia(cid, ctx, referencia):
     try:
-        videos = {
-            "ds 277": "ID_VIDEO_DS277",
-            "277": "ID_VIDEO_DS277",
-            "ds 288": "ID_VIDEO_DS288",
-            "288": "ID_VIDEO_DS288",
-            "ds 299": "ID_VIDEO_DS299",
-            "299": "ID_VIDEO_DS299",
-        }
+        referencias_soportadas = ["261", "277", "303", "295", "299", "ds 261", "ds 277", "ds 303", "ds 295", "ds 299"]
+        ref = normalize(referencia.lower())
 
-        video_id = videos.get(referencia.lower())
+        if ref in referencias_soportadas:
+            ruta_video = "videos/referencias_top.mp4"  # <-- usa tu archivo local
+            if os.path.exists(ruta_video):
+                with open(ruta_video, "rb") as video:
+                    await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
+                    await ctx.bot.send_video(
+                        chat_id=cid,
+                        video=video,
+                        caption=(
+                            f"🎬 Video de referencia {referencia.upper()}.\n"
+                            "¿Deseas continuar tu compra? (SI/NO)"
+                        ),
+                        parse_mode="Markdown"
+                    )
+                return
 
-        if video_id:
-            video_url = f"https://drive.google.com/uc?id={video_id}"
-            await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
-            await ctx.bot.send_video(
-                chat_id=cid,
-                video=video_url,
-                caption=f"🎬 Video de referencia {referencia.upper()}.\n¿Deseas continuar tu compra? (SI/NO)"
-            )
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="😕 No tengo un video específico para esa referencia."
-            )
-    except Exception as e:
-        logging.error(f"Error enviando video: {e}")
         await ctx.bot.send_message(
             chat_id=cid,
-            text="⚠️ Ocurrió un error al intentar enviar el video. Intenta de nuevo."
+            text="😕 Por ahora solo tengo un video para las referencias DS 261, 277, 303, 295 y 299.",
+            parse_mode="Markdown"
+        )
+
+    except Exception as e:
+        logging.error(f"[Video] ❌ Error: {e}")
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="⚠️ Hubo un error enviando el video. Intenta de nuevo."
         )
 
 # ───────────────────────────────────────────────────────────────
@@ -1200,10 +1201,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         colores_normalizados = {normalize(c): c for c in colores}
         entrada_normalizada = normalize(txt)
 
-        # Buscar coincidencia cercana
-        import difflib
-        coincidencias = difflib.get_close_matches(entrada_normalizada, colores_normalizados.keys(), n=1, cutoff=0.6)
-
+       
         if coincidencias:
             color_seleccionado = colores_normalizados[coincidencias[0]]
             est["color"] = color_seleccionado
@@ -1730,12 +1728,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             chat_id=cid,
             text=(
                 "🎬 ¡Claro! Aquí tienes videos de nuestras referencias más populares:\n\n"
-                "• DS 277: https://drive.google.com/file/d/1W7nMJ4RRYUvr9LiPDe5p_U6Mg_azyHLN/view?usp=drive_link\n"
-                "• DS 288: https://youtu.be/ID_DEL_VIDEO_288\n"
-                "• DS 299: https://youtu.be/ID_DEL_VIDEO_299\n\n"
+                "• DS 261🔥277🔥303🔥295🔥299: https://drive.google.com/file/d/1W7nMJ4RRYUvr9LiPDe5p_U6Mg_azyHLN/view?usp=drive_link\n"
+                "• PROMO 39%🔥: https://youtu.be/ID_DEL_VIDEO_288\n"
+                "• Referenicas niño🔥: https://youtu.be/ID_DEL_VIDEO_299\n\n"
                 "¿Cuál te gustaría ver?"
             ),
-            reply_markup=menu_botones(["DS 277", "DS 288", "DS 299"]),
+            reply_markup=menu_botones(["DS 277", "DS 261", "DS 303"]),
             parse_mode="Markdown"
         )
         est["fase"] = "esperando_video_referencia"
