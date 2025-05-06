@@ -105,16 +105,6 @@ vision_creds = service_account.Credentials.from_service_account_info(creds_info)
 # Servicios
 drive_service = build("drive", "v3", credentials=drive_creds)
 vision_client = vision.ImageAnnotatorClient(credentials=vision_creds)
-# 📂 Ruta donde están los embeddings generados
-EMBEDDINGS_PATH = "/var/data/embeddings.json"
-
-# 🧠 Cargar base de embeddings guardados
-def cargar_embeddings_desde_cache():
-    if not os.path.exists(EMBEDDINGS_PATH):
-        raise FileNotFoundError("No se encontró embeddings.json; ejecuta generar_embeddings.py primero.")
-    with open(EMBEDDINGS_PATH, "r") as f:
-        return json.load(f)
-
 # 🖼️ Convertir base64 a imagen PIL
 def decodificar_imagen_base64(base64_str: str) -> Image.Image:
     data = base64.b64decode(base64_str + "===")
@@ -1379,13 +1369,13 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"✅ Pedido: {sale_id}\n"
             f"👤Nombre: {est['nombre']}\n"
             f"📧Correo: {est['correo']}\n"
-            f"Celular: {est['telefono']}\n"
-            f"Dirección: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
-            f"Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
-            f"Valor a pagar: {precio:,} COP\n\n"
+            f"📱Celular: {est['telefono']}\n"
+            f"📍Dirección: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
+            f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
+            f"💲Valor a pagar: {precio:,} COP\n\n"
             "¿Cómo deseas hacer el pago?\n"
-            "• Contraentrega: adelanta 35 000 COP para el envío (se descuenta del total).\n"
-            "• Transferencia inmediata: paga completo hoy y obtén 5 % de descuento.\n\n"
+            "•💸 Contraentrega: adelanta 35 000 COP para el envío (se descuenta del total).\n"
+            "• 💰Transferencia inmediata: paga completo hoy y obtén 5 % de descuento.\n\n"
             "Escribe tu método de pago: Transferencia o Contraentrega."
         )
         await ctx.bot.send_message(chat_id=cid, text=msg)
@@ -2338,10 +2328,9 @@ async def venom_webhook(req: Request):
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
-import os
-import uvicorn
-
-port = int(os.environ.get("PORT", 8000))
-uvicorn.run("lector:api", host="0.0.0.0", port=port, reload=False)
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("lector:api", host="0.0.0.0", port=port)
 
 
