@@ -309,9 +309,12 @@ CLIP_INSTRUCTIONS = (
     "Para enviarme una imagen, pulsa el ícono de clip (📎), "
     "selecciona “Galería” o “Archivo” y elige la foto."
 )
-CATALOG_LINK    = "https://wa.me/c/573007607245"
-CATALOG_MESSAGE = f"👇🏻AQUÍ ESTA EL CATÁLOGO 🆕
-Sigue este enlace para ver la ultima colección 👟 X💯: {CATALOG_LINK}"
+CATALOG_LINK = "https://wa.me/c/573007607245"
+CATALOG_MESSAGE = (
+    f"👇🏻AQUÍ ESTA EL CATÁLOGO 🆕\n"
+    f"Sigue este enlace para ver la ultima colección 👟 X💯: {CATALOG_LINK}"
+)
+
 def fase_valida(fase: str) -> bool:
     fases_validas = [
         "esperando_color",
@@ -324,6 +327,8 @@ def fase_valida(fase: str) -> bool:
         "imagen_detectada",
         "resumen_compra"
     ]
+    return fase in fases_validas
+
     return fase in fases_validas
 
 def enviar_correo(dest, subj, body):
