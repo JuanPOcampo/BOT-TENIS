@@ -888,12 +888,47 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ])
         )
         return
+
+    # 5) Muestra el catálogo si lo menciona
     if menciona_catalogo(txt_raw):
         await ctx.bot.send_message(
             chat_id=cid,
             text=CATALOG_MESSAGE
-        ) 
+        )
         est["fase"] = "inicio"
+        return
+
+    # 🎬 Si pide videos normales
+    if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video")):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                "🎬 ¡Claro! Aquí tienes videos de nuestras referencias más populares:\n\n"
+                "• DS 261🔥 277🔥 303🔥 295🔥 299\n"
+                "• PROMO 39%🔥\n"
+                "• Referencias niño🔥\n\n"
+                "¿Cuál te gustaría ver?"
+            ),
+            reply_markup=menu_botones(["DS 277", "DS 261", "DS 303"]),
+            parse_mode="Markdown"
+        )
+        est["fase"] = "esperando_video_referencia"
+        estado_usuario[cid] = est
+        return
+
+    # 🎬 Esperar selección de video
+    if est.get("fase") == "esperando_video_referencia":
+        # Ignora coincidencia con modelo tipo 261
+        if re.match(r"^\d{3}$", txt_raw.strip()):
+            await enviar_video_referencia(cid, ctx, txt)
+            est["fase"] = "inicio"
+            estado_usuario[cid] = est
+            return
+
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="👀 Solo necesito el número de referencia, como 261 o 277. Intenta de nuevo."
+        )
         return
 
 # ─────────── Preguntas frecuentes (FAQ) ───────────
@@ -1721,28 +1756,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # 🎬 Si pide videos normales
-    if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video")):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "🎬 ¡Claro! Aquí tienes videos de nuestras referencias más populares:\n\n"
-                "• DS 261🔥 277🔥 303🔥 295🔥 299\n"
-                "• PROMO 39%🔥\n"
-                "• Referencias niño🔥\n\n"
-                "¿Cuál te gustaría ver?"
-            ),
-            reply_markup=menu_botones(["DS 277", "DS 261", "DS 303"]),
-            parse_mode="Markdown"
-        )
-        est["fase"] = "esperando_video_referencia"
-        return
-
-    # 🎬 Esperar selección de video
-    if est.get("fase") == "esperando_video_referencia":
-        await enviar_video_referencia(cid, ctx, txt)
-        est["fase"] = "inicio"
-        return
 
     if await manejar_precio(update, ctx, inv):
         return
