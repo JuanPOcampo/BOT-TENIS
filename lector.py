@@ -79,6 +79,192 @@ def get_drive_service():
         scopes=["https://www.googleapis.com/auth/drive.readonly"]
     )
     return build("drive", "v3", credentials=creds)
+# ─── Descarga del video de confianza desde Drive ─────────────────────────────
+CARPETA_VIDEO_CONFIANZA_DRIVE = "1uX0FXruTXLr2c5SHAc6thlIUMucN1hAA"  # Carpeta 'Video de confianza'
+
+def descargar_video_confianza():
+    """
+    Descarga el archivo .mp4 desde la carpeta 'Video de confianza' en Google Drive.
+    Guarda el archivo en /var/data/videos/video_confianza.mp4 si aún no existe.
+    """
+    try:
+        print(">>> descargar_video_confianza() – iniciando")
+        service = get_drive_service()
+        os.makedirs("/var/data/videos", exist_ok=True)
+
+        logging.info("📂 [Video Confianza] Iniciando descarga desde Drive…")
+        logging.info(f"🆔 Carpeta Drive: {CARPETA_VIDEO_CONFIANZA_DRIVE}")
+
+        # Buscar archivo .mp4 en la carpeta
+        archivos = service.files().list(
+            q=f"'{CARPETA_VIDEO_CONFIANZA_DRIVE}' in parents and mimeType='video/mp4' and trashed = false",
+            fields="files(id, name)",
+            pageSize=1
+        ).execute().get("files", [])
+
+        if not archivos:
+            logging.warning("⚠️ No se encontró ningún video .mp4 en la carpeta de confianza.")
+            return
+
+        archivo = archivos[0]
+        nombre_archivo = "video_confianza.mp4"
+        ruta_destino = os.path.join("/var/data/videos", nombre_archivo)
+
+        if os.path.exists(ruta_destino):
+            logging.info(f"📦 Ya existe: {nombre_archivo} — se omite descarga.")
+            return
+
+        logging.info(f"⬇️ Descargando video: {nombre_archivo}")
+        request = service.files().get_media(fileId=archivo["id"])
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request)
+
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+
+        with open(ruta_destino, "wb") as f:
+            f.write(buffer.getvalue())
+
+        logging.info(f"✅ Video guardado: {ruta_destino}")
+        print(">>> descargar_video_confianza() – finalizado")
+
+    except Exception as e:
+        print(">>> EXCEPCIÓN en descargar_video_confianza:", e)
+        logging.error(f"❌ Error descargando video de confianza: {e}")
+
+# ─── Descarga de stickers organizados por subcarpetas ───────────────────────
+CARPETA_STICKERS_DRIVE = "1mYpTq98rli3_hTXzvfCj6CgcGhrYZwCh"  # Carpeta 'Stickers'
+
+def descargar_stickers_drive():
+    """
+    Descarga stickers desde subcarpetas de 'Stickers' en Google Drive.
+    Cada subcarpeta (ej: 'Sticker bienvenida') se guarda como prefijo del nombre del archivo.
+    Ejemplo: 'Sticker bienvenida/sticker1.webp' → /var/data/stickers/sticker_bienvenida_sticker1.webp
+    """
+    try:
+        print(">>> descargar_stickers_drive() – iniciando")
+        service = get_drive_service()
+        os.makedirs("/var/data/stickers", exist_ok=True)
+
+        logging.info("📂 [Stickers] Descargando desde subcarpetas temáticas…")
+        logging.info(f"🆔 Carpeta raíz: {CARPETA_STICKERS_DRIVE}")
+
+        # Buscar subcarpetas dentro de la carpeta 'Stickers'
+        subcarpetas = service.files().list(
+            q=f"'{CARPETA_STICKERS_DRIVE}' in parents and mimeType='application/vnd.google-apps.folder' and trashed = false",
+            fields="files(id, name)"
+        ).execute().get("files", [])
+
+        for sub in subcarpetas:
+            nombre_subcarpeta = sub["name"].lower().replace(" ", "_")  # Ej: 'Sticker bienvenida' → 'sticker_bienvenida'
+            id_subcarpeta = sub["id"]
+
+            logging.info(f"🔎 Buscando en subcarpeta: {nombre_subcarpeta}")
+
+            archivos = service.files().list(
+                q=f"'{id_subcarpeta}' in parents and mimeType='image/webp' and trashed = false",
+                fields="files(id, name)"
+            ).execute().get("files", [])
+
+            for archivo in archivos:
+                nombre_archivo_original = archivo["name"]
+                nombre_archivo_local = f"{nombre_subcarpeta}_{nombre_archivo_original}"
+                ruta_destino = os.path.join("/var/data/stickers", nombre_archivo_local)
+
+                if os.path.exists(ruta_destino):
+                    logging.info(f"📦 Ya existe: {nombre_archivo_local} — omitiendo descarga.")
+                    continue
+
+                logging.info(f"⬇️ Descargando sticker: {nombre_archivo_local}")
+                request = service.files().get_media(fileId=archivo["id"])
+                buffer = io.BytesIO()
+                downloader = MediaIoBaseDownload(buffer, request)
+
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+
+                with open(ruta_destino, "wb") as f:
+                    f.write(buffer.getvalue())
+
+                logging.info(f"✅ Guardado: {ruta_destino}")
+
+        logging.info("🎉 Stickers descargados con éxito.")
+        print(">>> descargar_stickers_drive() – finalizado")
+
+    except Exception as e:
+        print(">>> EXCEPCIÓN en descargar_stickers_drive:", e)
+        logging.error(f"❌ Error al descargar stickers: {e}")
+
+
+# ─── Descarga de imágenes de catálogo desde Drive ───────────────────────
+CARPETA_CATALOGO_DRIVE = "1_liZvzlyNj2P8koFU4fgFp5X8icUh_ZA"  # Carpeta principal
+
+def descargar_imagenes_catalogo():
+    """
+    Descarga una imagen por subcarpeta de la carpeta 'Envio de Imagenes Catalogo'.
+    Guarda las imágenes en /var/data/modelos_video/. No repite si ya existen.
+    """
+    try:
+        print(">>> descargar_imagenes_catalogo() – iniciando")
+        service = get_drive_service()
+        os.makedirs("/var/data/modelos_video", exist_ok=True)
+
+        logging.info("📂 [Modelos Catálogo] Descargando imágenes desde Drive…")
+        logging.info(f"🆔 Carpeta raíz: {CARPETA_CATALOGO_DRIVE}")
+
+        # Obtener todas las subcarpetas (cada modelo-color)
+        subcarpetas = service.files().list(
+            q=f"'{CARPETA_CATALOGO_DRIVE}' in parents and mimeType='application/vnd.google-apps.folder' and trashed = false",
+            fields="files(id, name)"
+        ).execute().get("files", [])
+
+        for carpeta in subcarpetas:
+            nombre_carpeta = carpeta["name"]
+            id_carpeta = carpeta["id"]
+
+            logging.info(f"🔎 Buscando imagen en subcarpeta: {nombre_carpeta}")
+
+            # Buscar una imagen dentro de la subcarpeta
+            archivos = service.files().list(
+                q=f"'{id_carpeta}' in parents and mimeType contains 'image/' and trashed = false",
+                fields="files(id, name)",
+                pageSize=1
+            ).execute().get("files", [])
+
+            if not archivos:
+                logging.warning(f"⚠️ Sin imágenes en {nombre_carpeta}")
+                continue
+
+            imagen = archivos[0]
+            nombre_archivo = f"{nombre_carpeta}.jpg"
+            ruta_destino = os.path.join("/var/data/modelos_video", nombre_archivo)
+
+            if os.path.exists(ruta_destino):
+                logging.info(f"📦 Ya existe: {nombre_archivo} — omitiendo descarga.")
+                continue
+
+            logging.info(f"⬇️ Descargando imagen: {nombre_archivo}")
+            request = service.files().get_media(fileId=imagen["id"])
+            buffer = io.BytesIO()
+            downloader = MediaIoBaseDownload(buffer, request)
+
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+
+            with open(ruta_destino, "wb") as f:
+                f.write(buffer.getvalue())
+
+            logging.info(f"✅ Imagen guardada: {ruta_destino}")
+
+        logging.info("🎉 Descarga de imágenes de catálogo completada.")
+        print(">>> descargar_imagenes_catalogo() – finalizado")
+
+    except Exception as e:
+        print(">>> EXCEPCIÓN en descargar_imagenes_catalogo:", e)
+        logging.error(f"❌ Error descargando imágenes de catálogo: {e}")
 
 # ─── Descarga de videos desde Drive ──────────────────────────────────────
 CARPETA_VIDEOS_DRIVE = "1bFJAuuW8JYWDMT74bGqQC6qBynZ_olBU"   # ⬅️ tu carpeta
@@ -1016,6 +1202,16 @@ def generate_sale_id() -> str:
     rnd = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
     return f"VEN-{ts}-{rnd}"
 
+async def enviar_sticker(ctx, cid, nombre_archivo):
+    ruta = os.path.join("/var/data/stickers", nombre_archivo)
+    if os.path.exists(ruta):
+        try:
+            await ctx.client.sendImageAsSticker(cid, ruta)
+            logging.info(f"✅ Sticker enviado: {ruta}")
+        except Exception as e:
+            logging.warning(f"⚠️ No se pudo enviar el sticker {nombre_archivo}: {e}")
+    else:
+        logging.warning(f"⚠️ Sticker no encontrado: {ruta}")
 
 # ────────────────────────────────────────────────────────────
 # FUNCIÓN AUXILIAR – ENVIAR VIDEO (VENOM) CON LOGS DETALLADOS
@@ -1106,6 +1302,101 @@ async def enviar_video_referencia(cid, ctx, referencia):
         return None
 
 
+# ────────────────────────────────────────────────────────────
+# FUNCIÓN AUXILIAR – Detectar color en texto con alias y video
+# ────────────────────────────────────────────────────────────
+
+# 📼 Asociación de colores y modelos por video específico
+colores_video_modelos = {
+    "referencias": {
+        "verde":    ["279", "305"],
+        "azul":     ["279", "304", "305"],  # 305 también como azul
+        "fucsia":   ["279"],
+        "amarillo": ["279"],
+        "naranja":  ["279", "304"],
+        "negro":    ["279", "304"],
+        "blanco":   ["279", "305"],
+        "rojo":     ["279"],
+        "aqua":     ["305"],
+    }
+}
+
+# 🎨 Sinónimos y variantes comunes de clientes
+color_aliases = {
+    "rosado": "fucsia",
+    "rosa": "fucsia",
+    "fucsias": "fucsia",
+    "celeste": "azul",
+    "azul cielo": "aqua",
+    "azul clarito": "aqua",
+    "azul claro": "aqua",
+    "azulito": "aqua",
+    "azules": "azul",
+    "verdes": "verde",
+    "amarillas": "amarillo",
+    "blancos": "blanco",
+    "negros": "negro",
+    "rojos": "rojo",
+    "naranjas": "naranja",
+    "aqua": "azul",        # 👈 alias agregado correctamente ahora
+    "turquesa": "aqua"
+}
+
+# 🧠 Detección especial para colores por video
+def detectar_color_video(texto: str) -> str:
+    texto = texto.lower()
+    texto = texto.replace("las ", "").replace("los ", "").strip()
+
+    # Aplicar alias conocidos
+    for palabra, real_color in color_aliases.items():
+        if palabra in texto:
+            return real_color
+
+    # Fallback directo
+    for color in colores_video_modelos.get("referencias", {}):
+        if color in texto:
+            return color
+
+    return ""
+
+# 🎨 Fallback general para otros flujos o videos
+def detectar_color(texto: str) -> str:
+    colores = [
+        "negro", "blanco", "rojo", "azul", "amarillo", "verde",
+        "rosado", "gris", "morado", "naranja", "café", "beige",
+        "neón", "limón", "fucsia", "celeste", "aqua"
+    ]
+    texto = texto.lower()
+    for c in colores:
+        if c in texto:
+            return c
+    return ""
+
+# 👟 Obtener tallas desde inventario, respetando alias del color
+def obtener_tallas_por_color_alias(inventario, modelo, color_usuario):
+    color_usuario = normalize(color_usuario)
+    
+    # 🔁 Crear set con todos los colores equivalentes: color original + sinónimos
+    colores_equivalentes = {color_usuario}
+    for alias, real in color_aliases.items():
+        if normalize(alias) == color_usuario or normalize(real) == color_usuario:
+            colores_equivalentes.add(normalize(alias))
+            colores_equivalentes.add(normalize(real))
+
+    tallas = set()
+    for item in inventario:
+        if normalize(item.get("modelo", "")) != normalize(modelo):
+            continue
+        if item.get("stock", "").lower() != "si":
+            continue
+
+        color_item = normalize(item.get("color", ""))
+        if any(color_equiv in color_item for color_equiv in colores_equivalentes):
+            tallas.add(str(item.get("talla", "")))
+
+    return sorted(tallas)
+
+
 
 # --------------------------------------------------------------------------------------------------
 
@@ -1183,21 +1474,209 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         video_respuesta = await enviar_video_referencia(cid, ctx, ref)
         logging.debug(f"[RESPONDER] video_respuesta type = {type(video_respuesta)}")
 
-        est["fase"] = "inicio"
-        estado_usuario[cid] = est
-
         if isinstance(video_respuesta, dict):
+            # ✅ IMPORTANTE: guardar fase ANTES del return para WhatsApp (Venom)
+            est["video_activo"] = "referencia.mp4"  # o asigna según ref si quieres más precisión
+            est["fase"] = "esperando_color_post_video"
+            estado_usuario[cid] = est
             logging.info("[RESPONDER] ✓ Dict video recibido – se devolverá al webhook")
-            logging.debug(f"[RESPONDER] Claves dict = {list(video_respuesta.keys())}")
             return video_respuesta
 
-        logging.warning("[RESPONDER] ⚠️ No se obtuvo dict de video, enviando mensaje fallback")
+        if video_respuesta:
+            est["video_activo"] = str(video_respuesta)  # por ejemplo: "referencia.mp4"
+            est["fase"] = "esperando_color_post_video"
+        else:
+            est["fase"] = "inicio"  # si no se reconoce el video
+
+        estado_usuario[cid] = est
+        return
+
+    # 🟩 Fase post-video: el cliente dice un color (“me gustaron los verdes”)
+    if est.get("fase") == "esperando_color_post_video":
+        video_activo = est.get("video_activo", "").replace(".mp4", "").lower()
+
+        if video_activo == "referencias":
+            color = detectar_color_video(txt)
+
+            # ✅ NUEVO: incluir alias que apuntan al mismo color
+            colores_equivalentes = [color] + [k for k, v in color_aliases.items() if v == color]
+            modelos_permitidos = []
+            for c in colores_equivalentes:
+                modelos_permitidos.extend(colores_video_modelos.get(video_activo, {}).get(c, []))
+        else:
+            color = detectar_color(txt)
+            modelos_permitidos = []
+
+        if not color:
+            await ctx.bot.send_message(cid, "👀 No entendí el color. ¿Puedes repetirlo?")
+            return
+
+        if video_activo == "referencias" and not modelos_permitidos:
+            await ctx.bot.send_message(cid, f"😕 No encontré modelos de color *{color.upper()}* para ese video.")
+            return
+
+        ruta = "/var/data/modelos_video"
+        if not os.path.exists(ruta):
+            await ctx.bot.send_message(cid, "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde.")
+            return
+
+        # 📁 Buscar imágenes que contengan el color o cualquier alias relacionado
+        aliases_del_color = [color] + [k for k, v in color_aliases.items() if v == color]
+
+        coincidencias = [
+            f for f in os.listdir(ruta)
+            if f.lower().endswith(".jpg")
+            and any(alias in f.lower() for alias in aliases_del_color)
+            and (not modelos_permitidos or any(modelo in f for modelo in modelos_permitidos))
+        ]
+
+        if not coincidencias:
+            await ctx.bot.send_message(cid, f"😕 No encontré modelos con ese color.")
+            return
+
+        for archivo in coincidencias:
+            try:
+                path = os.path.join(ruta, archivo)
+                modelo = archivo.replace(".jpg", "").replace("_", " ")
+                await ctx.bot.send_photo(
+                    chat_id=cid,
+                    photo=open(path, "rb"),
+                    caption=f"📸 En el video aparece el modelo *{modelo}*",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logging.error(f"❌ Error enviando imagen: {e}")
+                await ctx.bot.send_message(cid, "⚠️ No pude enviar una de las imágenes.")
+
+        await ctx.bot.send_message(cid, "🧐 ¿Cuál de estos modelos te interesa?")
+        est["color"] = color  # ✅ Guardar el color para el siguiente paso del flujo
+        est["fase"] = "esperando_modelo_elegido"
+        estado_usuario[cid] = est
+        return
+
+
+    
+    # 🔄 Mostrar todos los colores del modelo (solo si está en fase inicial)
+    if est.get("fase") in ("inicio", "haciendo_pedido"):
+        match_modelo = re.search(r"\b(279|304|305)\b", txt)
+        if match_modelo:
+            modelo = str(match_modelo.group(1))
+            ruta = "/var/data/modelos_colores"  # Asegúrate que este es el path correcto
+
+            if not os.path.exists(ruta) or not os.listdir(ruta):
+                await ctx.bot.send_message(cid, "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde.")
+                return
+
+            imagenes_modelo = [
+                f for f in os.listdir(ruta)
+                if f.lower().endswith((".jpg", ".jpeg", ".png")) and modelo in f
+            ]
+
+            if not imagenes_modelo:
+                await ctx.bot.send_message(cid, f"😕 No encontré imágenes del modelo {modelo}.")
+                return
+
+            for archivo in imagenes_modelo:
+                try:
+                    path = os.path.join(ruta, archivo)
+                    color = archivo.replace(".jpg", "").replace(".jpeg", "").replace(".png", "")
+                    color = color.replace("_", " ").replace(modelo, "").strip()
+                    await ctx.bot.send_photo(
+                        chat_id=cid,
+                        photo=open(path, "rb"),
+                        caption=f"📸 Modelo *{modelo}* color *{color}*",
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logging.error(f"❌ Error enviando imagen: {e}")
+                    await ctx.bot.send_message(cid, "⚠️ No pude enviar una de las imágenes.")
+
+            await ctx.bot.send_message(cid, "🧐 ¿Cuál color de este modelo te interesa?")
+            est["fase"] = "esperando_color"
+            est["referencia"] = modelo
+            estado_usuario[cid] = est
+            return
+
+    # 🟦 El cliente ya vio los modelos y confirma: "quiero los 279", "sí esos", etc.
+    if est.get("fase") == "esperando_modelo_elegido":
+        referencia_mencionada = re.search(r"\b(279|304|305)\b", txt)
+        afirmacion = any(palabra in txt for palabra in (
+            "sí", "s", "esos", "quiero", "me gustaron", "me sirven",
+            "ese", "perfecto", "dale", "me encanta", "lo quiero"
+        ))
+
+        ref_final = ""
+        if referencia_mencionada:
+            ref_final = referencia_mencionada.group(1)
+        elif afirmacion:
+            ref_final = est.get("referencia") or est.get("ultimo_modelo", "")
+
+        if ref_final:
+            # ── Guardar datos clave ─────────────────────────────────
+            est["referencia"] = ref_final
+            est["modelo"]     = ref_final
+            est["color"]      = est.get("color", "")
+            if not est.get("marca"):      # marca por defecto si viene de video
+                est["marca"] = "DS"
+
+            modelo = est["modelo"]
+            color  = est["color"]
+
+            # ── Alias de color ─────────────────────────────────────
+            def colores_equivalentes(base: str):
+                b  = normalize(base)
+                eq = {b}
+                for alias, real in color_aliases.items():
+                    if normalize(alias) == b or normalize(real) == b:
+                        eq.update({normalize(alias), normalize(real)})
+                return eq
+
+            equivalentes = colores_equivalentes(color)
+
+            # ── Precio desde Google Sheets (comparación flexible) ──
+            precio = next(
+                (row.get("precio") for row in inv
+                 if normalize(row.get("modelo", "")) == normalize(modelo)
+                 and any(eq in normalize(row.get("color", "")) for eq in equivalentes)),
+                None
+            )
+            est["precio_total"] = int(precio) if precio else 0
+
+            # ── Tallas disponibles usando alias ────────────────────
+            tallas = obtener_tallas_por_color_alias(inv, modelo, color)
+            if isinstance(tallas, (int, float, str)):
+                tallas = [str(tallas)]
+
+            if tallas:
+                est["fase"] = "esperando_talla"
+                estado_usuario[cid] = est
+
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=(
+                        f"📏 Estas son las tallas disponibles para el modelo *{modelo}* "
+                        f"color *{color.upper()}*:\n"
+                        f"👉 Opciones: {', '.join(tallas)}"
+                    ),
+                    parse_mode="Markdown"
+                )
+                return
+            else:
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=f"❌ No hay tallas disponibles para el modelo {modelo} en color {color.upper()}."
+                )
+                return
+
+        #  Si el usuario no especificó un modelo válido
         await ctx.bot.send_message(
             chat_id=cid,
-            text="⚠️ No logré encontrar o enviar el video. Intenta con otra referencia.",
-            parse_mode="Markdown"
+            text="👀 ¿Cuál de los modelos que viste te gustó más? Puedes decir solo el número, como *279*."
         )
         return
+
+
+
 
 
 
@@ -1256,12 +1735,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # ─────────── Preguntas frecuentes (FAQ) ───────────
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
+        texto_normalizado = normalize(txt_raw)
 
-        # FAQ 1: ¿Cuánto demora el envío?
-        if any(frase in txt for frase in (
-            "cuanto demora", "cuánto demora", "cuanto tarda", "cuánto tarda",
-            "cuanto se demora", "cuánto se demora", "en cuanto llega", "en cuánto llega",
-            "me llega rapido", "llegan rapido"
+        # FAQ 1: ¿Cuánto demora el envío?
+        if any(frase in texto_normalizado for frase in (
+            "cuanto demora", "cuanto tarda", "cuanto se demora",
+            "en cuanto llega", "me llega rapido", "llegan rapido"
         )):
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -1276,8 +1755,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await reanudar_fase_actual(cid, ctx, est)
             return
 
-        # FAQ 2: ¿Tienen pago contra entrega?
-        if any(frase in txt for frase in (
+        # FAQ 2: ¿Tienen pago contra entrega?
+        if any(frase in texto_normalizado for frase in (
             "pago contra entrega", "pago contraentrega", "contraentrega", "contra entrega",
             "pagan al recibir", "puedo pagar al recibir", "tienen contra entrega"
         )):
@@ -1293,10 +1772,9 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await reanudar_fase_actual(cid, ctx, est)
             return
 
-        # FAQ 3: ¿Tienen garantía?
-        if any(frase in txt for frase in (
-            "tienen garantia", "tienen garantía", "hay garantía", "hay garantia",
-            "garantía", "garantia", "tienen garantia de fabrica"
+        # FAQ 3: ¿Tienen garantía?
+        if any(frase in texto_normalizado for frase in (
+            "tienen garantia", "hay garantia", "garantia", "tienen garantia de fabrica"
         )):
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -1310,7 +1788,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await reanudar_fase_actual(cid, ctx, est)
             return
 
-        # FAQ 4: ¿Cómo sé que no me van a robar?
+        # 📦 FAQ 4: Frases comunes de desconfianza (antes del uso)
         frases_desconfianza = [
             "no confío", "no confio", "desconfío", "desconfio",
             "me han robado", "me robaron", "ya me robaron", "me tumbaron",
@@ -1341,24 +1819,37 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "no quiero perder plata", "no me arriesgo", "no voy a arriesgar mi dinero"
         ]
 
-        if any(frase in txt for frase in frases_desconfianza):
-            video_url = "https://tudominio.com/videos/video_confianza.mp4"
+        if any(frase in texto_normalizado for frase in frases_desconfianza):
+            video_path = "/var/data/videos/video_confianza.mp4"
+
             await ctx.bot.send_message(
                 chat_id=cid,
-                text=(
-                    "🤝 Entendemos tu preocupación. "
-                    "Te compartimos este video para que veas que somos una tienda real y seria."
-                ),
+                text="🤝 Entendemos tu preocupación. Te compartimos este video para que veas que somos una tienda real y seria.",
                 parse_mode="Markdown"
             )
-            await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
-            await ctx.bot.send_video(
-                chat_id=cid,
-                video=video_url,
-                caption="¡Estamos aquí para ayudarte en lo que necesites! 👟✨"
-            )
+
+            if os.path.exists(video_path):
+                with open(video_path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                return {
+                    "type": "video",
+                    "base64": b64,
+                    "mimetype": "video/mp4",
+                    "filename": "video_confianza.mp4",
+                    "text": "¡Estamos aquí para ayudarte en lo que necesites! 👟✨"
+                }
+            else:
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text="📹 No pudimos cargar el video en este momento, pero puedes confiar en nosotros. ¡Llevamos años vendiendo con éxito!",
+                    parse_mode="Markdown"
+                )
+
             await reanudar_fase_actual(cid, ctx, est)
             return
+
+
 
     # FAQ 5: ¿Dónde están ubicados?
     if est.get("fase") not in ("editando_dato", "esperando_direccion", "confirmar_datos_guardados"):
@@ -2117,9 +2608,12 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             text="✅ ¡Pago registrado exitosamente! Tu pedido está en proceso. 🚚"
         )
 
+        await enviar_sticker(ctx, cid, "sticker_fin_de_compra_gracias.webp")
+
         reset_estado(cid)
         estado_usuario.pop(cid, None)
         return
+
 
 
 
@@ -2617,11 +3111,13 @@ async def manejar_catalogo(update, ctx):
     return False
 
 
+import base64  # Asegúrate de que esté arriba del archivo
+
 # ─────────────────────────────────────────────────────────────
 # 4. Procesar mensaje de WhatsApp
 # ─────────────────────────────────────────────────────────────
 async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
-    cid = str(cid)  # 🔐 ID siempre string
+    cid = str(cid)
     texto = body.lower() if body else ""
     txt = texto if texto else ""
 
@@ -2640,18 +3136,47 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     if msg_id:
         ultimo_msg[cid] = {"id": msg_id, "t": now}
 
+    # Función auxiliar para codificar imagen como base64
+    def codificar_base64(path, tipo='image/jpeg'):
+        with open(path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+        return f"data:{tipo};base64,{b64}"
+
     # ───────────────────────────────────────────
     class DummyCtx(SimpleNamespace):
-        async def bot_send(self, chat_id, text, **kw): self.resp.append(text)
-        async def bot_send_chat_action(self, chat_id, action, **kw): pass
-        async def bot_send_video(self, chat_id, video, caption=None, **kw):
-            self.resp.append(f"[VIDEO] {caption or ' '}]")
-    ctx = DummyCtx(resp=[])
+        async def bot_send(self, chat_id, text, **kw):
+            self.resp.append({"type": "text", "text": text})
 
+        async def bot_send_chat_action(self, chat_id, action, **kw):
+            pass
+
+        async def bot_send_video(self, chat_id, video, caption=None, **kw):
+            self.resp.append({
+                "type": "video",
+                "path": video.name,
+                "text": caption or ""
+            })
+
+        async def bot_send_photo(self, chat_id, photo, caption=None, **kw):
+            try:
+                base64_img = codificar_base64(photo.name)
+                self.resp.append({
+                    "type": "photo",
+                    "base64": base64_img,
+                    "text": caption or ""
+                })
+            except Exception as e:
+                self.resp.append({
+                    "type": "text",
+                    "text": f"❌ Error cargando imagen: {e}"
+                })
+
+    ctx = DummyCtx(resp=[])
     ctx.bot = SimpleNamespace(
         send_message=ctx.bot_send,
         send_chat_action=ctx.bot_send_chat_action,
-        send_video=ctx.bot_send_video
+        send_video=ctx.bot_send_video,
+        send_photo=ctx.bot_send_photo
     )
 
     class DummyMsg(SimpleNamespace):
@@ -2663,7 +3188,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             self._ctx = ctx
 
         async def reply_text(self, text, **kw):
-            self._ctx.resp.append(text)
+            self._ctx.resp.append({"type": "text", "text": text})
 
     dummy_msg = DummyMsg(text=body, ctx=ctx)
     dummy_update = SimpleNamespace(
@@ -2733,7 +3258,10 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
         # 🟢 Si hay mensajes acumulados por ctx
         if ctx.resp:
-            return {"type": "text", "text": "\n".join(ctx.resp)}
+            if len(ctx.resp) == 1:
+                return ctx.resp[0]  # envía solo la respuesta directa (texto, foto o video)
+            else:
+                return {"type": "multi", "messages": ctx.resp}
 
         # 🟡 Si está esperando pago o comprobante
         est = estado_usuario.get(cid, {})
@@ -2933,14 +3461,26 @@ async def venom_webhook(req: Request):
 
         # 💬 TEXTO
         elif mtype == "chat":
-            fase_actual = estado_usuario.get(cid, {}).get("fase", "")
-            logging.info(f"💬 Texto recibido en fase: {fase_actual or 'NO DEFINIDA'}")
-            reply = await procesar_wa(cid, body)
+                fase_actual = estado_usuario.get(cid, {}).get("fase", "")
+                logging.info(f"💬 Texto recibido en fase: {fase_actual or 'NO DEFINIDA'}")
+                reply = await procesar_wa(cid, body)
 
-            if isinstance(reply, dict) and reply.get("type") in ("video", "audio", "image"):
-                return JSONResponse(reply)
+                # A) Dict directo válido
+                if isinstance(reply, dict) and reply.get("type") in ("video", "audio", "image", "photo", "multi", "text"):
+                        return JSONResponse(reply)
 
-            return JSONResponse({"type": "text", "text": reply} if isinstance(reply, str) else reply)
+                # B) Lista → convertir a multi
+                if isinstance(reply, list):
+                        return JSONResponse({"type": "multi", "messages": reply})
+
+                # C) Texto plano (evita text anidado)
+                if isinstance(reply, str):
+                        return JSONResponse({"type": "text", "text": reply})
+
+                # D) Seguridad: si vino algo raro
+                return JSONResponse({"type": "text", "text": "⚠️ Error inesperado. Intenta de nuevo."})
+
+
 
         # 🎙️ AUDIO
         elif mtype in ("audio", "ptt") or mimetype.startswith("audio"):
@@ -2987,7 +3527,11 @@ async def venom_webhook(req: Request):
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
-    descargar_videos_drive()  # ⬅️ Descarga videos desde Drive al iniciar
+    descargar_videos_drive()          # ⬇️ Descarga los videos (si no existen)
+    descargar_imagenes_catalogo()     # ⬇️ Descarga 1 imagen por modelo del catálogo
+    descargar_stickers_drive()
+    descargar_video_confianza()
+ 
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("lector:api", host="0.0.0.0", port=port)
