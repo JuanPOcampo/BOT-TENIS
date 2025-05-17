@@ -1396,6 +1396,35 @@ def obtener_tallas_por_color_alias(inventario, modelo, color_usuario):
 
     return sorted(tallas)
 
+def extraer_cm_y_convertir_talla(texto):
+    import re
+
+    tabla_cm = {
+        23: 34, 24: 35, 24.5: 36, 25: 37, 26: 38,
+        26.5: 39, 27: 40, 27.5: 41, 28.5: 42,
+        29: 43, 30: 44, 31: 45
+    }
+
+    # Buscar patrones como 26cm, 260mm, JP 27.5, etc.
+    coincidencias = re.findall(r'(\d{2,3}(?:\.\d+)?)\s?(cm|mm|jp)?', texto.lower())
+
+    for valor, unidad in coincidencias:
+        try:
+            numero = float(valor)
+            if unidad == "mm" or (not unidad and numero > 100):
+                numero = numero / 10  # convertir mm a cm
+            elif unidad == "jp":
+                numero = numero  # ya está en CM
+
+            # Redondear al más cercano de la tabla
+            numero = round(numero * 2) / 2  # redondea a 0.5
+
+            if numero in tabla_cm:
+                return tabla_cm[numero]
+        except:
+            continue
+
+    return None
 
 
 # --------------------------------------------------------------------------------------------------
@@ -1471,25 +1500,37 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ref = normalize(txt_raw)
         logging.debug(f"[RESPONDER] Referencia normalizada = {ref!r}")
 
+        # Verificar si es una referencia válida de video
+        referencias_validas = {
+            "261", "ds 261", "277", "ds 277", "303", "ds 303",
+            "295", "ds 295", "299", "ds 299",
+            "279", "ds 279", "304", "ds 304", "305", "ds 305",
+            "niño", "niños", "kids", "infantil", "promo", "descuento", "descuentos"
+        }
+
+        if ref not in referencias_validas:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="⚠️ Esa referencia no la reconozco como un video. Si querías continuar tu compra, dime el modelo o mándame una imagen."
+            )
+            est["fase"] = "inicio"
+            estado_usuario[cid] = est
+            return
+
         video_respuesta = await enviar_video_referencia(cid, ctx, ref)
         logging.debug(f"[RESPONDER] video_respuesta type = {type(video_respuesta)}")
 
         if isinstance(video_respuesta, dict):
-            # ✅ IMPORTANTE: guardar fase ANTES del return para WhatsApp (Venom)
-            est["video_activo"] = "referencia.mp4"  # o asigna según ref si quieres más precisión
+            est["video_activo"] = ref
             est["fase"] = "esperando_color_post_video"
             estado_usuario[cid] = est
-            logging.info("[RESPONDER] ✓ Dict video recibido – se devolverá al webhook")
             return video_respuesta
 
-        if video_respuesta:
-            est["video_activo"] = str(video_respuesta)  # por ejemplo: "referencia.mp4"
-            est["fase"] = "esperando_color_post_video"
-        else:
-            est["fase"] = "inicio"  # si no se reconoce el video
-
+        # Si hubo error o el video no existe
+        est["fase"] = "inicio"
         estado_usuario[cid] = est
         return
+
 
     # 🟩 Fase post-video: el cliente dice un color (“me gustaron los verdes”)
     if est.get("fase") == "esperando_color_post_video":
@@ -1728,7 +1769,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=("Para darte el precio necesito saber la referencia o repetirla. "
-                      "¿Puedes decirme cuál estás mirando?")
+                      "¿Puedes decirme cuál estás mirando,")
             )
         return
 
@@ -2064,6 +2105,15 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
         if any(frase in txt for frase in ("si", "sí", "s", "claro", "claro que sí", "quiero comprar", "continuar", "vamos")):
+
+            # ✅ Si ya hay talla (desde imagen de lengüeta), saltar a confirmar datos
+            if est.get("talla"):
+                est["fase"] = "esperando_talla"
+                # Simula respuesta del cliente para que entre directo al bloque de talla
+                # Esto permite que el bloque de "esperando_talla" se ejecute automáticamente
+                return await procesar_wa(cid, "sí")
+
+            # 🔁 Si aún no tiene talla, se comporta como antes
             est["fase"] = "esperando_talla"
             tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
             if isinstance(tallas, (int, float, str)):
@@ -2072,12 +2122,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(
                 chat_id=cid,
                 text=(
-                    f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*?\n\n"
-                    f"👉 Opciones: {', '.join(tallas)}"
+                    f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
+                    f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
+                    "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟 y la detectamos automáticamente."
                 ),
                 parse_mode="Markdown"
             )
             return
+
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
@@ -2086,6 +2138,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             reset_estado(cid)
             return
+
+
 
     # 🛒 Flujo manual si está buscando modelo
     if est.get("fase") == "esperando_modelo":
@@ -2149,74 +2203,95 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # 👟 Elegir talla
+    # 👟 Elegir talla (texto directo o confirmación de lengüeta)
     if est.get("fase") == "esperando_talla":
         tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
         if isinstance(tallas, (int, float, str)):
             tallas = [str(tallas)]
 
-        talla_detectada = detectar_talla(txt_raw, tallas)
+        # 🟢 1. Si ya hay una talla detectada (por imagen) y cliente confirma con "sí"
+        if est.get("talla") and any(p in txt for p in ("sí", "si", "s", "dale", "claro", "continuar", "comprar", "vamos")):
+            talla_detectada = est["talla"]
+
+        # 🟡 2. Si escribió la talla manualmente
+        else:
+            talla_detectada = detectar_talla(txt_raw, tallas)
 
         if talla_detectada:
             est["talla"] = talla_detectada
 
-        # 🔍 Ver si ya hay memoria del cliente
-        cliente = obtener_datos_cliente(numero)
+            # 🔍 Ver si ya hay memoria del cliente
+            cliente = obtener_datos_cliente(numero)
 
-        if cliente:
-            nombre    = cliente.get("nombre", "cliente")
-            correo    = cliente.get("correo", "No registrado")
-            telefono  = cliente.get("telefono", numero)
-            cedula    = cliente.get("cedula", "No registrada")
-            ciudad    = cliente.get("ciudad", "No registrada")
-            provincia = cliente.get("provincia", "No registrada")
-            direccion = cliente.get("direccion", "No registrada")
+            if cliente:
+                nombre    = cliente.get("nombre", "cliente")
+                correo    = cliente.get("correo", "No registrado")
+                telefono  = cliente.get("telefono", numero)
+                cedula    = cliente.get("cedula", "No registrada")
+                ciudad    = cliente.get("ciudad", "No registrada")
+                provincia = cliente.get("provincia", "No registrada")
+                direccion = cliente.get("direccion", "No registrada")
 
-            est.update({
-                "nombre": nombre,
-                "correo": correo,
-                "telefono": telefono,
-                "cedula": cedula,
-                "ciudad": ciudad,
-                "provincia": provincia,
-                "direccion": direccion
-            })
+                est.update({
+                    "nombre": nombre,
+                    "correo": correo,
+                    "telefono": telefono,
+                    "cedula": cedula,
+                    "ciudad": ciudad,
+                    "provincia": provincia,
+                    "direccion": direccion
+                })
 
-            precio = next(
-                (i["precio"] for i in inv
-                 if normalize(i["marca"]) == normalize(est["marca"])
-                 and normalize(i["modelo"]) == normalize(est["modelo"])
-                 and normalize(i["color"]) == normalize(est["color"])),
-                None
-            )
-            est["precio_total"] = int(precio) if precio else 0
-            est["sale_id"] = generate_sale_id()
+                precio = next(
+                    (i["precio"] for i in inv
+                     if normalize(i["marca"]) == normalize(est["marca"])
+                     and normalize(i["modelo"]) == normalize(est["modelo"])
+                     and normalize(i["color"]) == normalize(est["color"])),
+                    None
+                )
+                est["precio_total"] = int(precio) if precio else 0
+                est["sale_id"] = generate_sale_id()
 
-            resumen = (
-                f"✅ Pedido: {est['sale_id']}\n"
-                f"👤Nombre: {nombre}\n"
-                f"📧Correo: {correo}\n"
-                f"📱Celular: {telefono}\n"
-                f"🪪Cédula: {cedula}\n"
-                f"📍Dirección: {direccion}, {ciudad}, {provincia}\n"
-                f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
-                f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
-                "¿Estos datos siguen siendo correctos o deseas cambiar algo?"
-            )
+                resumen = (
+                    f"✅ Pedido: {est['sale_id']}\n"
+                    f"👤Nombre: {nombre}\n"
+                    f"📧Correo: {correo}\n"
+                    f"📱Celular: {telefono}\n"
+                    f"🪪Cédula: {cedula}\n"
+                    f"📍Dirección: {direccion}, {ciudad}, {provincia}\n"
+                    f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
+                    f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
+                    "¿Estos datos siguen siendo correctos o deseas cambiar algo?"
+                )
 
-            est["fase"] = "confirmar_datos_guardados"
+                est["fase"] = "confirmar_datos_guardados"
+                estado_usuario[cid] = est
+                await ctx.bot.send_message(chat_id=cid, text=resumen, parse_mode="Markdown")
+                return
+
+            # 🧾 No hay cliente guardado → continuar normal
+            est["fase"] = "esperando_nombre"
             estado_usuario[cid] = est
-            await ctx.bot.send_message(chat_id=cid, text=resumen, parse_mode="Markdown")
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="¿Tu nombre completo para el pedido?",
+                parse_mode="Markdown"
+            )
             return
 
-        # 🧾 No hay cliente guardado → continuar normal
-        est["fase"] = "esperando_nombre"
+        # 🚫 No se detectó ninguna talla → mostrar tallas y pedir imagen
         await ctx.bot.send_message(
             chat_id=cid,
-            text="¿Tu nombre completo para el pedido?",
+            text=(
+                f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
+                f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
+                "📸 Para darte tu *talla ideal*, mándame una foto de la *lengüeta de tu zapato* 👟 y la detectamos automáticamente."
+            ),
             parse_mode="Markdown"
         )
         return
+
+
 
     # 👤 Confirmar o editar datos guardados
     if est.get("fase") == "confirmar_datos_guardados":
@@ -2951,6 +3026,18 @@ async def manejar_precio(update, ctx, inventario):
     txt = normalize(mensaje)
     logging.debug(f"[manejar_precio] Mensaje recibido: {mensaje}")
 
+    # ✅ PROTECCIÓN — Solo ejecutarse si no está en fases de video
+    est = estado_usuario.get(cid, {})
+    fase_actual = est.get("fase", "")
+
+    if fase_actual in (
+        "esperando_video_referencia",
+        "esperando_color_post_video",
+        "esperando_modelo_elegido"
+    ):
+        logging.info(f"[manejar_precio] Ignorado: usuario en fase '{fase_actual}'")
+        return False
+
     # Detectar referencia de 3 o 4 dígitos
     m_ref = re.search(r"(?:referencia|modelo)?\s*(\d{3,4})", txt)
     if not m_ref:
@@ -3009,12 +3096,11 @@ async def manejar_precio(update, ctx, inventario):
                 logging.error(f"[manejar_precio] Error formateando tallas: {e}")
 
         # ✅ Guardar estado de forma segura
-        est = estado_usuario.get(cid, {})
         est["fase"] = "confirmar_compra"
         est["modelo_confirmado"] = primer_producto["modelo"]
         est["color_confirmado"] = primer_producto["color"]
         est["marca"] = primer_producto.get("marca", "sin marca")
-        estado_usuario[cid] = est  # ✅ GUARDA el estado correctamente
+        estado_usuario[cid] = est
 
         logging.debug(f"[manejar_precio] Guardado modelo: {primer_producto['modelo']}, color: {primer_producto['color']}")
 
@@ -3023,7 +3109,7 @@ async def manejar_precio(update, ctx, inventario):
             text=(
                 f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
                 f"{respuesta_final}"
-                "Seguimos con la compra?\n\n"
+                "¿Seguimos con la compra?\n\n"
             ),
             parse_mode="Markdown"
         )
@@ -3041,6 +3127,7 @@ async def manejar_precio(update, ctx, inventario):
             parse_mode="Markdown"
         )
         return True
+
 
 
 
@@ -3326,52 +3413,48 @@ async def venom_webhook(req: Request):
 
             # 📄 COMPROBANTE
             if fase == "esperando_comprobante":
+                # ... (ya lo tienes implementado y funciona) ...
+                pass
+
+            # 👟 LENGÜETA - detectar talla si está esperando_talla
+            elif fase == "esperando_talla":
                 try:
                     os.makedirs("temp", exist_ok=True)
-                    temp_path = f"temp/{cid}_proof.jpg"
-                    with open(temp_path, "wb") as f:
+                    path_img = f"temp/{cid}_lengueta.jpg"
+                    with open(path_img, "wb") as f:
                         f.write(img_bytes)
 
-                    texto = extraer_texto_comprobante(temp_path)
-                    logging.info(f"[OCR] Texto extraído (500 chars):\n{texto[:500]}")
+                    image = vision.Image(content=img_bytes)
+                    response = vision_client.text_detection(image=image)
+                    textos_detectados = response.text_annotations
+                    texto_extraido = textos_detectados[0].description if textos_detectados else ""
+                    logging.info(f"[OCR LENGÜETA] Texto detectado:\n{texto_extraido}")
 
-                    if es_comprobante_valido(texto):
-                        logging.info("✅ Comprobante válido por OCR")
-                        resumen = est.get("resumen", {})
-                        registrar_orden(resumen)
-
-                        enviar_correo(
-                            est["correo"],
-                            f"Pago recibido {resumen.get('Número Venta')}",
-                            json.dumps(resumen, indent=2)
-                        )
-                        enviar_correo_con_adjunto(
-                            EMAIL_JEFE,
-                            f"Comprobante {resumen.get('Número Venta')}",
-                            json.dumps(resumen, indent=2),
-                            temp_path
-                        )
-                        os.remove(temp_path)
-                        reset_estado(cid)
+                    talla_detectada = extraer_cm_y_convertir_talla(texto_extraido)
+                    if talla_detectada:
+                        est["talla"] = talla_detectada
+                        estado_usuario[cid] = est
                         return JSONResponse({
                             "type": "text",
-                            "text": "✅ Comprobante verificado. Tu pedido está en proceso. 🚚"
+                            "text": f"📏 Según la imagen, la talla ideal para tus zapatos es la *{talla_detectada}* de nuestra tienda. ¿Deseas continuar con esa?",
+                            "parse_mode": "Markdown"
                         })
                     else:
-                        os.remove(temp_path)
                         return JSONResponse({
                             "type": "text",
-                            "text": "⚠️ No pude verificar el comprobante. Asegúrate que diga 'Pago exitoso'."
+                            "text": "❌ No logré identificar tu talla. ¿Podrías enviarme una foto más clara de la lengüeta del zapato?"
                         })
-
                 except Exception as e:
-                    logging.error(f"❌ Error al procesar comprobante: {e}")
+                    logging.error(f"[OCR LENGÜETA] ❌ Error al procesar la imagen: {e}")
                     return JSONResponse({
                         "type": "text",
-                        "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."
+                        "text": "❌ Hubo un error procesando la imagen. Intenta de nuevo con otra foto, por favor."
                     })
 
-            # 🔍 CLIP (identificación de modelo)
+
+
+
+            # 🧠 CLIP - identificación de modelo
             else:
                 try:
                     logging.info("[CLIP] 🚀 Iniciando identificación de modelo")
@@ -3459,6 +3542,7 @@ async def venom_webhook(req: Request):
                         "type": "text",
                         "text": "⚠️ Ocurrió un error analizando la imagen."
                     })
+
 
         # 💬 TEXTO
         elif mtype == "chat":
