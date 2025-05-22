@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timedelta
 from collections import defaultdict
 from types import SimpleNamespace
-
+from oauth2client.service_account import ServiceAccountCredentials
 # ——— Librerías externas ———
 import numpy as np               # ←  déjalo si realmente lo usas
 import torch
@@ -65,6 +65,7 @@ logging.basicConfig(level=logging.INFO,
 api = FastAPI(title="AYA Bot – WhatsApp")
 logging.basicConfig(level=logging.DEBUG)
 
+
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
 def get_drive_service():
     """
@@ -78,7 +79,218 @@ def get_drive_service():
         "service_account.json",
         scopes=["https://www.googleapis.com/auth/drive.readonly"]
     )
+ 
     return build("drive", "v3", credentials=creds)
+def registrar_o_actualizar_lead(data: dict) -> bool:
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+
+    try:
+        logging.info("[LEADS] ⇢ Intentando registrar o actualizar lead...")
+        logging.info(f"[LEADS] Datos recibidos:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
+
+        creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+
+        sheet = client.open("PEDIDOS").worksheet("LEADS")
+        telefono = data.get("Teléfono", "").strip()
+        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        if not telefono:
+            logging.warning("[LEADS] ⚠️ Teléfono vacío. No se puede registrar.")
+            return False
+
+        registros = sheet.col_values(1)  # Columna A: Teléfono
+        logging.info(f"[LEADS] 🔍 Total de registros existentes: {len(registros)}")
+
+        fila_data = [
+            telefono,
+            data.get("Fecha Registro", fecha),
+            data.get("Nombre", ""),
+            data.get("Producto", ""),
+            data.get("Color", ""),
+            data.get("Talla", ""),
+            data.get("Correo", ""),
+            data.get("Fase", ""),
+            data.get("Último Mensaje", ""),
+            data.get("Estado", "")
+        ]
+
+        if telefono in registros:
+            fila_index = registros.index(telefono) + 1
+            sheet.update(f"A{fila_index}:J{fila_index}", [fila_data])
+            logging.info(f"[LEADS] 🔁 Lead actualizado (fila {fila_index})")
+        else:
+            sheet.append_row(fila_data)
+            logging.info("[LEADS] ✅ Lead registrado por primera vez")
+
+        return True
+
+    except Exception as e:
+        logging.exception("[LEADS] ❌ Error registrando o actualizando lead")
+        return False
+
+
+def descargar_imagen_lengueta():
+    """
+    Descarga la imagen de ejemplo de lengüeta desde Google Drive.
+    Guarda el archivo como /var/data/extra/lengueta_ejemplo.jpg
+    """
+    try:
+        print(">>> descargar_imagen_lengueta() – iniciando")
+        service = get_drive_service()
+        os.makedirs("/var/data/extra", exist_ok=True)
+
+        archivo = service.files().list(
+            q="'1GF3rdTM0t81KRIb6xbQ1uNV4uC4A7LvE' in parents and name = 'lengueta_ejemplo.jpg' and trashed = false",
+            fields="files(id, name)",
+            pageSize=1
+        ).execute().get("files", [])
+
+        if not archivo:
+            logging.warning("⚠️ No se encontró 'lengueta_ejemplo.jpg'")
+            return
+
+        file_id = archivo[0]["id"]
+        destino = "/var/data/extra/lengueta_ejemplo.jpg"
+
+        if os.path.exists(destino):
+            logging.info("📦 Imagen de lengüeta ya existe. Omitiendo descarga.")
+            return
+
+        logging.info("⬇️ Descargando imagen de lengüeta")
+        request = service.files().get_media(fileId=file_id)
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request)
+
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+
+        with open(destino, "wb") as f:
+            f.write(buffer.getvalue())
+
+        logging.info(f"✅ Imagen guardada en: {destino}")
+
+    except Exception as e:
+        logging.error(f"❌ Error descargando imagen de lengüeta: {e}")
+
+CARPETA_AUDIOS_DRIVE = "1-Htyzy4f8NgjkLJRv5hGZHdTXpRvz5mA"  # Carpeta raíz de 'Audios'
+
+import os
+import io
+import logging
+from googleapiclient.http import MediaIoBaseDownload
+
+def descargar_audios_bienvenida_drive():
+    """
+    Descarga audios desde las subcarpetas 'BIENVENIDA' y 'CONFIANZA' dentro de la carpeta 'Audios' en Google Drive.
+    Guarda los archivos en:
+    - /var/data/audios/bienvenida/
+    - /var/data/audios/confianza/
+    """
+    try:
+        print(">>> descargar_audios_bienvenida_drive() – iniciando")
+        service = get_drive_service()
+
+        # Rutas de destino locales
+        carpeta_bienvenida = "/var/data/audios/bienvenida"
+        carpeta_confianza = "/var/data/audios/confianza"
+        os.makedirs(carpeta_bienvenida, exist_ok=True)
+        os.makedirs(carpeta_confianza, exist_ok=True)
+
+        logging.info("📂 [Audios Bienvenida] Descargando desde subcarpeta 'BIENVENIDA'…")
+
+        # 🧹 Limpiar bienvenida
+        for f in os.listdir(carpeta_bienvenida):
+            archivo = os.path.join(carpeta_bienvenida, f)
+            if os.path.isfile(archivo):
+                os.remove(archivo)
+                logging.info(f"🧹 Eliminado archivo viejo: {archivo}")
+
+        # Buscar subcarpeta 'BIENVENIDA'
+        bienvenida = service.files().list(
+            q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'BIENVENIDA' and mimeType='application/vnd.google-apps.folder' and trashed = false",
+            fields="files(id, name)", pageSize=1
+        ).execute().get("files", [])
+
+        if bienvenida:
+            bienvenida_id = bienvenida[0]["id"]
+
+            audios = service.files().list(
+                q=f"'{bienvenida_id}' in parents and mimeType contains 'audio/' and trashed = false",
+                fields="files(id, name)"
+            ).execute().get("files", [])
+
+            for audio in audios:
+                nombre_archivo = audio["name"]
+                ruta_destino = os.path.join(carpeta_bienvenida, nombre_archivo)
+                logging.info(f"⬇️ Descargando audio bienvenida: {nombre_archivo}")
+
+                request = service.files().get_media(fileId=audio["id"])
+                buffer = io.BytesIO()
+                downloader = MediaIoBaseDownload(buffer, request)
+
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+
+                with open(ruta_destino, "wb") as f:
+                    f.write(buffer.getvalue())
+                logging.info(f"✅ Guardado: {ruta_destino}")
+
+        else:
+            logging.warning("❌ No se encontró la subcarpeta 'BIENVENIDA'.")
+
+        # ────────────────────────────────────────────────
+        # AHORA: Descargar "Desconfianza.mp3" de carpeta 'CONFIANZA'
+        logging.info("📂 [Audio Confianza] Buscando en carpeta 'CONFIANZA'…")
+
+        confianza = service.files().list(
+            q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'CONFIANZA' and mimeType='application/vnd.google-apps.folder' and trashed = false",
+            fields="files(id, name)", pageSize=1
+        ).execute().get("files", [])
+
+        if confianza:
+            confianza_id = confianza[0]["id"]
+
+            desconfianza = service.files().list(
+                q=f"'{confianza_id}' in parents and name = 'Desconfianza.mp3' and mimeType contains 'audio/' and trashed = false",
+                fields="files(id, name)", pageSize=1
+            ).execute().get("files", [])
+
+            if desconfianza:
+                file = desconfianza[0]
+                nombre_archivo = file["name"]
+                ruta_destino = os.path.join(carpeta_confianza, nombre_archivo)
+
+                request = service.files().get_media(fileId=file["id"])
+                buffer = io.BytesIO()
+                downloader = MediaIoBaseDownload(buffer, request)
+
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+
+                with open(ruta_destino, "wb") as f:
+                    f.write(buffer.getvalue())
+                logging.info(f"✅ Guardado: {ruta_destino}")
+            else:
+                logging.warning("❌ No se encontró el audio 'Desconfianza.mp3' en la carpeta CONFIANZA.")
+
+        else:
+            logging.warning("❌ No se encontró la subcarpeta 'CONFIANZA'.")
+
+        print(">>> descargar_audios_bienvenida_drive() – finalizado")
+
+    except Exception as e:
+        print(">>> EXCEPCIÓN en descargar_audios_bienvenida_drive:", e)
+        logging.error(f"❌ Error al descargar audios: {e}")
+
+
+
 # ─── Descarga del video de confianza desde Drive ─────────────────────────────
 CARPETA_VIDEO_CONFIANZA_DRIVE = "1uX0FXruTXLr2c5SHAc6thlIUMucN1hAA"  # Carpeta 'Video de confianza'
 
@@ -133,9 +345,6 @@ def descargar_video_confianza():
         print(">>> EXCEPCIÓN en descargar_video_confianza:", e)
         logging.error(f"❌ Error descargando video de confianza: {e}")
 
-# ─── Descarga de stickers organizados por subcarpetas ───────────────────────
-CARPETA_STICKERS_DRIVE = "1mYpTq98rli3_hTXzvfCj6CgcGhrYZwCh"  # Carpeta 'Stickers'
-
 def descargar_stickers_drive():
     """
     Descarga stickers desde subcarpetas de 'Stickers' en Google Drive.
@@ -157,7 +366,7 @@ def descargar_stickers_drive():
         ).execute().get("files", [])
 
         for sub in subcarpetas:
-            nombre_subcarpeta = sub["name"].lower().replace(" ", "_")  # Ej: 'Sticker bienvenida' → 'sticker_bienvenida'
+            nombre_subcarpeta = sub["name"].lower().replace(" ", "_")  # Ej: 'Envio Gratis' → 'envio_gratis'
             id_subcarpeta = sub["id"]
 
             logging.info(f"🔎 Buscando en subcarpeta: {nombre_subcarpeta}")
@@ -196,6 +405,7 @@ def descargar_stickers_drive():
     except Exception as e:
         print(">>> EXCEPCIÓN en descargar_stickers_drive:", e)
         logging.error(f"❌ Error al descargar stickers: {e}")
+
 
 
 # ─── Descarga de imágenes de catálogo desde Drive ───────────────────────
@@ -656,13 +866,44 @@ def convertir_palabras_a_numero(texto):
 
 def menciona_catalogo(texto: str) -> bool:
     texto = normalize(texto)
-    claves = [
+
+    # Frases que deberían activar el catálogo
+    claves_exactas = [
         "catalogo", "catálogo", "ver catálogo", "mostrar catálogo",
         "quiero ver", "ver productos", "mostrar productos",
         "ver lo que tienes", "ver tenis", "muéstrame",
-        "mostrar lo que tienes", "tenis disponibles"
+        "mostrar lo que tienes", "que estilos tiene",
+        "enséñame el catálogo", "Tienes imagenes", "mandame el catalogo",
+        "quiero ver modelos", "ver referencias", "quiero referencias",
+        "muestrame los modelos", "qué modelos tienes", "que modelos hay",
+        "que tienes", "mandame fotos", "mandame las imagenes",
+        "envíame modelos", "quiero ver imágenes", "tenis que tienes",
+        "que hay", "quiero ver los pares", "muestra los tenis",
+        "cuales modelos tienes", "mande fotos"
     ]
-    return any(palabra in texto for palabra in claves)
+
+    # Variantes mal escritas
+    claves_con_errores = [
+        "catlogo", "catálog", "katalogo", "catalogoo",
+        "ver katalago", "mostar catalogo", "ber catalogo",
+        "muestrame modelos", "quiero bber", "mandame katalago",
+        "quero ver modelos", "quiero bel modelos", "kiero bel",
+        "mandame modeloss", "ver referensias", "enseñame loq tienes"
+    ]
+
+    # Combinar y verificar coincidencia directa
+    todas = claves_exactas + claves_con_errores
+    if any(fr in texto for fr in todas):
+        return True
+
+    # Extra: buscar coincidencias similares si no hubo match directo
+    for frase in todas:
+        similares = difflib.get_close_matches(texto, [frase], n=1, cutoff=0.85)
+        if similares:
+            return True
+
+    return False
+
 
 # ——— VARIABLES DE ENTORNO ——————————————————————————————————————————————
 OPENAI_API_KEY        = os.environ["OPENAI_API_KEY"]
@@ -676,14 +917,63 @@ SMTP_PORT             = int(os.environ.get("SMTP_PORT", 587))
 EMAIL_REMITENTE       = os.environ.get("EMAIL_REMITENTE")
 EMAIL_PASSWORD        = os.environ.get("EMAIL_PASSWORD")
 
-WELCOME_TEXT = (
-    f"¡Bienvenido a {NOMBRE_NEGOCIO}!\n\n"
-    "Si tienes una foto puedes enviarla\n"
-    "Si tienes numero de referencia enviamelo\n"
-    "Puedes enviarme la foto del pedido\n"
-    "Te gustaria ver unos videos de nuestras referencias👟?\n"
-    "Cuéntame sin ningún problema 😀"
-)
+import os
+import base64
+import logging
+
+async def enviar_welcome_venom(cid: str):
+    try:
+        audio_path = "/var/data/audios/bienvenida/bienvenida1.mp3"
+
+        existe = os.path.exists(audio_path)
+        logging.info(f"🧪 Enviando audio: {audio_path} | Existe: {existe}")
+
+        if not existe:
+            raise FileNotFoundError(f"❌ No se encontró el archivo: {audio_path}")
+
+        with open(audio_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+            b64_final = f"data:audio/mpeg;base64,{b64}"  # ✅ encabezado MIME agregado
+
+        logging.info(f"🧪 Base64 generado correctamente — longitud: {len(b64)}")
+        logging.info(f"🧪 Base64 preview: {b64[:80]}...")
+
+        return {
+            "type": "multi",
+            "messages": [
+                {
+                    "type": "audio",
+                    "base64": b64_final,  # ✅ ahora con encabezado
+                    "mimetype": "audio/mpeg",  # WhatsApp lo requiere así
+                    "filename": "bienvenida1.mp3",
+                    "text": "🎧 Escucha este audio de bienvenida."
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "👇🏻 *AQUÍ ESTÁ EL CATÁLOGO* 🆕\n"
+                        "Sigue este enlace para ver la última colección 👟 X💯:\n"
+                        "https://wa.me/c/573007607245"
+                    ),
+                    "parse_mode": "Markdown"
+                },
+                {
+                    "type": "text",
+                    "text": "🙋‍♂️ Dime tu nombre y ciudad por favor y en qué te ayudo"
+                }
+            ]
+        }
+
+    except Exception as e:
+        logging.error(f"❌ Error al preparar audio bienvenida: {e}")
+        return {
+            "type": "text",
+            "text": "❌ No logré enviarte el audio de bienvenida. Intenta más tarde."
+        }
+
+
+
+
 CLIP_INSTRUCTIONS = (
     "Para enviarme una imagen, pulsa el ícono de clip (📎), "
     "selecciona “Galería” o “Archivo” y elige la foto."
@@ -692,6 +982,7 @@ CATALOG_LINK = "https://wa.me/c/573007607245"
 CATALOG_MESSAGE = (
     f"👇🏻AQUÍ ESTA EL CATÁLOGO 🆕\n"
     f"Sigue este enlace para ver la ultima colección 👟 X💯: {CATALOG_LINK}"
+
 )
 
 def fase_valida(fase: str) -> bool:
@@ -708,7 +999,6 @@ def fase_valida(fase: str) -> bool:
     ]
     return fase in fases_validas
 
-    return fase in fases_validas
 
 def enviar_correo(dest, subj, body):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}")
@@ -1018,9 +1308,6 @@ async def manejar_pqrs(update, ctx) -> bool:
 
     return False
 
-def decodificar_imagen_base64(base64_str: str) -> Image.Image:
-    data = base64.b64decode(base64_str + "===")
-    return Image.open(io.BytesIO(data)).convert("RGB")
 
 # 🧠 Cargar base de embeddings guardados
 EMBEDDINGS_PATH = "/var/data/embeddings.json"
@@ -1171,28 +1458,73 @@ async def manejar_imagen(update, ctx):
 
 # ───────────────────────────────────────────────────────────────
 
-# 🔥 Registrar la orden en Google Sheets
-def registrar_orden(data: dict, fase: str = ""):
-    payload = {
-        "numero_venta": data.get("Número Venta", ""),
-        "fecha_venta":  data.get("Fecha Venta", ""),
-        "cliente":      data.get("Cliente", ""),
-        "cedula":       data.get("Cédula", ""),  # ✅ NUEVO
-        "telefono":     data.get("Teléfono", ""),
-        "producto":     data.get("Producto", ""),
-        "color":        data.get("Color", ""),
-        "talla":        data.get("Talla", ""),
-        "correo":       data.get("Correo", ""),
-        "pago":         data.get("Pago", ""),
-        "estado":       data.get("Estado", ""),
-        "fase_actual":  fase                     # ✅ NUEVO
-    }
-    logging.info(f"[SHEETS] Payload JSON que envío:\n{payload}")
+def registrar_orden_unificada(data: dict, destino: str = "PEDIDOS") -> bool:
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
+
     try:
-        resp = requests.post(URL_SHEETS_PEDIDOS, json=payload)
-        logging.info(f"[SHEETS] HTTP {resp.status_code} — Body: {resp.text}")
+        logging.info(f"[SHEETS] ⇢ Intentando registrar en hoja: {destino}")
+        logging.info(f"[SHEETS] Datos recibidos:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
+
+        # Cargar credenciales desde variable de entorno
+        creds_dict = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+
+        # Abrir archivo y hoja
+        sh = client.open("PEDIDOS")
+        sheet = sh.worksheet(destino)
+
+        # Fecha actual
+        fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Fila por tipo
+        if destino == "PEDIDOS":
+            fila = [
+                data.get("Número Venta", ""),
+                fecha_actual,
+                data.get("Cliente", "No informado"),
+                data.get("Cédula", "No informada"),
+                data.get("Teléfono", "No informado"),
+                data.get("Producto", "No informado"),
+                data.get("Color", "No informado"),
+                data.get("Talla", "No informada"),
+                data.get("Correo", "No informado"),
+                data.get("Pago", "No definido"),
+                data.get("fase_actual", "Sin registrar"),
+                data.get("Estado", "PENDIENTE")
+            ]
+        elif destino == "PENDIENTES":
+            fila = [
+                fecha_actual,
+                data.get("Cliente", "No informado"),
+                data.get("Teléfono", "No informado"),
+                data.get("Producto", "No informado"),
+                data.get("Pago", "No indicado")  # Se usa "Pago" como campo 'Día/Hora contacto'
+            ]
+        elif destino == "ADDI":
+            fila = [
+                fecha_actual,
+                data.get("Cliente", "No informado"),
+                data.get("Cédula", "No informada"),
+                data.get("Teléfono", "No informado"),
+                data.get("Correo", "No informado"),
+            ]
+        else:
+            logging.error(f"[SHEETS] ❌ Hoja desconocida: {destino}")
+            return False
+
+        # Escribir
+        sheet.append_row(fila)
+        logging.info(f"[SHEETS] ✅ Fila escrita correctamente en hoja '{destino}'")
+        return True
+
     except Exception as e:
-        logging.error(f"[SHEETS] Error al hacer POST: {e}")
+        logging.exception(f"[SHEETS] ❌ Error escribiendo en hoja '{destino}': {e}")
+        return False
+
+
 
 # ───────────────────────────────────────────────────────────────
 
@@ -1216,161 +1548,70 @@ async def enviar_sticker(ctx, cid, nombre_archivo):
 # ────────────────────────────────────────────────────────────
 # FUNCIÓN AUXILIAR – ENVIAR VIDEO (VENOM) CON LOGS DETALLADOS
 # ────────────────────────────────────────────────────────────
-async def enviar_video_referencia(cid, ctx, referencia):
-    logging.info(f"[VIDEO_FN] ⇢ Petición video ref={referencia!r}  cid={cid}")
-
-    opciones = {
-        # 🔥 Referencias2.mp4
-        "261": "referencias2.mp4", "ds 261": "referencias2.mp4",
-        "277": "referencias2.mp4", "ds 277": "referencias2.mp4",
-        "303": "referencias2.mp4", "ds 303": "referencias2.mp4",
-        "295": "referencias2.mp4", "ds 295": "referencias2.mp4",
-        "299": "referencias2.mp4", "ds 299": "referencias2.mp4",
-
-        # 📼 Referencias.mp4
-        "279": "referencias.mp4",  "ds 279": "referencias.mp4",
-        "304": "referencias.mp4",  "ds 304": "referencias.mp4",
-        "305": "referencias.mp4",  "ds 305": "referencias.mp4",
-
-        # 👟 Otros
-        "niño": "infantil.mp4",    "niños": "infantil.mp4",
-        "infantil": "infantil.mp4","kids":  "infantil.mp4",
-
-        "promo": "descuentos.mp4", "descuento": "descuentos.mp4",
-        "descuentos": "descuentos.mp4"
-    }
-
-    nombres_real = {
-        "referencias.mp4":  "Referencias.mp4",
-        "referencias2.mp4": "Referencias2.mp4",
-        "infantil.mp4":     "Infantil.mp4",
-        "descuentos.mp4":   "Descuentos.mp4"
-    }
-
-    ref_norm = normalize(referencia).lower()
-    nombre_logico = opciones.get(ref_norm)
-    nombre_real = nombres_real.get(nombre_logico)
-    logging.debug(
-        f"[VIDEO_FN] ref_norm={ref_norm}  "
-        f"nombre_logico={nombre_logico}  nombre_real={nombre_real}"
-    )
-
-    if not nombre_real:
-        logging.warning(f"[VIDEO_FN] Video no reconocido para ref={ref_norm}")
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="❌ No reconocí ese video. Intenta con el número o nombre correcto."
-        )
-        return None
-
-    ruta_video = os.path.join("/var/data/videos", nombre_real)
-    existe = os.path.exists(ruta_video)
-    logging.debug(f"[VIDEO_FN] ruta_video={ruta_video}  existe={existe}")
-
-    if not existe:
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="⚠️ El video aún no está disponible. Estoy actualizando mi galería."
-        )
-        return None
-
-    tamaño = os.path.getsize(ruta_video)
-    logging.debug(f"[VIDEO_FN] Tamaño archivo='{nombre_real}' = {tamaño:,} bytes")
-
+async def enviar_todos_los_videos(cid):
     try:
-        with open(ruta_video, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("utf-8")
+        carpeta = "/var/data/videos"
+        if not os.path.exists(carpeta):
+            logging.warning(f"[VIDEOS] ⚠️ Carpeta no encontrada: {carpeta}")
+            return {
+                "type": "text",
+                "text": "⚠️ No tengo videos cargados por ahora. Intenta más tarde."
+            }
 
-        logging.debug(f"[VIDEO_FN] Longitud base64 = {len(b64):,} caracteres")
+        archivos = sorted([
+            f for f in os.listdir(carpeta)
+            if f.lower().endswith(".mp4")
+        ])
 
-        video_dict = {
-            "type": "video",
-            "base64": b64,
-            "mimetype": "video/mp4",
-            "filename": nombre_real,
-            "text": "🎬 Aquí tienes el video solicitado "
+        logging.info(f"[VIDEOS] Archivos detectados: {archivos}")
+
+        if not archivos:
+            return {
+                "type": "text",
+                "text": "⚠️ No tengo videos disponibles en este momento."
+            }
+
+        mensajes = []
+        for nombre in archivos:
+            ruta = os.path.join(carpeta, nombre)
+            try:
+                with open(ruta, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                mensajes.append({
+                    "type": "video",
+                    "base64": b64,
+                    "mimetype": "video/mp4",
+                    "filename": nombre,
+                    "text": f"🎥 Video: {nombre.replace('.mp4', '').replace('_', ' ').title()}"
+                })
+
+            except Exception as ve:
+                logging.error(f"❌ Error leyendo video '{nombre}': {ve}")
+
+        if not mensajes:
+            return {
+                "type": "text",
+                "text": "❌ No logré preparar ningún video. Intenta más tarde."
+            }
+
+        logging.info(f"[VIDEOS] ✅ Videos preparados: {len(mensajes)}")
+        return {
+            "type": "multi",
+            "messages": mensajes
         }
-        logging.info(f"[VIDEO_FN] ✓ Dict video listo para enviar (keys={list(video_dict.keys())})")
-        return video_dict
 
     except Exception as e:
-        logging.error(f"[VIDEO_FN] ❌ Error leyendo/enviando video: {e}")
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="❌ No logré enviarte el video. Intenta de nuevo."
-        )
-        return None
+        logging.error(f"❌ Error general al preparar videos: {e}")
+        return {
+            "type": "text",
+            "text": "❌ No logré enviarte los videos. Intenta más tarde."
+        }
 
 
-# ────────────────────────────────────────────────────────────
-# FUNCIÓN AUXILIAR – Detectar color en texto con alias y video
-# ────────────────────────────────────────────────────────────
 
-# 📼 Asociación de colores y modelos por video específico
-colores_video_modelos = {
-    "referencias": {
-        "verde":    ["279", "305"],
-        "azul":     ["279", "304", "305"],  # 305 también como azul
-        "fucsia":   ["279"],
-        "amarillo": ["279"],
-        "naranja":  ["279", "304"],
-        "negro":    ["279", "304"],
-        "blanco":   ["279", "305"],
-        "rojo":     ["279"],
-        "aqua":     ["305"],
-    }
-}
 
-# 🎨 Sinónimos y variantes comunes de clientes
-color_aliases = {
-    "rosado": "fucsia",
-    "rosa": "fucsia",
-    "fucsias": "fucsia",
-    "celeste": "azul",
-    "azul cielo": "aqua",
-    "azul clarito": "aqua",
-    "azul claro": "aqua",
-    "azulito": "aqua",
-    "azules": "azul",
-    "verdes": "verde",
-    "amarillas": "amarillo",
-    "blancos": "blanco",
-    "negros": "negro",
-    "rojos": "rojo",
-    "naranjas": "naranja",
-    "aqua": "azul",        # 👈 alias agregado correctamente ahora
-    "turquesa": "aqua"
-}
 
-# 🧠 Detección especial para colores por video
-def detectar_color_video(texto: str) -> str:
-    texto = texto.lower()
-    texto = texto.replace("las ", "").replace("los ", "").strip()
-
-    # Aplicar alias conocidos
-    for palabra, real_color in color_aliases.items():
-        if palabra in texto:
-            return real_color
-
-    # Fallback directo
-    for color in colores_video_modelos.get("referencias", {}):
-        if color in texto:
-            return color
-
-    return ""
-
-# 🎨 Fallback general para otros flujos o videos
-def detectar_color(texto: str) -> str:
-    colores = [
-        "negro", "blanco", "rojo", "azul", "amarillo", "verde",
-        "rosado", "gris", "morado", "naranja", "café", "beige",
-        "neón", "limón", "fucsia", "celeste", "aqua"
-    ]
-    texto = texto.lower()
-    for c in colores:
-        if c in texto:
-            return c
-    return ""
 
 # 👟 Obtener tallas desde inventario, respetando alias del color
 def obtener_tallas_por_color_alias(inventario, modelo, color_usuario):
@@ -1426,36 +1667,97 @@ def extraer_cm_y_convertir_talla(texto):
 
     return None
 
+def extraer_nombre(txt):
+    palabras = txt.split()
+    nombre = " ".join(p for p in palabras if p.istitle())
+    return nombre or "Nombre no detectado"
+
+def extraer_modelo(txt):
+    m = re.search(r"\d{3,4}", txt)
+    return m.group() if m else "Modelo no detectado"
+
+def extraer_dia_hora(txt):
+    m = re.search(r"(lunes|martes|miércoles|jueves|viernes|sábado|domingo)?\s*\d{1,2}(\s*(am|pm))?", txt, re.IGNORECASE)
+    return m.group() if m else "No especificado"
+# 📼 Asociación de colores y modelos por video específico
+colores_video_modelos = {
+    "referencias": {
+        "verde":    ["279", "305"],
+        "azul":     ["279", "304", "305"],
+        "fucsia":   ["279"],
+        "amarillo": ["279"],
+        "naranja":  ["279", "304"],
+        "negro":    ["279", "304"],
+        "blanco":   ["279", "305"],
+        "rojo":     ["279"],
+        "aqua":     ["305"],
+    }
+}
+
+# 🎨 Alias de color (bidireccional)
+color_aliases = {
+    "rosado": "fucsia", "rosa": "fucsia", "fucsias": "fucsia",
+    "celeste": "azul", "azules": "azul",
+    "azul cielo": "aqua", "azul clarito": "aqua", "azul claro": "aqua", "azulito": "aqua",
+    "verdes": "verde", "amarillas": "amarillo", "blancos": "blanco", "negros": "negro",
+    "rojos": "rojo", "naranjas": "naranja", "turquesa": "aqua"
+}
+
+# 🚀 Generar alias inversos automáticamente
+for base_color in list(color_aliases.values()):
+    color_aliases[base_color] = base_color
+
+# 🧠 Detección especial para colores por video
+def detectar_color_video(texto: str) -> str:
+    texto = texto.lower().strip()
+    for palabra, real_color in color_aliases.items():
+        if palabra in texto:
+            return real_color
+    for color in colores_video_modelos.get("referencias", {}):
+        if color in texto:
+            return color
+    return ""
+
+# 🎨 Detección general de colores
+def detectar_color(texto: str) -> str:
+    texto = texto.lower().strip()
+    for palabra, real_color in color_aliases.items():
+        if palabra in texto:
+            return real_color
+    colores_base = [
+        "negro", "blanco", "rojo", "azul", "amarillo", "verde",
+        "rosado", "gris", "morado", "naranja", "café", "beige",
+        "neón", "limón", "fucsia", "celeste", "aqua", "turquesa"
+    ]
+    for c in colores_base:
+        if c in texto:
+            return c
+    return ""
+
 
 # --------------------------------------------------------------------------------------------------
 
 async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
     numero = str(cid)
-
-    if cid not in estado_usuario:
-        reset_estado(cid)
-        await update.message.reply_text(
-            WELCOME_TEXT,
-            reply_markup=menu_botones([
-                "Hacer pedido", "Enviar imagen", "Ver catálogo",
-                "Rastrear pedido", "Realizar cambio"
-            ])
-        )
-        return
-
-    est = estado_usuario[cid]
-    inv = obtener_inventario()
-
     txt_raw = update.message.text or ""
     txt = normalize(txt_raw)
+   # Ya existe el usuario
+    est = estado_usuario[cid]
+    inv = obtener_inventario()
+    tallas = obtener_tallas_por_color_alias(inv, est.get("modelo", ""), est.get("color", ""))
+    if isinstance(tallas, (int, float, str)):
+        tallas = [str(tallas)]
 
     print("🧠 FASE:", est.get("fase"))
     print("🧠 TEXTO:", txt_raw, "|", repr(txt_raw))
     print("🧠 ESTADO:", est)
 
-    if txt in ("reset", "reiniciar", "empezar", "volver", "/start", "menu", "inicio"):
-        reset_estado(cid)
+    # 👋 Detectar saludo inicial y responder con bienvenida + videos
+    if any(p in txt for p in ("hola", "buenas", "buenos días", "buenas tardes", "buenas noches")):
+        logging.info(f"👋 Saludo detectado: {txt_raw} — CID: {cid}")
+
+        # 1. Mensaje de bienvenida
         await update.message.reply_text(
             WELCOME_TEXT,
             reply_markup=menu_botones([
@@ -1463,7 +1765,106 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "Rastrear pedido", "Realizar cambio"
             ])
         )
-        return
+
+        # 2. Envío automático de todos los videos disponibles (excepto confianza)
+        ruta_videos = "/var/data/videos"
+        try:
+            if not os.path.exists(ruta_videos):
+                logging.warning(f"⚠️ Carpeta de videos no encontrada: {ruta_videos}")
+                await ctx.bot.send_message(cid, "⚠️ Aún no tengo videos cargados.")
+                return
+
+            archivos = sorted([
+                f for f in os.listdir(ruta_videos)
+                if f.lower().endswith(".mp4") and "confianza" not in f.lower()
+            ])
+
+            logging.info(f"🎬 Videos encontrados (sin confianza): {archivos}")
+            print("📂 DEBUG: Archivos encontrados para enviar:", archivos)
+
+            if not archivos:
+                logging.warning("⚠️ Lista de videos vacía aunque la carpeta existe.")
+                await ctx.bot.send_message(cid, "⚠️ Aún no tengo videos cargados.")
+                return
+
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta!"
+            )
+            logging.info("🎯 Procediendo a enviar videos...")
+
+            for nombre in archivos:
+                try:
+                    path = os.path.join(ruta_videos, nombre)
+                    size = os.path.getsize(path)
+                    logging.info(f"🎥 Enviando: {nombre} — {size / 1024:.2f} KB")
+                    print(f"📤 DEBUG: Enviando {nombre} a {cid}")
+
+                    with open(path, "rb") as video_file:
+                        await ctx.bot.send_video(
+                            chat_id=cid,
+                            video=video_file,
+                            caption=f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}",
+                            parse_mode="Markdown"
+                        )
+
+                except Exception as e:
+                    logging.error(f"❌ Error enviando video '{nombre}': {e}")
+                    await ctx.bot.send_message(cid, f"⚠️ No pude enviar el video {nombre}")
+
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="🧐 ¿Cuál de estos modelos te interesa?"
+            )
+
+            # Solo cambiar la fase sin borrar el estado anterior
+            est["fase"] = "esperando_modelo_elegido"
+            estado_usuario[cid] = est
+            return
+
+        except Exception as e:
+            logging.error(f"❌ Error al enviar videos tras saludo: {e}")
+            await ctx.bot.send_message(cid, "❌ Hubo un error al cargar los videos.")
+            return
+
+
+
+    # 🎨 Si el cliente dice "me gustaron los amarillos", "quiero los rojos", etc.
+    if detectar_color(txt):
+        color = detectar_color(txt)
+
+        ruta = "/var/data/modelos_video"
+        if not os.path.exists(ruta):
+            await ctx.bot.send_message(cid, "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde.")
+            return
+
+        aliases_del_color = [color] + [k for k, v in color_aliases.items() if v == color]
+
+        coincidencias = [
+            f for f in os.listdir(ruta)
+            if f.lower().endswith(".jpg")
+            and any(alias in f.lower() for alias in aliases_del_color)
+        ]
+
+        if coincidencias:
+            await ctx.bot.send_message(cid, f"🎨 ¡Claro! Aquí te muestro modelos en color *{color.upper()}*.")
+            for archivo in coincidencias:
+                try:
+                    path = os.path.join(ruta, archivo)
+                    modelo = archivo.replace(".jpg", "").replace("_", " ")
+                    await ctx.bot.send_photo(
+                        chat_id=cid,
+                        photo=open(path, "rb"),
+                        caption=f"📸 Modelo en color *{color.upper()}*: *{modelo}*",
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logging.error(f"❌ Error enviando imagen: {e}")
+            await ctx.bot.send_message(cid, "🧐 ¿Cuál de estos modelos te interesa?")
+            est["color"] = color
+            est["fase"] = "esperando_modelo_elegido"
+            estado_usuario[cid] = est
+            return
 
     if menciona_catalogo(txt_raw):
         await ctx.bot.send_message(
@@ -1473,175 +1874,145 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         est["fase"] = "inicio"
         return
 
-    # 🎬 Si el cliente pide ver videos (solo si NO está ya esperando uno)
-    if est.get("fase") != "esperando_video_referencia":
-        if any(frase in txt for frase in ("videos", "quiero videos", "ver videos", "video")):
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    "🎬 ¡Claro! Aquí tienes videos de nuestras referencias más populares:\n\n"
-                    "• *DS 279 304 305* 🔥\n"
-                    "• *DS 261 277 303 295 299* 🔥\n"
-                    "• *REFERENCIAS NIÑO* 👶\n"
-                    "• *PROMO DESCUENTOS 39% OFF* 💸\n\n"
-                    "Escríbeme el número o el nombre del video que deseas ver."
-                ),
-                parse_mode="Markdown"
-            )
-            est["fase"] = "esperando_video_referencia"
-            estado_usuario[cid] = est
-            return
+    # ─────────────────────────────────────────────
+    # 📦 RESPUESTA UNIVERSAL SI EL CLIENTE EXPRESA DESCONFIANZA
+    # ─────────────────────────────────────────────
+    texto_normalizado = normalize(txt)
 
-    # 🎬 Procesar selección de video
-    if est.get("fase") == "esperando_video_referencia":
-        logging.info("[RESPONDER] ⇢ Entró fase 'esperando_video_referencia'")
-        logging.debug(f"[RESPONDER] Texto bruto = {txt_raw!r}")
+    frases_desconfianza = [
+        "no confio", "desconfio", "me han robado", "PERO YO COMO SE QUE NO ME VAN A ROBAR", "ya me robaron", "y si me roban",
+        "me estafaron", "ya me estafaron", "me hicieron el robo", "como se que no me van a robar",
+        "no quiero pagar anticipado", "no quiero dar plata antes", "no quiero enviar dinero sin ver",
+        "me da desconfianza", "me da miedo pagar", "no me da confianza", "me han tumbado",
+        "me hicieron fraude", "tengo miedo de pagar", "no tengo seguridad", "Como se que no me roban",
+        "quiero pagar al recibir", "pago al recibir", "solo contraentrega", "pago cuando llegue",
+        "cuando me lleguen pago", "Como se que no me van a robar", "pago cuando me llegue", "me tumbaron una vez",
+        "me jodieron", "ya me tumbaron", "no vuelvo a caer", "yo como se que no me roban", "eso me paso antes",
+        "no me sale el mensaje", "no me abre el link", "me han robado antes", "me da cosa pagar",
+        "no puedo pagar sin saber", "no mando dinero asi", "no conozco su tienda", "no estoy seguro",
+        "como se que es real", "como se que es confiable", "como saber si es real", "esto es confiable?",
+        "no tengo pruebas", "es seguro esto?", "no me siento comodo pagando", "mejor contraentrega",
+        "yo solo pago al recibir", "yo no pago antes", "a mi me han estafado", "me estafaron antes",
+        "me robaron antes", "y si no me llega", "y si no llega", "y si me estafan", "me robaron antes",
+        "ya me tumbaron plata", "me hicieron perder plata", "me quitaron la plata",
+        "me da miedo que me estafen", "esto no parece seguro", "no se ve seguro", "y si es mentira",
+        "y si es estafa", "robo", "yo no pago sin ver", "yo no mando plata asi", "robado",
+        "esto parece raro", "y si no cumplen", "y si no es verdad", "parece una estafa", "se ve raro",
+        "esto huele a estafa", "muy sospechoso", "no quiero perder plata", "no me arriesgo",
+        "no voy a arriesgar mi dinero"
+    ]
 
-        ref = normalize(txt_raw)
-        logging.debug(f"[RESPONDER] Referencia normalizada = {ref!r}")
+    if any(frase in texto_normalizado for frase in frases_desconfianza):
+        video_path = "/var/data/videos/video_confianza.mp4"
+        audio_path = "/var/data/audios/confianza/Desconfianza.mp3"
 
-        # Verificar si es una referencia válida de video
-        referencias_validas = {
-            "261", "ds 261", "277", "ds 277", "303", "ds 303",
-            "295", "ds 295", "299", "ds 299",
-            "279", "ds 279", "304", "ds 304", "305", "ds 305",
-            "niño", "niños", "kids", "infantil", "promo", "descuento", "descuentos"
-        }
-
-        if ref not in referencias_validas:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="⚠️ Esa referencia no la reconozco como un video. Si querías continuar tu compra, dime el modelo o mándame una imagen."
-            )
-            est["fase"] = "inicio"
-            estado_usuario[cid] = est
-            return
-
-        video_respuesta = await enviar_video_referencia(cid, ctx, ref)
-        logging.debug(f"[RESPONDER] video_respuesta type = {type(video_respuesta)}")
-
-        if isinstance(video_respuesta, dict):
-            est["video_activo"] = ref
-            est["fase"] = "esperando_color_post_video"
-            estado_usuario[cid] = est
-            return video_respuesta
-
-        # Si hubo error o el video no existe
-        est["fase"] = "inicio"
-        estado_usuario[cid] = est
-        return
-
-
-    # 🟩 Fase post-video: el cliente dice un color (“me gustaron los verdes”)
-    if est.get("fase") == "esperando_color_post_video":
-        video_activo = est.get("video_activo", "").replace(".mp4", "").lower()
-
-        if video_activo == "referencias":
-            color = detectar_color_video(txt)
-
-            # ✅ NUEVO: incluir alias que apuntan al mismo color
-            colores_equivalentes = [color] + [k for k, v in color_aliases.items() if v == color]
-            modelos_permitidos = []
-            for c in colores_equivalentes:
-                modelos_permitidos.extend(colores_video_modelos.get(video_activo, {}).get(c, []))
-        else:
-            color = detectar_color(txt)
-            modelos_permitidos = []
-
-        if not color:
-            await ctx.bot.send_message(cid, "👀 No entendí el color. ¿Puedes repetirlo?")
-            return
-
-        if video_activo == "referencias" and not modelos_permitidos:
-            await ctx.bot.send_message(cid, f"😕 No encontré modelos de color *{color.upper()}* para ese video.")
-            return
-
-        ruta = "/var/data/modelos_video"
-        if not os.path.exists(ruta):
-            await ctx.bot.send_message(cid, "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde.")
-            return
-
-        # 📁 Buscar imágenes que contengan el color o cualquier alias relacionado
-        aliases_del_color = [color] + [k for k, v in color_aliases.items() if v == color]
-
-        coincidencias = [
-            f for f in os.listdir(ruta)
-            if f.lower().endswith(".jpg")
-            and any(alias in f.lower() for alias in aliases_del_color)
-            and (not modelos_permitidos or any(modelo in f for modelo in modelos_permitidos))
+        mensajes = [
+            {
+                "type": "text",
+                "text": "🤝 Entendemos tu preocupación. Te compartimos este video para que veas que somos una tienda real y seria.",
+                "parse_mode": "Markdown"
+            }
         ]
 
-        if not coincidencias:
-            await ctx.bot.send_message(cid, f"😕 No encontré modelos con ese color.")
-            return
+        if os.path.exists(video_path):
+            with open(video_path, "rb") as f:
+                b64_video = base64.b64encode(f.read()).decode("utf-8")
+                mensajes.append({
+                    "type": "video",
+                    "base64": b64_video,
+                    "mimetype": "video/mp4",
+                    "filename": "video_confianza.mp4",
+                    "text": "🎥 Mira este video corto de confianza:"
+                })
+        else:
+            mensajes.append({
+                "type": "text",
+                "text": "📹 No pudimos cargar el video en este momento, pero puedes confiar en nosotros. ¡Llevamos años vendiendo con éxito!",
+                "parse_mode": "Markdown"
+            })
 
-        for archivo in coincidencias:
-            try:
-                path = os.path.join(ruta, archivo)
-                modelo = archivo.replace(".jpg", "").replace("_", " ")
-                await ctx.bot.send_photo(
-                    chat_id=cid,
-                    photo=open(path, "rb"),
-                    caption=f"📸 En el video aparece el modelo *{modelo}*",
-                    parse_mode="Markdown"
-                )
-            except Exception as e:
-                logging.error(f"❌ Error enviando imagen: {e}")
-                await ctx.bot.send_message(cid, "⚠️ No pude enviar una de las imágenes.")
+        if os.path.exists(audio_path):
+            with open(audio_path, "rb") as f:
+                b64_audio = base64.b64encode(f.read()).decode("utf-8")
+                mensajes.append({
+                    "type": "audio",
+                    "base64": b64_audio,
+                    "mimetype": "audio/mpeg",
+                    "filename": "Desconfianza.mp3",
+                    "text": "🎧 Escucha este audio breve también:"
+                })
 
-        await ctx.bot.send_message(cid, "🧐 ¿Cuál de estos modelos te interesa?")
-        est["color"] = color  # ✅ Guardar el color para el siguiente paso del flujo
-        est["fase"] = "esperando_modelo_elegido"
-        estado_usuario[cid] = est
-        return
+        await reanudar_fase_actual(cid, ctx, est)
+        return {"type": "multi", "messages": mensajes}
 
 
-    
-    # 🔄 Mostrar todos los colores del modelo (solo si está en fase inicial)
-    if est.get("fase") in ("inicio", "haciendo_pedido"):
-        match_modelo = re.search(r"\b(279|304|305)\b", txt)
-        if match_modelo:
-            modelo = str(match_modelo.group(1))
-            ruta = "/var/data/modelos_colores"  # Asegúrate que este es el path correcto
 
-            if not os.path.exists(ruta) or not os.listdir(ruta):
+    # 🟨 Detección universal de color — funciona en cualquier fase
+    try:
+        if detectar_color(txt):
+            color = detectar_color(txt)
+            logging.info(f"[COLOR] Petición de color → {color} | CID: {cid}")
+
+            ruta = "/var/data/modelos_video"
+            if not os.path.exists(ruta):
+                logging.warning(f"[COLOR] Carpeta no existe: {ruta}")
                 await ctx.bot.send_message(cid, "⚠️ Aún no tengo imágenes cargadas. Intenta más tarde.")
                 return
 
-            imagenes_modelo = [
+            aliases_del_color = [color] + [k for k, v in color_aliases.items() if v == color]
+            logging.debug(f"[COLOR] Aliases del color: {aliases_del_color}")
+
+            coincidencias = [
                 f for f in os.listdir(ruta)
-                if f.lower().endswith((".jpg", ".jpeg", ".png")) and modelo in f
+                if f.lower().endswith(".jpg") and any(alias in f.lower() for alias in aliases_del_color)
             ]
 
-            if not imagenes_modelo:
-                await ctx.bot.send_message(cid, f"😕 No encontré imágenes del modelo {modelo}.")
+            logging.info(f"[COLOR] Coincidencias encontradas: {coincidencias}")
+
+            if not coincidencias:
+                await ctx.bot.send_message(cid, f"😕 No encontré modelos con color *{color.upper()}*.")
                 return
 
-            for archivo in imagenes_modelo:
+            await ctx.bot.send_message(cid, f"🎨 ¡Perfecto! Aquí tienes modelos en color *{color.upper()}*:")
+
+            errores_envio = 0
+            for archivo in coincidencias:
+                path = os.path.join(ruta, archivo)
+                modelo = archivo.replace(".jpg", "").replace("_", " ")
+
                 try:
-                    path = os.path.join(ruta, archivo)
-                    color = archivo.replace(".jpg", "").replace(".jpeg", "").replace(".png", "")
-                    color = color.replace("_", " ").replace(modelo, "").strip()
                     await ctx.bot.send_photo(
                         chat_id=cid,
                         photo=open(path, "rb"),
-                        caption=f"📸 Modelo *{modelo}* color *{color}*",
+                        caption=f"📸 Modelo *{modelo}* en color *{color.upper()}*",
                         parse_mode="Markdown"
                     )
+                    logging.debug(f"[COLOR] Imagen enviada: {archivo}")
                 except Exception as e:
-                    logging.error(f"❌ Error enviando imagen: {e}")
-                    await ctx.bot.send_message(cid, "⚠️ No pude enviar una de las imágenes.")
+                    errores_envio += 1
+                    logging.error(f"❌ Error enviando {archivo}: {e}")
 
-            await ctx.bot.send_message(cid, "🧐 ¿Cuál color de este modelo te interesa?")
-            est["fase"] = "esperando_color"
-            est["referencia"] = modelo
+            if errores_envio:
+                await ctx.bot.send_message(cid, f"⚠️ No pude enviar {errores_envio} de {len(coincidencias)} imágenes.")
+
+            await ctx.bot.send_message(cid, "🧐 ¿Cuál de estos modelos te interesa?")
+
+            est["color"] = color
+            est["fase"] = "esperando_modelo_elegido"
             estado_usuario[cid] = est
             return
+    except Exception as e:
+        logging.error(f"❌ Error en bloque de detección de color: {e}")
+        await ctx.bot.send_message(cid, "❌ Ocurrió un problema al procesar el color. Intenta de nuevo.")
+        return
+
 
     # 🟦 El cliente ya vio los modelos y confirma: "quiero los 279", "sí esos", etc.
     if est.get("fase") == "esperando_modelo_elegido":
+        logging.debug(f"[CONFIRMA MODELO] Texto: {txt_raw}")
+
         referencia_mencionada = re.search(r"\b(279|304|305)\b", txt)
-        afirmacion = any(palabra in txt for palabra in (
+        afirmacion = any(p in txt for p in (
             "sí", "s", "esos", "quiero", "me gustaron", "me sirven",
             "ese", "perfecto", "dale", "me encanta", "lo quiero"
         ))
@@ -1649,41 +2020,39 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ref_final = ""
         if referencia_mencionada:
             ref_final = referencia_mencionada.group(1)
+            logging.info(f"[CONFIRMA MODELO] Número detectado: {ref_final}")
         elif afirmacion:
             ref_final = est.get("referencia") or est.get("ultimo_modelo", "")
+            logging.info(f"[CONFIRMA MODELO] Afirmación sin número, usando ref: {ref_final}")
 
         if ref_final:
             # ── Guardar datos clave ─────────────────────────────────
-            est["referencia"] = ref_final
-            est["modelo"]     = ref_final
-            est["color"]      = est.get("color", "")
-            if not est.get("marca"):      # marca por defecto si viene de video
-                est["marca"] = "DS"
-
+            est.update({
+                "referencia": ref_final,
+                "modelo":     ref_final,
+                "marca":      est.get("marca") or "DS"
+            })
             modelo = est["modelo"]
-            color  = est["color"]
+            color  = est.get("color", "")
 
-            # ── Alias de color ─────────────────────────────────────
-            def colores_equivalentes(base: str):
-                b  = normalize(base)
-                eq = {b}
-                for alias, real in color_aliases.items():
-                    if normalize(alias) == b or normalize(real) == b:
-                        eq.update({normalize(alias), normalize(real)})
-                return eq
+            # ── Precio desde Google Sheets ─────────────────────────
+            try:
+                equivalentes = {normalize(color)} | {
+                    normalize(a) for a, b in color_aliases.items()
+                    if normalize(b) == normalize(color)
+                }
+                precio = next(
+                    (row.get("precio") for row in inv
+                     if normalize(row.get("modelo", "")) == normalize(modelo)
+                     and any(eq in normalize(row.get("color", "")) for eq in equivalentes)),
+                    None
+                )
+                est["precio_total"] = int(precio) if precio else 0
+            except Exception as e:
+                logging.error(f"[CONFIRMA MODELO] Error buscando precio: {e}")
+                est["precio_total"] = 0
 
-            equivalentes = colores_equivalentes(color)
-
-            # ── Precio desde Google Sheets (comparación flexible) ──
-            precio = next(
-                (row.get("precio") for row in inv
-                 if normalize(row.get("modelo", "")) == normalize(modelo)
-                 and any(eq in normalize(row.get("color", "")) for eq in equivalentes)),
-                None
-            )
-            est["precio_total"] = int(precio) if precio else 0
-
-            # ── Tallas disponibles usando alias ────────────────────
+            # ── Tallas disponibles ─────────────────────────────────
             tallas = obtener_tallas_por_color_alias(inv, modelo, color)
             if isinstance(tallas, (int, float, str)):
                 tallas = [str(tallas)]
@@ -1717,9 +2086,109 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
 
+    # ──────────────────────────────────────────────────────
+    # 💬 DETECTOR UNIVERSAL — "me pagan el 30"
+    # ──────────────────────────────────────────────────────
+    if re.search(r"(me pagan|me consignan|me depositan)( el)? \d{1,2}", txt):
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text=(
+                "🗓️ ¡Perfecto! Te contactaremos ese día para ayudarte a cerrar la compra.\n\n"
+                "Para dejarte agendado, por favor mándame estos datos:\n\n"
+                "• 🧑‍💼 *Tu nombre completo*\n"
+                "• 👟 *Producto que te interesa*\n"
+                "• 🕒 *¿Qué día y a qué hora te contactamos?*"
+            ),
+            parse_mode="Markdown"
+        )
+        est["fase"] = "esperando_datos_pago_posterior"
+        estado_usuario[cid] = est
+        return
+
+    # ──────────────────────────────────────────────────────
+    # 📋 RECOLECCIÓN DE DATOS PARA LA HOJA "PENDIENTES"
+    # ──────────────────────────────────────────────────────
+    if est.get("fase") == "esperando_datos_pago_posterior":
+        try:
+            texto_limpio = txt.replace("\n", " ").strip()
+
+            # Extraer modelo (número de 3 o 4 cifras)
+            modelo = re.search(r"\b\d{3,4}\b", texto_limpio)
+            modelo = modelo.group(0) if modelo else ""
+
+            # Extraer nombre: lo que va antes del modelo
+            nombre = texto_limpio.split(modelo)[0].strip() if modelo else texto_limpio[:25].strip()
+
+            # Extraer día/hora desde la palabra clave
+            dia_hora = ""
+            match_dia = re.search(r"(mañana|hoy|el\s+dia\s+\d+|el\s+\d+|día\s+\d+|a\s+las\s+\d+)", texto_limpio, re.IGNORECASE)
+            if match_dia:
+                dia_hora = texto_limpio[match_dia.start():].strip()
+
+            if nombre and modelo and dia_hora:
+                datos_pendiente = {
+                    "Cliente": nombre.title(),
+                    "Teléfono": cid,
+                    "Producto": modelo,
+                    "Pago": dia_hora
+                }
+
+                ok = registrar_orden_unificada(datos_pendiente, destino="PENDIENTES")
+
+                if ok:
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text=f"✅ ¡Listo {nombre.title()}! Te escribiremos {dia_hora} para cerrar la compra del modelo {modelo.upper()} 🔥"
+                    )
+                    est["fase"] = "inicial"
+                    estado_usuario[cid] = est
+                else:
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text="⚠️ No pudimos registrar tu promesa de pago. Intenta nuevamente."
+                    )
+                return
+
+            else:
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=(
+                        "❌ Para agendar tu pago necesito 3 cosas:\n"
+                        "1️⃣ Tu *nombre*\n2️⃣ El *modelo* que te gustó\n3️⃣ *Día y hora* estimada de pago\n\n"
+                        "Ejemplo:\nJuan\nDS 298\nMañana a las 2"
+                    ),
+                    parse_mode="Markdown"
+                )
+                return
+
+        except Exception as e:
+            logging.error(f"[PENDIENTES] ❌ Error registrando pago posterior: {e}")
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="⚠️ Ocurrió un problema registrando tus datos. Intenta de nuevo más tarde."
+            )
+            return
 
 
+    # ─────────────────────────────────────────────
+    # 📍 DETECTAR SI ES DE BUCARAMANGA (GLOBAL)
+    # ─────────────────────────────────────────────
+    if not est.get("es_de_bucaramanga") and any(b in txt for b in ["bucaramanga", "bga", "b/manga"]):
+        est["es_de_bucaramanga"] = True
+        estado_usuario[cid] = est
+        logging.info(f"📍 Cliente {cid} es de Bucaramanga")
 
+        if est.get("fase") == "inicio":
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "📍 ¡Genial! Como estás en *Bucaramanga*, más adelante podrás elegir entre *que lo envie un domiciliario* 🛵 "
+                    "o *recoger en tienda* 🏪.\n\n"
+                    "Continuemos con tu pedido 👟"
+                ),
+                parse_mode="Markdown"
+            )
+            return
 
 
     # 💬 Si el usuario pregunta el precio en cualquier parte del flujo
@@ -1828,70 +2297,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             await reanudar_fase_actual(cid, ctx, est)
             return
-
-        # 📦 FAQ 4: Frases comunes de desconfianza (antes del uso)
-        frases_desconfianza = [
-                "no confio", "desconfio",
-                "me han robado", "me robaron", "ya me robaron", "me tumbaron",
-                "me estafaron", "ya me estafaron", "me hicieron el robo",
-                "no quiero pagar antes", "no quiero pagar anticipado",
-                "no quiero dar plata antes", "no quiero enviar dinero sin ver",
-                "me da desconfianza", "me da miedo pagar", "no me da confianza",
-                "me han tumbado", "me hicieron fraude", "tengo miedo de pagar",
-                "no tengo seguridad", "prefiero contraentrega", "quiero pagar al recibir",
-                "pago al recibir", "solo contraentrega", "pago cuando llegue",
-                "cuando me lleguen pago", "cuando llegue pago", "pago cuando me llegue",
-                "me tumbaron una vez", "me jodieron", "ya me tumbaron",
-                "no vuelvo a caer", "ya me paso una vez", "eso me paso antes",
-                "no me sale el mensaje", "no me abre el link", "me han robado antes",
-                "me da cosa pagar", "no puedo pagar sin saber", "no mando dinero asi",
-                "no conozco su tienda", "no estoy seguro", "como se que es real",
-                "como se que es confiable", "como saber si es real", "esto es confiable?",
-                "no tengo pruebas", "es seguro esto?", "no me siento comodo pagando",
-                "mejor contraentrega", "yo solo pago al recibir", "yo no pago antes",
-                "a mi me han estafado", "me estafaron antes", "me robaron antes",
-                "y si no me llega", "y si no llega", "y si me estafan", "y si es falso",
-                "ya me tumbaron plata", "me hicieron perder plata", "me quitaron la plata",
-                "me da miedo que me estafen", "esto no parece seguro", "no se ve seguro",
-                "y si es mentira", "y si es estafa", "robo",
-                "yo no pago sin ver", "yo no mando plata asi", "robado",
-                "esto parece raro", "y si no cumplen", "y si no es verdad",
-                "parece una estafa", "se ve raro", "esto huele a estafa", "muy sospechoso",
-                "no quiero perder plata", "no me arriesgo", "no voy a arriesgar mi dinero"
-        ]
-
-        if any(frase in texto_normalizado for frase in frases_desconfianza):
-            video_path = "/var/data/videos/video_confianza.mp4"
-
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="🤝 Entendemos tu preocupación. Te compartimos este video para que veas que somos una tienda real y seria.",
-                parse_mode="Markdown"
-            )
-
-            if os.path.exists(video_path):
-                with open(video_path, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode("utf-8")
-
-                return {
-                    "type": "video",
-                    "base64": b64,
-                    "mimetype": "video/mp4",
-                    "filename": "video_confianza.mp4",
-                    "text": "🤝 Entendemos tu preocupación. Te compartimos este video para que veas que somos una tienda real y seria."
-                }
-            else:
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text="📹 No pudimos cargar el video en este momento, pero puedes confiar en nosotros. ¡Llevamos años vendiendo con éxito!",
-                    parse_mode="Markdown"
-                )
-
-            await reanudar_fase_actual(cid, ctx, est)
-            return
-
-
-
 
     # FAQ 5: ¿Dónde están ubicados?
     if est.get("fase") not in ("editando_dato", "esperando_direccion", "confirmar_datos_guardados"):
@@ -2109,31 +2514,65 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             # ✅ Si ya hay talla (desde imagen de lengüeta), saltar a confirmar datos
             if est.get("talla"):
                 est["fase"] = "esperando_talla"
-                # Simula respuesta del cliente para que entre directo al bloque de talla
-                # Esto permite que el bloque de "esperando_talla" se ejecute automáticamente
+                estado_usuario[cid] = est
+
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=(
+                        f"📏 Según la etiqueta que me enviaste, la talla ideal para tus zapatos es *{est['talla']}* en nuestra horma.\n"
+                        "¿Deseas que te lo enviemos hoy mismo?"
+                    ),
+                    parse_mode="Markdown"
+                )
+
+                # ⚠️ Reentrada automática para que se dispare el flujo como si el cliente hubiera escrito "sí"
                 return await procesar_wa(cid, "sí")
 
-            # 🔁 Si aún no tiene talla, se comporta como antes
+            # 🔁 Si aún no tiene talla, mostrar las tallas y pedir foto de lengüeta
             est["fase"] = "esperando_talla"
+            estado_usuario[cid] = est
+
             tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
             if isinstance(tallas, (int, float, str)):
                 tallas = [str(tallas)]
 
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=(
-                    f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
-                    f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
-                    "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟 y la detectamos automáticamente."
-                ),
-                parse_mode="Markdown"
-            )
-            return
+            ruta = "/var/data/extra/lengueta_ejemplo.jpg"
+            if os.path.exists(ruta):
+                with open(ruta, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+                    return {
+                        "type": "multi",
+                        "messages": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
+                                    f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
+                                    "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟."
+                                ),
+                                "parse_mode": "Markdown"
+                            },
+                            {
+                                "type": "photo",
+                                "base64": f"data:image/jpeg;base64,{b64}",
+                                "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
+                            }
+                        ]
+                    }
+            else:
+                return {
+                    "type": "text",
+                    "text": (
+                        f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
+                        "📸 Mándame una foto de la lengüeta de tu zapato para detectar tu talla ideal."
+                    ),
+                    "parse_mode": "Markdown"
+                }
 
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="Cancelado. /start para reiniciar o cuéntame si quieres ver otra referencia. 📋",
+                text="❌ Cancelado. Escribe /start para reiniciar o dime si deseas ver otra referencia. 📋",
                 parse_mode="Markdown"
             )
             reset_estado(cid)
@@ -2220,76 +2659,85 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if talla_detectada:
             est["talla"] = talla_detectada
 
-            # 🔍 Ver si ya hay memoria del cliente
-            cliente = obtener_datos_cliente(numero)
+        # 🔍 Ver si ya hay memoria del cliente
+        cliente = obtener_datos_cliente(numero)
 
-            if cliente:
-                nombre    = cliente.get("nombre", "cliente")
-                correo    = cliente.get("correo", "No registrado")
-                telefono  = cliente.get("telefono", numero)
-                cedula    = cliente.get("cedula", "No registrada")
-                ciudad    = cliente.get("ciudad", "No registrada")
-                provincia = cliente.get("provincia", "No registrada")
-                direccion = cliente.get("direccion", "No registrada")
+        if cliente:
+            nombre    = cliente.get("nombre", "cliente")
+            correo    = cliente.get("correo", "No registrado")
+            telefono  = cliente.get("telefono", numero)
+            cedula    = cliente.get("cedula", "No registrada")
+            ciudad    = cliente.get("ciudad", "No registrada")
+            provincia = cliente.get("provincia", "No registrada")
+            direccion = cliente.get("direccion", "No registrada")
 
-                est.update({
-                    "nombre": nombre,
-                    "correo": correo,
-                    "telefono": telefono,
-                    "cedula": cedula,
-                    "ciudad": ciudad,
-                    "provincia": provincia,
-                    "direccion": direccion
-                })
+            est.update({
+                "nombre": nombre,
+                "correo": correo,
+                "telefono": telefono,
+                "cedula": cedula,
+                "ciudad": ciudad,
+                "provincia": provincia,
+                "direccion": direccion
+            })
 
-                precio = next(
-                    (i["precio"] for i in inv
-                     if normalize(i["marca"]) == normalize(est["marca"])
-                     and normalize(i["modelo"]) == normalize(est["modelo"])
-                     and normalize(i["color"]) == normalize(est["color"])),
-                    None
-                )
-                est["precio_total"] = int(precio) if precio else 0
-                est["sale_id"] = generate_sale_id()
-
-                resumen = (
-                    f"✅ Pedido: {est['sale_id']}\n"
-                    f"👤Nombre: {nombre}\n"
-                    f"📧Correo: {correo}\n"
-                    f"📱Celular: {telefono}\n"
-                    f"🪪Cédula: {cedula}\n"
-                    f"📍Dirección: {direccion}, {ciudad}, {provincia}\n"
-                    f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
-                    f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
-                    "¿Estos datos siguen siendo correctos o deseas cambiar algo?"
-                )
-
-                est["fase"] = "confirmar_datos_guardados"
-                estado_usuario[cid] = est
-                await ctx.bot.send_message(chat_id=cid, text=resumen, parse_mode="Markdown")
-                return
-
-            # 🧾 No hay cliente guardado → continuar normal
-            est["fase"] = "esperando_nombre"
-            estado_usuario[cid] = est
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="¿Tu nombre completo para el pedido?",
-                parse_mode="Markdown"
+            # ── Precio y sale_id ──────────────────────────────
+            precio = next(
+                (i["precio"] for i in inv
+                 if normalize(i["marca"]) == normalize(est["marca"])
+                 and normalize(i["modelo"]) == normalize(est["modelo"])
+                 and normalize(i["color"]) == normalize(est["color"])),
+                None
             )
+            est["precio_total"] = int(precio) if precio else 0
+            est["sale_id"] = generate_sale_id()
+
+            # ── Guardar RESUMEN dict ─────────────────────────
+            est["resumen"] = {
+                "Número Venta": est["sale_id"],
+                "Fecha Venta":  datetime.now().isoformat(),
+                "Cliente":      nombre,
+                "Teléfono":     telefono,
+                "Cédula":       cedula,
+                "Producto":     est["modelo"],
+                "Color":        est["color"],
+                "Talla":        est["talla"],
+                "Correo":       correo,
+                "Pago":         None,
+                "Estado":       "PENDIENTE"
+            }
+
+            # ── Mensaje para confirmar o editar ──────────────
+            resumen_msg = (
+                f"✅ Pedido: {est['sale_id']}\n"
+                f"👤Nombre: {nombre}\n"
+                f"📧Correo: {correo}\n"
+                f"📱Celular: {telefono}\n"
+                f"🪪Cédula: {cedula}\n"
+                f"📍Dirección: {direccion}, {ciudad}, {provincia}\n"
+                f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
+                f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
+                "¿Estos datos siguen siendo correctos o deseas cambiar algo?\n"
+                "• Responde *sí* si todo está bien.\n"
+                "• O dime el campo a cambiar (nombre, correo, teléfono, etc.)."
+            )
+
+            est["fase"] = "confirmar_datos_guardados"   # ⬅️  Primero confirmar / editar
+            estado_usuario[cid] = est
+            await ctx.bot.send_message(chat_id=cid, text=resumen_msg, parse_mode="Markdown")
             return
 
-        # 🚫 No se detectó ninguna talla → mostrar tallas y pedir imagen
+
+        # 🧾 No hay cliente guardado → continuar normal
+        est["fase"] = "esperando_nombre"
+        estado_usuario[cid] = est
         await ctx.bot.send_message(
             chat_id=cid,
-            text=(
-                f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
-                f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
-                "📸 Para darte tu *talla ideal*, mándame una foto de la *lengüeta de tu zapato* 👟 y la detectamos automáticamente."
-            ),
+            text="🤩Perfecto, para iniciar la orden de compra dime tu nombre completo",
             parse_mode="Markdown"
         )
         return
+
 
 
 
@@ -2327,12 +2775,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"💲Valor a pagar: {precio:,} COP\n\n"
                 "¿Cómo deseas hacer el pago?\n"
                 "• 💸 *Contraentrega*: adelanta 35 000 COP (se descuenta del total).\n"
-                "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n\n"
-                "Escribe *Transferencia* o *Contraentrega*."
+                "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n"
+                "• 🟦 *Addi*: financiación inmediata (crédito a cuotas).\n\n"
+                "Escribe *Transferencia*, *Contraentrega* o *Addi*."
             )
             await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
             estado_usuario[cid] = est
             return
+
 
         # B) Detectar qué campo desea cambiar
         campos = {
@@ -2550,6 +3000,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Estado": "PENDIENTE"
         }
 
+    # ────────────────────────────────────────────────
+    # 💳 MÉTODO DE PAGO – RESUMEN PERSONALIZADO
+    # ────────────────────────────────────────────────
+    if est.get("fase") == "resumen_compra":
         msg = (
             f"✅ Pedido: {est['sale_id']}\n"
             f"👤Nombre: {est['nombre']}\n"
@@ -2558,21 +3012,38 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"📍Dirección: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
             f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
             f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
-            "¿Cómo deseas hacer el pago?\n"
-            "• 💸 *Contraentrega*: adelanta 35 000 COP (se descuenta del total).\n"
-            "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n\n"
-            "Escribe *Transferencia* o *Contraentrega*."
         )
+
+        if est.get("es_de_bucaramanga"):
+            msg += (
+                "📍 Como estás en *Bucaramanga*, puedes elegir:\n"
+                "• 🛵 *Domicilio*: te lo llevamos y pagas al recibir\n"
+                "• 🏪 *Tienda*: puedes pasar a recogerlo tú mismo\n\n"
+                "¿Qué prefieres? Escribe *domicilio* o *tienda*"
+            )
+            est["fase"] = "esperando_metodo_bucaramanga"
+        else:
+            msg += (
+                "¿Cómo deseas hacer el pago?\n"
+                "• 💸 *Contraentrega*: adelanta 35 000 COP (se descuenta del total).\n"
+                "• 💰 *Transferencia*: paga completo hoy y obtén 5 % de descuento.\n"
+                "• 🟦 *Addi*: financiación inmediata (crédito a cuotas).\n\n"
+                "Escribe *Transferencia*, *Contraentrega* o *Addi*."
+            )
+            est["fase"] = "esperando_pago"
+
         await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
-        est["fase"] = "esperando_pago"
         estado_usuario[cid] = est
         return
 
-    # 💳 Método de pago
+    # ────────────────────────────────────────────────
+    # 💳 MÉTODO DE PAGO – ELECCIÓN
+    # ────────────────────────────────────────────────
     if est.get("fase") == "esperando_pago":
         opciones = {
             "transferencia": ["transferencia", "trasferencia", "transf", "trans", "pago inmediato", "qr"],
-            "contraentrega": ["contraentrega", "contra entrega", "contra", "contrapago"]
+            "contraentrega": ["contraentrega", "contra entrega", "contra", "contrapago"],
+            "addi": ["addi", "pagar con addi", "credito", "crédito", "financiacion", "financiación"]
         }
         txt_normalizado = normalize(txt_raw)
         metodo_detectado = None
@@ -2584,7 +3055,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not metodo_detectado:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="💳 No entendí el método de pago. Escribe *transferencia* o *contraentrega* 😊",
+                text="💳 No entendí el método de pago. Escribe *transferencia*, *contraentrega* o *Addi* 😊",
                 parse_mode="Markdown"
             )
             return
@@ -2604,20 +3075,22 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "Valor Final": valor_final
             })
 
+            estado_usuario[cid] = est
             msg = (
                 "🟢 Elegiste *TRANSFERENCIA*.\n\n"
                 f"💰 Valor original: {precio_original:,} COP\n"
-                f"🎉 Descuento 5 %: -{descuento:,} COP\n"
+                f"🎉 Descuento 5 %: -{descuento:,} COP\n"
                 f"✅ Total a pagar: {valor_final:,} COP\n\n"
                 "💳 Cuentas:\n"
-                "- Bancolombia 30300002233 (X100 SAS)\n"
-                "- Nequi 317 717 1171\n"
-                "- Daviplata 300 414 1021\n\n"
+                "- Bancolombia 30300002233 (X100 SAS)\n"
+                "- Nequi 317 717 1171\n"
+                "- Daviplata 300 414 1021\n\n"
                 "📸 Envía aquí la foto del comprobante."
             )
             await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
+            return
 
-        else:
+        elif metodo_detectado == "contraentrega":
             est["fase"] = "esperando_comprobante"
             est["metodo_pago"] = "Contraentrega"
             resumen.update({
@@ -2625,70 +3098,198 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "Valor Anticipo": 35000
             })
 
+            estado_usuario[cid] = est
             msg = (
                 "🟡 Elegiste *CONTRAENTREGA*.\n\n"
-                "Debes adelantar *35 000 COP* para el envío (se descuenta del total).\n\n"
+                "Debes adelantar *35 000 COP* para el envío (se descuenta del total).\n\n"
                 "💳 Cuentas:\n"
-                "- Bancolombia 30300002233 (X100 SAS)\n"
-                "- Nequi 317 717 1171\n"
-                "- Daviplata 300 414 1021\n\n"
+                "- Bancolombia 30300002233 (X100 SAS)\n"
+                "- Nequi 317 717 1171\n"
+                "- Daviplata 300 414 1021\n\n"
                 "📸 Envía aquí la foto del comprobante."
             )
             await ctx.bot.send_message(chat_id=cid, text=msg, parse_mode="Markdown")
+            return
 
-        estado_usuario[cid] = est
-        return
+        # ────────────────────────────────────────────────
+        # 💳 DETECTÓ MÉTODO "Addi"
+        # ────────────────────────────────────────────────
+        elif metodo_detectado == "addi":
+            est["fase"] = "esperando_datos_addi"
+            est["metodo_pago"] = "Addi"
+            estado_usuario[cid] = est
+
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "🟦 Elegiste *Addi* para financiar tu compra.\n\n"
+                    "Por favor envíame los siguientes datos (cada uno en una línea):\n"
+                    "1️⃣ Nombre completo\n"
+                    "2️⃣ Número de cédula\n"
+                    "3️⃣ Correo electrónico\n"
+                    "4️⃣ Teléfono WhatsApp\n\n"
+                    "_La aprobación está sujeta a políticas de Addi y centrales de riesgo._"
+                ),
+                parse_mode="Markdown"
+            )
+            return   # ← nada más se procesa en esta vuelta
+
+
+        # ────────────────────────────────────────────────
+        # ⏸️  PAUSA GLOBAL DEL CHAT (si un humano debe continuar)
+        # ────────────────────────────────────────────────
+        if est.get("pausa_hasta"):
+            pausa_hasta = datetime.fromisoformat(est["pausa_hasta"])
+            if datetime.now() < pausa_hasta:
+                logging.info(f"[PAUSA] Chat {cid} pausado hasta {pausa_hasta}")
+
+                # Sólo se permiten imágenes si estuviera esperando otra cosa.
+                if est.get("fase") == "pausado_addi" and mtype.startswith("image"):
+                    pass  # aquí podrías analizarlas si lo deseas
+                else:
+                    return {"status": "paused"}      # 🔇 silencio total
+            else:
+                # La pausa expiró → reiniciamos el flujo
+                est.pop("pausa_hasta", None)
+                if est.get("fase", "").startswith("pausado_"):
+                    est["fase"] = "inicial"
+                estado_usuario[cid] = est
+
+
+        # ────────────────────────────────────────────────
+        # 📋 DATOS PARA ADDI – SOLO 4 CAMPOS OBLIGATORIOS
+        # ────────────────────────────────────────────────
+        if est.get("fase") == "esperando_datos_addi":
+            try:
+                # txt_raw ≡ mensaje original sin limpiar
+                partes = [p.strip() for p in txt_raw.splitlines() if p.strip()]
+                nombre = partes[0] if len(partes) >= 1 else ""
+
+                cedula_match    = re.search(r"\d{6,12}", partes[1]) if len(partes) >= 2 else None
+                correo_match    = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", partes[2]) if len(partes) >= 3 else None
+                telefono_match  = re.search(r"3\d{9}", partes[3]) if len(partes) >= 4 else None
+
+                if not (nombre and cedula_match and correo_match and telefono_match):
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text=(
+                            "❌ *Faltan datos o hay un formato incorrecto*.\n\n"
+                            "Envíame 4 líneas así:\n"
+                            "1️⃣ Nombre completo\n2️⃣ Cédula\n3️⃣ Correo\n4️⃣ Teléfono WhatsApp"
+                        ),
+                        parse_mode="Markdown"
+                    )
+                    return  # sigue en la misma fase
+
+                datos_addi = {
+                    "Cliente":   nombre.title(),
+                    "Cédula":    cedula_match.group(0),
+                    "Teléfono":  telefono_match.group(0),
+                    "Correo":    correo_match.group(0),
+                    "Fecha":     datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+
+                if registrar_orden_unificada(datos_addi, destino="ADDI"):
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text=(
+                            "✅ ¡Gracias! Tus datos fueron enviados a Addi.\n"
+                            "Un asesor se contactará contigo en breve para continuar el proceso. 💙"
+                        )
+                    )
+                    # ⏸️ Bloquea el chat 24 h
+                    est["fase"]        = "pausado_addi"
+                    est["pausa_hasta"] = (datetime.now() + timedelta(hours=24)).isoformat()
+                    estado_usuario[cid] = est
+                else:
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text="⚠️ No pudimos registrar tus datos. Intenta nuevamente más tarde."
+                    )
+                return   # ← detenemos aquí el flujo
+
+            except Exception as e:
+                logging.error(f"[ADDI] ❌ Error registrando datos: {e}")
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text="❌ Hubo un error procesando tus datos para Addi. Intenta de nuevo más tarde."
+                )
+                return
+
+
+
 
     # 📸 Recibir comprobante de pago
     if est.get("fase") == "esperando_comprobante" and update.message.photo:
-        f = await update.message.photo[-1].get_file()
-        tmp = os.path.join("temp", f"{cid}_proof.jpg")
-        os.makedirs("temp", exist_ok=True)
-        await f.download_to_drive(tmp)
+        try:
+            f = await update.message.photo[-1].get_file()
+            tmp = os.path.join("temp", f"{cid}_proof.jpg")
+            os.makedirs("temp", exist_ok=True)
+            await f.download_to_drive(tmp)
 
-        with io.open(tmp, "rb") as image_file:
-            content = image_file.read()
-        image = vision.Image(content=content)
-        response = vision_client.text_detection(image=image)
-        textos_detectados = response.text_annotations
+            with io.open(tmp, "rb") as image_file:
+                content = image_file.read()
+            image = vision.Image(content=content)
+            response = vision_client.text_detection(image=image)
+            textos_detectados = response.text_annotations
 
-        texto_extraido = textos_detectados[0].description if textos_detectados else ""
-        print("🧾 TEXTO EXTRAÍDO:\n", texto_extraido)
+            texto_extraido = textos_detectados[0].description if textos_detectados else ""
+            print("🧾 TEXTO EXTRAÍDO:\n", texto_extraido)
 
-        if not es_comprobante_valido(texto_extraido):
+            if not es_comprobante_valido(texto_extraido):
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text="⚠️ El comprobante no parece válido. Asegúrate de que sea legible y que diga *Pago exitoso*.",
+                    parse_mode="Markdown"
+                )
+                os.remove(tmp)
+                return
+
+            # Enviar correos (si aplica)
+            try:
+                enviar_correo(
+                    est["correo"],
+                    f"Pago recibido {est['resumen']['Número Venta']}",
+                    json.dumps(est["resumen"], indent=2)
+                )
+                enviar_correo_con_adjunto(
+                    EMAIL_JEFE,
+                    f"Comprobante {est['resumen']['Número Venta']}",
+                    json.dumps(est["resumen"], indent=2),
+                    tmp
+                )
+            except Exception as e:
+                logging.warning(f"📧 Error al enviar correos: {e}")
+
+            # ✅ Registrar en hoja PEDIDOS como completado
+            resumen_final = est.get("resumen", {})
+            resumen_final["fase_actual"] = "Finalizado"
+            resumen_final["Estado"] = "COMPLETADO"
+            registrar_orden_unificada(resumen_final, destino="PEDIDOS")
+
+            os.remove(tmp)
+
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="⚠️ El comprobante no parece válido. Asegúrate de que sea legible y que diga *Pago exitoso*.",
-                parse_mode="Markdown"
+                text="✅ ¡Pago registrado exitosamente! Tu pedido está en proceso. 🚚"
             )
-            os.remove(tmp)
+
+            await enviar_sticker(ctx, cid, "sticker_fin_de_compra_gracias.webp")
+
+            reset_estado(cid)
+            estado_usuario.pop(cid, None)
             return
 
-        registrar_orden(est["resumen"])
+        except Exception as e:
+            logging.error(f"❌ Error al procesar comprobante: {e}")
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="❌ No pude procesar el comprobante. Intenta con otra imagen.",
+                parse_mode="Markdown"
+            )
+            return
 
-        enviar_correo(
-            est["correo"],
-            f"Pago recibido {est['resumen']['Número Venta']}",
-            json.dumps(est["resumen"], indent=2)
-        )
-        enviar_correo_con_adjunto(
-            EMAIL_JEFE,
-            f"Comprobante {est['resumen']['Número Venta']}",
-            json.dumps(est["resumen"], indent=2),
-            tmp
-        )
-        os.remove(tmp)
 
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text="✅ ¡Pago registrado exitosamente! Tu pedido está en proceso. 🚚"
-        )
-
-        await enviar_sticker(ctx, cid, "sticker_fin_de_compra_gracias.webp")
-
-        reset_estado(cid)
-        estado_usuario.pop(cid, None)
-        return
 
 
 
@@ -2854,28 +3455,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-
-    # 🔒 Video de confianza si desconfía
-    if any(frase in txt for frase in (
-        "no me fio", "no confio", "es seguro", "como se que no me roban",
-        "como se que no me estafan", "desconfio", "no creo", "estafa", "miedo a comprar"
-    )):
-        VIDEO_DRIVE_ID = "TU_ID_DEL_VIDEO_DE_CONFIANZA"
-        video_url = f"https://drive.google.com/uc?id={VIDEO_DRIVE_ID}"
-
-        await ctx.bot.send_chat_action(chat_id=cid, action=ChatAction.UPLOAD_VIDEO)
-        await ctx.bot.send_video(
-            chat_id=cid,
-            video=video_url,
-            caption=(
-                "🔒 Entendemos perfectamente tu preocupación. "
-                "Aquí te dejamos un video corto donde nuestros clientes reales comparten su experiencia. "
-                "Somos una empresa seria y segura, ¡puedes confiar en nosotros! 😊👍"
-            )
-        )
-        return
-
-
     if await manejar_catalogo(update, ctx):
         return
 
@@ -2998,24 +3577,75 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
     return
 # ─────────────────────────────────────────
-# FUNCIÓN AUXILIAR – REANUDAR FASE
+# FUNCIÓN AUXILIAR – REANUDAR FASE ACTUAL
 # ─────────────────────────────────────────
 async def reanudar_fase_actual(cid, ctx, est):
     fase = est.get("fase")
+
     if fase == "esperando_nombre":
         await ctx.bot.send_message(chat_id=cid, text="¿Dime tu nombre completo para seguir la compra? ✍️")
+
     elif fase == "esperando_correo":
-        await ctx.bot.send_message(chat_id=cid, text="¿Dime cual es tu correo para seguir? 📧")
+        await ctx.bot.send_message(chat_id=cid, text="¿Dime cuál es tu correo para seguir? 📧")
+
     elif fase == "esperando_telefono":
-        await ctx.bot.send_message(chat_id=cid, text="¿Tu telefono celular para continuar? 📱")
+        await ctx.bot.send_message(chat_id=cid, text="¿Tu teléfono celular para continuar? 📱")
+
     elif fase == "esperando_cedula":
-        await ctx.bot.send_message(chat_id=cid, text="¿Dime la cedula para que sigamos ? 🪪")
+        await ctx.bot.send_message(chat_id=cid, text="¿Dime la cédula para que sigamos? 🪪")
+
     elif fase == "esperando_ciudad":
         await ctx.bot.send_message(chat_id=cid, text="¿Dime la ciudad para ya cerrar tu pedido? 🏙️")
+
     elif fase == "esperando_provincia":
         await ctx.bot.send_message(chat_id=cid, text="¿Dime el Departamento o provincia? 🏞️")
+
     elif fase == "esperando_direccion":
-        await ctx.bot.send_message(chat_id=cid, text="¿Cual es entonces tu direccion para el pedido? 🏡")
+        await ctx.bot.send_message(chat_id=cid, text="¿Cuál es entonces tu dirección para el pedido? 🏡")
+
+    elif fase == "esperando_pago":
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="¿Cómo deseas pagar? Escribe *transferencia* o *contraentrega*.",
+            parse_mode="Markdown"
+        )
+
+    elif fase == "esperando_comprobante":
+        await ctx.bot.send_message(chat_id=cid, text="📸 Por favor, envíame el comprobante de pago.")
+
+    elif fase == "esperando_talla":
+        if est.get("talla"):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=f"✅ Ya tengo registrada tu talla como *{est['talla']}*. ¿Deseas continuar con el pedido?",
+                parse_mode="Markdown"
+            )
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="📏 ¿Cuál es tu talla? O si prefieres, mándame una foto de la lengüeta del zapato para ayudarte automáticamente."
+            )
+
+    elif fase == "esperando_color":
+        if est.get("color"):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=f"🎨 Ya tengo registrado que te interesan los *{est['color']}*. ¿Deseas ver más modelos de ese color?",
+                parse_mode="Markdown"
+            )
+        else:
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="🎨 ¿Qué color te gustaría para ese modelo? Puedes decirme por ejemplo 'negros', 'blancos', etc."
+            )
+
+    elif fase == "confirmar_datos_guardados":
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="✅ ¿Estos datos están correctos o deseas cambiar algo? Escribe 'sí son correctos' o dime qué deseas modificar."
+        )
+
+
 
 # Función para manejar la solicitud de precio por referencia
 PALABRAS_PRECIO = ['precio', 'vale', 'cuesta', 'valor', 'coste', 'precios', 'cuánto']
@@ -3127,12 +3757,6 @@ async def manejar_precio(update, ctx, inventario):
             parse_mode="Markdown"
         )
         return True
-
-
-
-
-
-
    
 # --------------------------------------------------------------------
 
@@ -3189,13 +3813,25 @@ async def manejar_catalogo(update, ctx):
     txt = getattr(update.message, "text", "").lower()
 
     if menciona_catalogo(txt):
-        mensaje = (
-            "🛍️ ¡Claro! Aquí tienes el catálogo más reciente:\n"
-            "👉 https://wa.me/c/573007607245\n"
-            "Si ves algo que te guste, solo dime el modelo o mándame una foto 📸"
-        )
+
         await ctx.bot.send_message(chat_id=cid, text=mensaje)
+
+        # 🧷 Luego el sticker (para que quede de último)
+        try:
+            sticker_path = "/var/data/stickers/catalogo_sticker_catalogo.webp"
+            if os.path.exists(sticker_path):
+                with open(sticker_path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                ctx.resp.append({
+                    "type": "sticker",
+                    "base64": f"data:image/webp;base64,{b64}"
+                })
+        except Exception as e:
+            logging.error(f"❌ Error cargando sticker catálogo en manejar_catalogo: {e}")
+
         return True
+
     return False
 
 
@@ -3289,17 +3925,70 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         reset_estado(cid)
         estado_usuario[cid] = {"fase": "inicio"}
 
-    # 💬 Saludo / start
-    if texto in ("/start", "start", "hola", "buenas", "hey"):
+    if any(p in txt for p in (
+        "/start", "start", "hola", "buenas", "buenos días", "buenos dias", "buenas tardes",
+        "buenas noches", "hey", "ey", "qué pasa", "que pasa", "buen día", "buen dia",
+        "saludos", "holaaa", "ehhh", "epa", "holi", "oe", "oe que más", "nose hola"
+    )):
         reset_estado(cid)
-        return {
-            "type": "text",
-            "text": ("¡Bienvenido a *X100🔥👟*!\n\n"
-                     "Si tienes una foto puedes enviarla\n"
-                     "Si tienes número de referencia, envíamelo\n"
-                     "¿Te gustaría ver unos videos de nuestras referencias?\n"
-                     "Cuéntame sin problema 😀")
-        }
+
+        # 1. Obtener welcome con audio + textos
+        bienvenida = await enviar_welcome_venom(cid)
+        bienvenida_msgs = bienvenida.get("messages", []) if bienvenida.get("type") == "multi" else [bienvenida]
+
+        try:
+            # 2. Cargar videos desde disco
+            carpeta = "/var/data/videos"
+            archivos = sorted([
+                f for f in os.listdir(carpeta)
+                if f.lower().endswith(".mp4") and "confianza" not in f.lower()
+            ])
+
+            # 3. Diccionario de nombres personalizados con emojis
+            nombres_con_emojis = {
+                "Referencias2.mp4": "👟 Referencias 🔝 261 🔥 277 🔥 303 🔥 295 🔥 299 🔥",
+                "Referencias.mp4":  "👟 Referencias 🔝 279 🔥 304 🔥 305 🔥",
+                "Descuentos.mp4":   "👟 Referencias 🔝 🔥 Promo 39 % Off 🔥",
+                "Infantil.mp4":     "👟 Referencias 🔝 🔥 Niños 🔥"
+            }
+
+            videos = []
+            for nombre in archivos:
+                path = os.path.join(carpeta, nombre)
+                with open(path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+                    texto = nombres_con_emojis.get(
+                        nombre,
+                        f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}"
+                    )
+                    videos.append({
+                        "type": "video",
+                        "base64": f"data:video/mp4;base64,{b64}",
+                        "text": texto
+                    })
+
+            if videos:
+                videos.insert(0, {
+                    "type": "text",
+                    "text": "🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta!"
+                })
+                videos.append({
+                    "type": "text",
+                    "text": "🧐 ¿Cuál de estos modelos te interesa?"
+                })
+
+            # 4. Enviar primero los videos, luego bienvenida
+            mensajes = videos + bienvenida_msgs
+
+            return {"type": "multi", "messages": mensajes}
+
+        except Exception as e:
+            logging.error(f"❌ Error cargando videos desde /var/data/videos: {e}")
+            return {
+                "type": "text",
+                "text": "⚠️ Te doy la bienvenida, pero no pude cargar los videos aún. Intenta más tarde."
+            }
+
 
     # 🔊 Petición de audio
     if any(f in txt for f in (
@@ -3314,31 +4003,46 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         )
 
         try:
+            # 1️⃣ Generar el MP3 con OpenAI TTS
             ruta_audio = await generar_audio_openai(texto_respuesta, f"audio_{cid}.mp3")
-            ruta_completa = os.path.join("temp", f"audio_{cid}.mp3")
+            if not ruta_audio or not os.path.exists(ruta_audio):
+                raise FileNotFoundError("El TTS no generó el archivo")
 
-            if ruta_audio and os.path.exists(ruta_completa):
-                return {
-                    "type": "audio",
-                    "path": ruta_completa,
-                    "text": "🎧 Aquí tienes tu audio:"
-                }
-            else:
-                return {
-                    "type": "text",
-                    "text": "❌ No pude generar el audio en este momento."
-                }
+            # 2️⃣ Convertir a base64 para enviarlo por Venom / WhatsApp
+            with open(ruta_audio, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+
+            # 3️⃣ Devolver estructura que Venom entiende
+            return {
+                "type": "audio",
+                "base64": b64,            # ← base64 limpio
+                "mimetype": "audio/mpeg", # ← obligatorio
+                "filename": os.path.basename(ruta_audio),
+                "text": "🎧 Aquí tienes tu audio:"
+            }
 
         except Exception as e:
-            logging.error(f"❌ Error generando o accediendo al audio: {e}")
+            logging.error(f"❌ Error generando o codificando audio: {e}")
             return {
                 "type": "text",
-                "text": "❌ Ocurrió un problema generando el audio."
+                "text": "❌ No pude generar el audio en este momento."
             }
+
 
     # ─── MAIN try/except ───
     try:
         reply = await responder(dummy_update, ctx)
+        # 🧭 ─────────────────────────
+        # ¿Pidió ver el catálogo?
+        # Llama a manejar_catalogo() para que añada el sticker + link
+        # y, si fue el caso, salimos antes de continuar con el resto del flujo.
+        # ───────────────────────────
+        if await manejar_catalogo(dummy_update, ctx):
+            # manejar_catalogo ya añadió el/los mensajes a ctx.resp
+            if ctx.resp:                       # hay sticker (y/o texto) en la cola
+                return {"type": "multi", "messages": ctx.resp}
+            # por seguridad devolvemos algo, aunque no debería ocurrir
+            return {"type": "text", "text": "👀 Revisa el catálogo que te envié arriba."}
 
         # 🟢 Si responder() devuelve un dict (video/audio), lo mandamos directo
         if isinstance(reply, dict):
@@ -3376,14 +4080,14 @@ async def venom_webhook(req: Request):
     inv = obtener_inventario()
 
     try:
-        data = await req.json()
-        cid = wa_chat_id(data.get("from", ""))
-        body = data.get("body", "") or ""
-        mtype = (data.get("type") or "").lower()
+        data     = await req.json()
+        cid      = wa_chat_id(data.get("from", ""))
+        body     = data.get("body", "") or ""          # ← SIN .lower()  (no daña base-64)
+        body_raw = body  # ← este es el que se usa para imagen (sin modificar ni hacer .lower())
+        mtype    = (data.get("type") or "").lower()
         mimetype = (data.get("mimetype") or "").lower()
 
         logging.info(f"📩 Mensaje recibido — CID:{cid} — Tipo:{mtype} — MIME:{mimetype}")
-
         if (
             data.get("isForwarded") or
             data.get("isNotification") or
@@ -3399,22 +4103,117 @@ async def venom_webhook(req: Request):
         # 🖼️ IMAGEN
         if mtype == "image" or mimetype.startswith("image"):
             try:
-                b64_str = body.split(",", 1)[1] if "," in body else body
-                img_bytes = base64.b64decode(b64_str + "===")
-                img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-                logging.info(f"✅ Imagen decodificada correctamente. Tamaño: {img.size}")
+                logging.info("🖼️ [IMG] Recibida imagen, iniciando decodificación…")
+
+                if len(body_raw) < 200:
+                    return JSONResponse({
+                        "type": "text",
+                        "text": "❌ La imagen llegó incompleta. Intenta enviarla otra vez."
+                    })
+
+                b64_data = body_raw.split(",", 1)[1] if body_raw.startswith("data:image") else body_raw
+                img_bytes = base64.b64decode(b64_data + "===")
+
+                with io.BytesIO(img_bytes) as bio:
+                    img = Image.open(bio)
+                    img.load()
+                    img = img.convert("RGB")
+
+                logging.info(f"✅ Imagen decodificada — Formato:{img.format} Tamaño:{img.size}")
+
             except Exception as e:
-                logging.error(f"❌ No pude leer la imagen: {e}")
-                return JSONResponse({"type": "text", "text": "❌ No pude leer la imagen 😕"})
+                logging.error(f"❌ [IMG] No pude leer la imagen: {e}")
+                return JSONResponse({
+                    "type": "text",
+                    "text": "❌ No pude leer la imagen 😕. Prueba con otra foto."
+                })
 
-            est = estado_usuario.get(cid, {})
+            est  = estado_usuario.get(cid, {})
             fase = est.get("fase", "")
-            logging.info(f"🔍 Fase actual del usuario {cid}: {fase or 'NO DEFINIDA'}")
 
-            # 📄 COMPROBANTE
+
+            # 3️⃣ COMPROBANTE -------------------------------------------------
             if fase == "esperando_comprobante":
-                # ... (ya lo tienes implementado y funciona) ...
-                pass
+                try:
+                    os.makedirs("temp", exist_ok=True)
+                    temp_path = f"temp/{cid}_proof.jpg"
+                    with open(temp_path, "wb") as f:
+                        f.write(img_bytes)
+
+                    texto = extraer_texto_comprobante(temp_path)
+                    logging.info(f"[OCR] Texto extraído (500 chars):\n{texto[:500]}")
+
+                    if es_comprobante_valido(texto):
+                        logging.info("✅ Comprobante válido por OCR")
+                        resumen = est.get("resumen", {})
+
+                        # Asegurar que tenga todas las claves necesarias
+                        resumen.setdefault("Número Venta", est.get("numero", ""))
+                        resumen.setdefault("Cliente", est.get("nombre", ""))
+                        resumen.setdefault("Cédula", est.get("cedula", ""))
+                        resumen.setdefault("Teléfono", est.get("telefono", ""))
+                        resumen.setdefault("Producto", est.get("modelo", ""))
+                        resumen.setdefault("Color", est.get("color", ""))
+                        resumen.setdefault("Talla", est.get("talla", ""))
+                        resumen.setdefault("Correo", est.get("correo", ""))
+                        resumen.setdefault("Pago", est.get("pago", ""))
+                        resumen["fase_actual"] = "Finalizado"
+                        resumen["Estado"] = "COMPLETADO"
+
+                        registrar_orden_unificada(resumen, destino="PEDIDOS")
+
+                        enviar_correo(
+                            est["correo"],
+                            f"Pago recibido {resumen.get('Número Venta')}",
+                            json.dumps(resumen, indent=2)
+                        )
+                        enviar_correo_con_adjunto(
+                            EMAIL_JEFE,
+                            f"Comprobante {resumen.get('Número Venta')}",
+                            json.dumps(resumen, indent=2),
+                            temp_path
+                        )
+                        os.remove(temp_path)
+                        reset_estado(cid)
+
+                        # ✅ Enviar texto + sticker de fin de compra
+                        try:
+                            sticker_path = "/var/data/stickers/sticker_fin_de_compra_sticker_final.webp"
+                            if os.path.exists(sticker_path):
+                                with open(sticker_path, "rb") as f:
+                                    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                                return JSONResponse({
+                                    "type": "multi",
+                                    "messages": [
+                                        {"type": "text", "text": "✅ Comprobante verificado. Tu pedido está en proceso. 🚚"},
+                                        {"type": "sticker", "base64": f"data:image/webp;base64,{b64}"}
+                                    ]
+                                })
+                        except Exception as e:
+                            logging.error(f"❌ Error al cargar el sticker de fin de compra: {e}")
+
+                        # fallback si falla el sticker
+                        return JSONResponse({
+                            "type": "text",
+                            "text": "✅ Comprobante verificado. Tu pedido está en proceso. 🚚"
+                        })
+
+                    else:
+                        os.remove(temp_path)
+                        return JSONResponse({
+                            "type": "text",
+                            "text": "⚠️ No pude verificar el comprobante. Asegúrate que diga 'Pago exitoso'."
+                        })
+
+                except Exception as e:
+                    logging.error(f"❌ Error al procesar comprobante: {e}")
+                    return JSONResponse({
+                        "type": "text",
+                        "text": "❌ No pude procesar el comprobante. Intenta con otra imagen."
+                    })
+
+
 
             # 👟 LENGÜETA - detectar talla si está esperando_talla
             elif fase == "esperando_talla":
@@ -3436,7 +4235,7 @@ async def venom_webhook(req: Request):
                         estado_usuario[cid] = est
                         return JSONResponse({
                             "type": "text",
-                            "text": f"📏 Según la imagen, la talla ideal para tus zapatos es la *{talla_detectada}* de nuestra tienda. ¿Deseas continuar con esa?",
+                            "text": f"📏 Según la etiqueta que me envias, la talla ideal para tus zapatos es la *{talla_detectada}* en nuestra horma. ¿Deseas que te las enviemos hoy mismo?",
                             "parse_mode": "Markdown"
                         })
                     else:
@@ -3521,7 +4320,8 @@ async def venom_webhook(req: Request):
                             "type": "text",
                             "text": (
                                 f"🟢 ¡Qué buena elección! Los *{modelo}* de color *{color}* están brutales 😎.\n"
-                                f"💲 Su precio es: *{precio_str}* y hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                                f"💲 Su precio es: *{precio_str}*, además el *envío es totalmente gratis a todo el país* 🚚.\n"
+                                f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
                                 "¿Seguimos con la compra?"
                             ),
                             "parse_mode": "Markdown"
@@ -3542,6 +4342,8 @@ async def venom_webhook(req: Request):
                         "type": "text",
                         "text": "⚠️ Ocurrió un error analizando la imagen."
                     })
+
+
 
 
         # 💬 TEXTO
@@ -3616,7 +4418,8 @@ if __name__ == "__main__":
     descargar_imagenes_catalogo()     # ⬇️ Descarga 1 imagen por modelo del catálogo
     descargar_stickers_drive()
     descargar_video_confianza()
- 
+    descargar_audios_bienvenida_drive()
+    descargar_imagen_lengueta()
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("lector:api", host="0.0.0.0", port=port)
