@@ -1866,13 +1866,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             estado_usuario[cid] = est
             return
 
-    if menciona_catalogo(txt_raw):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=CATALOG_MESSAGE
-        )
-        est["fase"] = "inicio"
-        return
 
     # ─────────────────────────────────────────────
     # 📦 RESPUESTA UNIVERSAL SI EL CLIENTE EXPRESA DESCONFIANZA
@@ -2089,18 +2082,18 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ──────────────────────────────────────────────────────
     # 💬 DETECTOR UNIVERSAL — "me pagan el 30"
     # ──────────────────────────────────────────────────────
-    if re.search(r"(me pagan|me consignan|me depositan)( el)? \d{1,2}", txt):
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
+    if re.search(r"(me\s+pagan|me\s+consignan|me\s+depositan)(\s+el)?\s+\d{1,2}", txt, re.IGNORECASE):
+        ctx.resp.append({
+            "type": "text",
+            "text": (
                 "🗓️ ¡Perfecto! Te contactaremos ese día para ayudarte a cerrar la compra.\n\n"
                 "Para dejarte agendado, por favor mándame estos datos:\n\n"
                 "• 🧑‍💼 *Tu nombre completo*\n"
                 "• 👟 *Producto que te interesa*\n"
                 "• 🕒 *¿Qué día y a qué hora te contactamos?*"
             ),
-            parse_mode="Markdown"
-        )
+            "parse_mode": "Markdown"
+        })
         est["fase"] = "esperando_datos_pago_posterior"
         estado_usuario[cid] = est
         return
@@ -2110,64 +2103,70 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ──────────────────────────────────────────────────────
     if est.get("fase") == "esperando_datos_pago_posterior":
         try:
-            texto_limpio = txt.replace("\n", " ").strip()
+            texto_limpio = txt_raw.replace("\n", " ").strip()
 
-            # Extraer modelo (número de 3 o 4 cifras)
-            modelo = re.search(r"\b\d{3,4}\b", texto_limpio)
-            modelo = modelo.group(0) if modelo else ""
+            # 1️⃣ Modelo: primer número de 3-4 cifras
+            modelo_match = re.search(r"\b\d{3,4}\b", texto_limpio)
+            modelo = modelo_match.group(0) if modelo_match else ""
 
-            # Extraer nombre: lo que va antes del modelo
-            nombre = texto_limpio.split(modelo)[0].strip() if modelo else texto_limpio[:25].strip()
+            # 2️⃣ Nombre: todo lo que va antes del modelo
+            nombre = texto_limpio.split(modelo)[0].strip() if modelo else ""
 
-            # Extraer día/hora desde la palabra clave
-            dia_hora = ""
-            match_dia = re.search(r"(mañana|hoy|el\s+dia\s+\d+|el\s+\d+|día\s+\d+|a\s+las\s+\d+)", texto_limpio, re.IGNORECASE)
-            if match_dia:
-                dia_hora = texto_limpio[match_dia.start():].strip()
+            # 3️⃣ Día/hora: desde cualquier mención de fecha u hora en adelante
+            dia_hora_match = re.search(
+                r"(mañana|hoy|el\s+\d{1,2}\b|día\s+\d{1,2}\b|a\s+las\s+\d{1,2}(?:[:h]\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)",
+                texto_limpio, re.IGNORECASE
+            )
+            dia_hora = texto_limpio[dia_hora_match.start():].strip() if dia_hora_match else ""
 
             if nombre and modelo and dia_hora:
                 datos_pendiente = {
-                    "Cliente": nombre.title(),
+                    "Cliente":  nombre.title(),
                     "Teléfono": cid,
                     "Producto": modelo,
-                    "Pago": dia_hora
+                    "Pago":     dia_hora
                 }
 
                 ok = registrar_orden_unificada(datos_pendiente, destino="PENDIENTES")
 
                 if ok:
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text=f"✅ ¡Listo {nombre.title()}! Te escribiremos {dia_hora} para cerrar la compra del modelo {modelo.upper()} 🔥"
-                    )
-                    est["fase"] = "inicial"
+                    ctx.resp.append({
+                        "type": "text",
+                        "text": (
+                            f"✅ ¡Listo {nombre.title()}! Te escribiremos {dia_hora} "
+                            f"para cerrar la compra del modelo {modelo.upper()} 🔥"
+                        )
+                    })
+                    est["fase"] = "pausado_promesa"
+                    est["pausa_hasta"] = (datetime.now() + timedelta(hours=48)).isoformat()
                     estado_usuario[cid] = est
                 else:
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text="⚠️ No pudimos registrar tu promesa de pago. Intenta nuevamente."
-                    )
+                    ctx.resp.append({
+                        "type": "text",
+                        "text": "⚠️ No pudimos registrar tu promesa de pago. Intenta nuevamente."
+                    })
                 return
 
-            else:
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text=(
-                        "❌ Para agendar tu pago necesito 3 cosas:\n"
-                        "1️⃣ Tu *nombre*\n2️⃣ El *modelo* que te gustó\n3️⃣ *Día y hora* estimada de pago\n\n"
-                        "Ejemplo:\nJuan\nDS 298\nMañana a las 2"
-                    ),
-                    parse_mode="Markdown"
-                )
-                return
+            # ——— Datos incompletos ———
+            ctx.resp.append({
+                "type": "text",
+                "text": (
+                    "❌ Para agendar tu pago necesito 3 cosas:\n"
+                    "1️⃣ Tu *nombre*\n2️⃣ El *modelo* que te gustó\n3️⃣ *Día y hora* estimada para contactarte\n\n"
+                    "Ejemplo:\nJuan Pablo\nDS 298\nEl 30 a las 2 PM"
+                ),
+                "parse_mode": "Markdown"
+            })
+            return
 
         except Exception as e:
             logging.error(f"[PENDIENTES] ❌ Error registrando pago posterior: {e}")
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="⚠️ Ocurrió un problema registrando tus datos. Intenta de nuevo más tarde."
-            )
+            ctx.resp.append({
+                "type": "text",
+                "text": "⚠️ Ocurrió un problema registrando tus datos. Intenta de nuevo más tarde."
+            })
             return
+
 
 
     # ─────────────────────────────────────────────
@@ -2509,8 +2508,57 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # 📷 Confirmación si la imagen detectada fue correcta
     if est.get("fase") == "imagen_detectada":
-        if any(frase in txt for frase in ("si", "sí", "s", "claro", "claro que sí", "quiero comprar", "continuar", "vamos")):
 
+        # 🆕 Pregunta directa por disponibilidad de talla
+        consulta_talla = re.search(
+            r"(?:tienen|tiene|hay|maneja(?:n)?)\s+talla\s+(\d{1,2})",
+            txt
+        )
+        if consulta_talla:
+            talla_pedida = consulta_talla.group(1)
+            est["fase"] = "esperando_talla"
+            estado_usuario[cid] = est
+
+            ruta = "/var/data/extra/lengueta_ejemplo.jpg"
+            if os.path.exists(ruta):
+                with open(ruta, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                return {
+                    "type": "multi",
+                    "messages": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"✅ ¡Claro que tenemos talla {talla_pedida}! "
+                                "📸 Para confirmar la medida exacta, mándame una foto de la *lengüeta* "
+                                "del zapato que usas normalmente 👟."
+                            ),
+                            "parse_mode": "Markdown"
+                        },
+                        {
+                            "type": "photo",
+                            "base64": f"data:image/jpeg;base64,{b64}",
+                            "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
+                        }
+                    ]
+                }
+            else:
+                return {
+                    "type": "text",
+                    "text": (
+                        f"✅ ¡Claro que tenemos talla {talla_pedida}! "
+                        "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟."
+                    ),
+                    "parse_mode": "Markdown"
+                }
+
+        # ✔️ Respuesta afirmativa para avanzar en la compra
+        if any(frase in txt for frase in (
+            "si", "sí", "sii", "sis", "sisz",
+            "de una", "dale", "hagale", "hágale", "hágale pues",
+            "claro", "claro que sí", "quiero comprar", "continuar", "vamos"
+        )):
             # ✅ Si ya hay talla (desde imagen de lengüeta), saltar a confirmar datos
             if est.get("talla"):
                 est["fase"] = "esperando_talla"
@@ -2519,22 +2567,17 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await ctx.bot.send_message(
                     chat_id=cid,
                     text=(
-                        f"📏 Según la etiqueta que me enviaste, la talla ideal para tus zapatos es *{est['talla']}* en nuestra horma.\n"
+                        f"📏 Según la etiqueta que me enviaste, la talla ideal para tus zapatos "
+                        f"es *{est['talla']}* en nuestra horma.\n"
                         "¿Deseas que te lo enviemos hoy mismo?"
                     ),
                     parse_mode="Markdown"
                 )
-
-                # ⚠️ Reentrada automática para que se dispare el flujo como si el cliente hubiera escrito "sí"
                 return await procesar_wa(cid, "sí")
 
-            # 🔁 Si aún no tiene talla, mostrar las tallas y pedir foto de lengüeta
+            # 🔁 Si aún no tiene talla, pedir foto de lengüeta sin mostrar tallas
             est["fase"] = "esperando_talla"
             estado_usuario[cid] = est
-
-            tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
-            if isinstance(tallas, (int, float, str)):
-                tallas = [str(tallas)]
 
             ruta = "/var/data/extra/lengueta_ejemplo.jpg"
             if os.path.exists(ruta):
@@ -2546,9 +2589,8 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                             {
                                 "type": "text",
                                 "text": (
-                                    f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
-                                    f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
-                                    "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟."
+                                    "📸 Para darte tu talla ideal, mándame una foto de la *lengüeta* "
+                                    "del zapato que usas normalmente 👟."
                                 ),
                                 "parse_mode": "Markdown"
                             },
@@ -2563,20 +2605,21 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 return {
                     "type": "text",
                     "text": (
-                        f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
-                        "📸 Mándame una foto de la lengüeta de tu zapato para detectar tu talla ideal."
+                        "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟."
                     ),
                     "parse_mode": "Markdown"
                 }
 
-        else:
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="❌ Cancelado. Escribe /start para reiniciar o dime si deseas ver otra referencia. 📋",
-                parse_mode="Markdown"
-            )
-            reset_estado(cid)
-            return
+        # ❓ Si no entendió nada útil
+        await ctx.bot.send_message(
+            chat_id=cid,
+            text="Entonces dime cómo te ayudo. Puedes enviar una imagen del producto que deseas 👍🏻",
+            parse_mode="Markdown"
+        )
+        reset_estado(cid)
+        return
+
+
 
 
 
@@ -3156,65 +3199,64 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 estado_usuario[cid] = est
 
 
-        # ────────────────────────────────────────────────
-        # 📋 DATOS PARA ADDI – SOLO 4 CAMPOS OBLIGATORIOS
-        # ────────────────────────────────────────────────
-        if est.get("fase") == "esperando_datos_addi":
-            try:
-                # txt_raw ≡ mensaje original sin limpiar
-                partes = [p.strip() for p in txt_raw.splitlines() if p.strip()]
-                nombre = partes[0] if len(partes) >= 1 else ""
+    # ────────────────────────────────────────────────────────────────
+    # 📋 DATOS PARA ADDI – PRIORIDAD TOTAL PARA EVITAR ERRORES
+    # ────────────────────────────────────────────────────────────────
+    if est.get("fase") == "esperando_datos_addi":
+        try:
+            partes = [p.strip() for p in txt_raw.splitlines() if p.strip()]
+            nombre = partes[0] if len(partes) >= 1 else ""
 
-                cedula_match    = re.search(r"\d{6,12}", partes[1]) if len(partes) >= 2 else None
-                correo_match    = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", partes[2]) if len(partes) >= 3 else None
-                telefono_match  = re.search(r"3\d{9}", partes[3]) if len(partes) >= 4 else None
+            cedula_match    = re.search(r"\d{6,12}", partes[1]) if len(partes) >= 2 else None
+            correo_match    = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", partes[2]) if len(partes) >= 3 else None
+            telefono_match  = re.search(r"3\d{9}", partes[3]) if len(partes) >= 4 else None
 
-                if not (nombre and cedula_match and correo_match and telefono_match):
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text=(
-                            "❌ *Faltan datos o hay un formato incorrecto*.\n\n"
-                            "Envíame 4 líneas así:\n"
-                            "1️⃣ Nombre completo\n2️⃣ Cédula\n3️⃣ Correo\n4️⃣ Teléfono WhatsApp"
-                        ),
-                        parse_mode="Markdown"
-                    )
-                    return  # sigue en la misma fase
-
-                datos_addi = {
-                    "Cliente":   nombre.title(),
-                    "Cédula":    cedula_match.group(0),
-                    "Teléfono":  telefono_match.group(0),
-                    "Correo":    correo_match.group(0),
-                    "Fecha":     datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
-
-                if registrar_orden_unificada(datos_addi, destino="ADDI"):
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text=(
-                            "✅ ¡Gracias! Tus datos fueron enviados a Addi.\n"
-                            "Un asesor se contactará contigo en breve para continuar el proceso. 💙"
-                        )
-                    )
-                    # ⏸️ Bloquea el chat 24 h
-                    est["fase"]        = "pausado_addi"
-                    est["pausa_hasta"] = (datetime.now() + timedelta(hours=24)).isoformat()
-                    estado_usuario[cid] = est
-                else:
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text="⚠️ No pudimos registrar tus datos. Intenta nuevamente más tarde."
-                    )
-                return   # ← detenemos aquí el flujo
-
-            except Exception as e:
-                logging.error(f"[ADDI] ❌ Error registrando datos: {e}")
+            if not (nombre and cedula_match and correo_match and telefono_match):
                 await ctx.bot.send_message(
                     chat_id=cid,
-                    text="❌ Hubo un error procesando tus datos para Addi. Intenta de nuevo más tarde."
+                    text=(
+                        "❌ *Faltan datos o hay un formato incorrecto*.\n\n"
+                        "Envíame 4 líneas así:\n"
+                        "1️⃣ Nombre completo\n2️⃣ Cédula\n3️⃣ Correo\n4️⃣ Teléfono WhatsApp"
+                    ),
+                    parse_mode="Markdown"
                 )
-                return
+                return  # sigue en la misma fase
+
+            datos_addi = {
+                "Cliente":   nombre.title(),
+                "Cédula":    cedula_match.group(0),
+                "Teléfono":  telefono_match.group(0),
+                "Correo":    correo_match.group(0),
+                "Fecha":     datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+
+            if registrar_orden_unificada(datos_addi, destino="ADDI"):
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=(
+                        "✅ ¡Gracias! Tus datos fueron enviados a Addi.\n"
+                        "Un asesor se contactará contigo en breve para continuar el proceso. 💙"
+                    )
+                )
+                est["fase"]        = "pausado_addi"
+                est["pausa_hasta"] = (datetime.now() + timedelta(hours=24)).isoformat()
+                estado_usuario[cid] = est
+            else:
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text="⚠️ No pudimos registrar tus datos. Intenta nuevamente más tarde."
+                )
+            return
+
+        except Exception as e:
+            logging.error(f"[ADDI] ❌ Error registrando datos: {e}")
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text="❌ Hubo un error procesando tus datos para Addi. Intenta de nuevo más tarde."
+            )
+            return
+
 
 
 
@@ -3813,8 +3855,13 @@ async def manejar_catalogo(update, ctx):
     txt = getattr(update.message, "text", "").lower()
 
     if menciona_catalogo(txt):
-
-        await ctx.bot.send_message(chat_id=cid, text=mensaje)
+        # 📝 Primero el mensaje con el link
+        mensaje = (
+            f"👇🏻AQUÍ ESTA EL CATÁLOGO 🆕\n"
+            f"Sigue este enlace para ver la ultima colección 👟 X💯: {CATALOG_LINK}\n"
+            "Si ves algo que te guste, solo dime el modelo o mándame una foto 📸"
+        )
+        ctx.resp.append({"type": "text", "text": mensaje})
 
         # 🧷 Luego el sticker (para que quede de último)
         try:
@@ -3835,6 +3882,7 @@ async def manejar_catalogo(update, ctx):
     return False
 
 
+
 import base64  # Asegúrate de que esté arriba del archivo
 
 # ─────────────────────────────────────────────────────────────
@@ -3844,6 +3892,12 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     cid = str(cid)
     texto = body.lower() if body else ""
     txt = texto if texto else ""
+    # Lista de palabras afirmativas comunes
+    AFIRMATIVAS = [
+        "si", "sí", "sii", "sis", "sisz", "siss", "de una", "dale", "hágale", "hagale", 
+        "hágale pues", "me gusta", "quiero", "lo quiero", "vamos", "claro", 
+        "obvio", "eso es", "ese", "de ley", "de fijo", "ok", "okay", "listo"
+    ]
 
     # ─── FILTRO 1: mensaje vacío ───
     if not body or not body.strip():
@@ -3866,6 +3920,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             b64 = base64.b64encode(f.read()).decode("utf-8")
         return f"data:{tipo};base64,{b64}"
 
+    # ───────────────────────────────────────────
     # ───────────────────────────────────────────
     class DummyCtx(SimpleNamespace):
         async def bot_send(self, chat_id, text, **kw):
@@ -3903,22 +3958,27 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         send_photo=ctx.bot_send_photo
     )
 
+    # ───────────────────────── DummyMsg (definido una sola vez) ─────────────────────────
     class DummyMsg(SimpleNamespace):
         def __init__(self, text, ctx, photo=None, voice=None, audio=None):
-            self.text = text
+            self.text  = text
             self.photo = photo
             self.voice = voice
             self.audio = audio
-            self._ctx = ctx
+            self._ctx  = ctx
 
         async def reply_text(self, text, **kw):
             self._ctx.resp.append({"type": "text", "text": text})
 
+    # ─────────────── Crear dummy_msg y dummy_update ───────────────
     dummy_msg = DummyMsg(text=body, ctx=ctx)
     dummy_update = SimpleNamespace(
         message=dummy_msg,
         effective_chat=SimpleNamespace(id=cid)
     )
+
+
+
 
     # 🧠 Inicializa estado si no existe
     if cid not in estado_usuario or not estado_usuario[cid].get("fase"):
@@ -4032,17 +4092,15 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     # ─── MAIN try/except ───
     try:
         reply = await responder(dummy_update, ctx)
-        # 🧭 ─────────────────────────
-        # ¿Pidió ver el catálogo?
-        # Llama a manejar_catalogo() para que añada el sticker + link
-        # y, si fue el caso, salimos antes de continuar con el resto del flujo.
-        # ───────────────────────────
+
+        # 🧭 Manejo del catálogo si el usuario lo menciona
         if await manejar_catalogo(dummy_update, ctx):
-            # manejar_catalogo ya añadió el/los mensajes a ctx.resp
-            if ctx.resp:                       # hay sticker (y/o texto) en la cola
+            est = estado_usuario.get(cid, {})         # ✅ asegúrate de obtener est primero
+            est["fase"] = "inicio"
+            estado_usuario[cid] = est
+            if ctx.resp:
                 return {"type": "multi", "messages": ctx.resp}
-            # por seguridad devolvemos algo, aunque no debería ocurrir
-            return {"type": "text", "text": "👀 Revisa el catálogo que te envié arriba."}
+            return {"type": "text", "text": "👟 Te envié el catálogo arriba 👆🏻"}
 
         # 🟢 Si responder() devuelve un dict (video/audio), lo mandamos directo
         if isinstance(reply, dict):
@@ -4051,9 +4109,22 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         # 🟢 Si hay mensajes acumulados por ctx
         if ctx.resp:
             if len(ctx.resp) == 1:
-                return ctx.resp[0]  # envía solo la respuesta directa (texto, foto o video)
+                return ctx.resp[0]
             else:
                 return {"type": "multi", "messages": ctx.resp}
+
+        # ✅ Confirmar compra si usuario responde con afirmación
+        est = estado_usuario.get(cid, {})
+        if est.get("fase") == "confirmar_compra":
+            if any(pal in txt for pal in AFIRMATIVAS):
+                estado_usuario[cid]["fase"] = "esperando_direccion"
+                return {"type": "text", "text": "Perfecto 💥 ¿A qué dirección quieres que enviemos el pedido?"}
+            elif any(x in txt for x in ["cancel", "cancelar", "otra", "ver otro", "no gracias"]):
+                estado_usuario.pop(cid, None)
+                return {"type": "text", "text": "❌ Cancelado. Escribe /start para reiniciar o dime si deseas ver otra referencia 📦."}
+            else:
+                return {"type": "text", "text": "¿Confirmas que quieres comprar este modelo? Puedes decir: 'sí', 'de una', 'dale', etc."}
+
 
         # 🟡 Si está esperando pago o comprobante
         est = estado_usuario.get(cid, {})
