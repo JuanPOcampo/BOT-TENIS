@@ -1964,7 +1964,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta!"
+                text="🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta y en que talla lo deseas!"
             )
             logging.info("🎯 Procediendo a enviar videos...")
 
@@ -4740,11 +4740,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         estado_usuario[cid] = est
 
 
-    if any(p in txt for p in (
-        "/start", "start", "hola", "buenas", "buenos días", "buenos dias", "buenas tardes",
-        "buenas noches", "hey", "ey", "qué pasa", "que pasa", "buen día", "buen dia",
-        "saludos", "holaaa", "ehhh", "epa", "holi", "oe", "oe que más", "nose hola"
-    )):
+    if est.get("fase") == "inicio":
         reset_estado(cid)
 
         # 1. Obtener welcome con audio + textos
@@ -4756,14 +4752,20 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         otros_msgs = [m for m in bienvenida_msgs if m.get("type") != "audio"]
 
         try:
-            # 2. Cargar videos desde disco
+            # 2. Cargar videos desde disco en orden fijo
             carpeta = "/var/data/videos"
-            archivos = sorted([
-                f for f in os.listdir(carpeta)
-                if f.lower().endswith(".mp4") and "confianza" not in f.lower()
-            ])
+            orden_deseado = [
+                "Referencias.mp4",
+                "Referencias2.mp4",
+                "Descuentos.mp4",
+                "Infantil.mp4"
+            ]
 
-            # 3. Diccionario de nombres personalizados con emojis
+            archivos = [
+                f for f in orden_deseado
+                if os.path.exists(os.path.join(carpeta, f))
+            ]
+
             nombres_con_emojis = {
                 "Referencias2.mp4": "👟 Referencias 🔝 261 🔥 277 🔥 303 🔥 295 🔥 299 🔥",
                 "Referencias.mp4":  "👟 Referencias 🔝 279 🔥 304 🔥 305 🔥",
@@ -4789,19 +4791,27 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             if videos:
                 videos.insert(0, {
                     "type": "text",
-                    "text": "🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta!"
+                    "text": "🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta y en qué talla lo deseas!"
                 })
                 videos.append({
                     "type": "text",
                     "text": "🧐 Dime qué referencia te interesa. Si no está acá, envíame una foto 📸"
                 })
 
-            # 4. Armar mensajes en orden: audio → videos → textos (catálogo, nombre)
             mensajes = []
             if audio_msg:
                 mensajes.append(audio_msg)
             mensajes.extend(videos)
             mensajes.extend(otros_msgs)
+
+            if "precio" in txt:
+                mensajes.append({
+                    "type": "text",
+                    "text": "💸 Manejamos varios precios. Envíame la referencia exacta o una foto 📸 del zapato que te interesa y te doy el precio al instante."
+                })
+
+            est["fase"] = "esperando_color"
+            estado_usuario[cid] = est
 
             return {"type": "multi", "messages": mensajes}
 
@@ -4811,6 +4821,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ Te doy la bienvenida, pero no pude cargar los videos aún. Intenta más tarde."
             }
+
+
 
 
 
