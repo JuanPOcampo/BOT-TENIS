@@ -132,6 +132,94 @@ def registrar_o_actualizar_lead(data: dict) -> bool:
         logging.exception("[LEADS] ❌ Error registrando o actualizando lead")
         return False
 
+RUTA_MEMORIA_USUARIOS = "/tmp/memoria_usuarios.json"
+
+# 🧠 Cargar memoria persistente
+def cargar_memoria_usuario(cid: str) -> dict:
+    if os.path.exists(RUTA_MEMORIA_USUARIOS):
+        try:
+            with open(RUTA_MEMORIA_USUARIOS, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get(cid, {})
+        except Exception as e:
+            logging.warning(f"⚠️ Error leyendo memoria de usuario: {e}")
+    return {}
+
+# 🧠 Guardar clave/valor en memoria persistente
+def guardar_memoria_usuario(cid: str, key: str, valor: str):
+    os.makedirs("/tmp", exist_ok=True)
+    data = {}
+    if os.path.exists(RUTA_MEMORIA_USUARIOS):
+        try:
+            with open(RUTA_MEMORIA_USUARIOS, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            logging.warning(f"⚠️ Error leyendo memoria para escribir: {e}")
+            data = {}
+
+    if cid not in data:
+        data[cid] = {}
+
+    data[cid][key] = valor
+
+    try:
+        with open(RUTA_MEMORIA_USUARIOS, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        logging.info(f"💾 Memoria actualizada para {cid}: {key} = {valor}")
+    except Exception as e:
+        logging.error(f"❌ Error escribiendo memoria: {e}")
+
+# 📥 Cargar CIUDADES_DISPONIBLES desde archivo (global)
+try:
+    with open("/var/data/ciudades/ciudades.json", "r", encoding="utf-8") as f:
+        CIUDADES_DISPONIBLES = json.load(f)
+    logging.info(f"✅ Se cargaron {len(CIUDADES_DISPONIBLES)} ciudades desde ciudades.json")
+except Exception as e:
+    logging.warning(f"⚠️ Error al cargar ciudades.json: {e}")
+    CIUDADES_DISPONIBLES = []
+def guardar_memoria_ciudad_temporal(cid, ciudad):
+    ruta_tmp = "/tmp/memoria_ciudades_temp.json"
+    try:
+        if os.path.exists(ruta_tmp):
+            with open(ruta_tmp, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = {}
+
+        data[cid] = ciudad
+
+        with open(ruta_tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        logging.info(f"🧠 Ciudad '{ciudad}' guardada en /tmp para {cid}")
+    except Exception as e:
+        logging.error(f"❌ Error guardando ciudad temporal: {e}")
+
+# 📍 Recuperar ciudad del cliente desde múltiples fuentes
+def get_ciudad_cliente(cid: str, est: dict) -> str:
+    """
+    Retorna la ciudad del cliente buscando en:
+    1. Memoria temporal (/tmp)
+    2. Memoria persistente (/tmp/memoria_usuarios.json)
+    3. Estado actual en RAM
+    """
+    try:
+        ruta_tmp = "/tmp/memoria_ciudades_temp.json"
+        if os.path.exists(ruta_tmp):
+            with open(ruta_tmp, "r", encoding="utf-8") as f:
+                data_tmp = json.load(f)
+            ciudad_tmp = data_tmp.get(cid)
+            if ciudad_tmp:
+                return ciudad_tmp
+    except Exception as e:
+        logging.warning(f"⚠️ Error leyendo /tmp ciudad temporal: {e}")
+
+    memoria = cargar_memoria_usuario(cid)
+    if memoria.get("ciudad"):
+        return memoria["ciudad"]
+
+    return est.get("ciudad")
+
 
 def descargar_imagen_lengueta():
     """
@@ -408,6 +496,59 @@ def descargar_video_confianza():
     except Exception as e:
         print(">>> EXCEPCIÓN en descargar_video_confianza:", e)
         logging.error(f"❌ Error descargando video de confianza: {e}")
+
+
+CARPETA_MEMORIA_CIUDADES = "1cwq8Nfk603JtP0zpXbNh5qjU7bFwnb8n"
+
+def descargar_memoria_ciudades():
+    """
+    Descarga el archivo ciudades.json desde la carpeta 'Memoria ciudades' en Drive.
+    Guarda el archivo en /var/data/ciudades/ciudades.json si aún no existe.
+    """
+    try:
+        print(">>> descargar_memoria_ciudades() – iniciando")
+        service = get_drive_service()
+        os.makedirs("/var/data/ciudades", exist_ok=True)
+
+        logging.info("📂 [Memoria Ciudades] Iniciando descarga desde Drive…")
+        logging.info(f"🆔 Carpeta Drive: {CARPETA_MEMORIA_CIUDADES}")
+
+        # Buscar archivo ciudades.json en la carpeta
+        archivos = service.files().list(
+            q=f"'{CARPETA_MEMORIA_CIUDADES}' in parents and name = 'ciudades.json' and trashed = false",
+            fields="files(id, name)",
+            pageSize=1
+        ).execute().get("files", [])
+
+        if not archivos:
+            logging.warning("⚠️ No se encontró 'ciudades.json' en la carpeta Memoria ciudades.")
+            return
+
+        archivo = archivos[0]
+        ruta_destino = "/var/data/ciudades/ciudades.json"
+
+        if os.path.exists(ruta_destino):
+            logging.info("📦 Ya existe 'ciudades.json' — se omite descarga.")
+            return
+
+        logging.info(f"⬇️ Descargando: {archivo['name']}")
+        request = service.files().get_media(fileId=archivo["id"])
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request)
+
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+
+        with open(ruta_destino, "wb") as f:
+            f.write(buffer.getvalue())
+
+        logging.info(f"✅ Archivo guardado: {ruta_destino}")
+        print(">>> descargar_memoria_ciudades() – finalizado")
+
+    except Exception as e:
+        print(">>> EXCEPCIÓN en descargar_memoria_ciudades:", e)
+        logging.error(f"❌ Error descargando 'ciudades.json': {e}")
 
 def descargar_stickers_drive():
     """
@@ -972,11 +1113,11 @@ def menciona_catalogo(texto: str) -> bool:
     claves_exactas = [
         "catalogo", "ver catalogo", "mostrar catalogo", "quiero ver",
         "ver productos", "mostrar productos", "ver lo que tienes",
-        "ver tenis", "muestrame", "mostrar lo que tienes",
+        "ver tenis", "muestrame", "envieme fotos",
         "que estilos tiene", "no tengo imagenes", "tienes imagenes",
         "mandame el catalogo", "quiero ver modelos", "ver referencias",
         "quiero referencias", "muestrame los modelos", "que modelos tienes",
-        "que modelos hay", "envielas", "mandame fotos", "mandame las imagenes",
+        "que modelos hay", "envielas", "mandame fotos", "mandame imagenes",
         "envielas usted", "quiero ver imagenes", "tenis que tienes",
         "que hay", "quiero ver los pares", "muestra los tenis",
         "cuales modelos tienes", "mande fotos", "muestrame los pares",
@@ -1582,6 +1723,26 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
     modelos_enviados = []
     modelos_info = []
 
+    # 🟥 Mensaje inicial antes de enviar las fotos
+    if len(coincidencias) == 1:
+        mensaje_intro = (
+            f"📸 *Este es el modelo de color {color.upper()} que manejamos.*\n"
+            "🚚 Recuerda que el *envío es totalmente gratis*."
+        )
+    else:
+        mensaje_intro = (
+            f"📸 *Estos son los modelos de color {color.upper()} que manejamos.*\n"
+            "🚚 Recuerda que el *envío es totalmente gratis*.\n"
+            "🧐 Dime cuál es el que mas te gusto."
+        )
+
+    await ctx.bot.send_message(
+        cid,
+        mensaje_intro,
+        parse_mode="Markdown"
+    )
+
+
     for archivo in coincidencias:
         try:
             path = os.path.join(ruta, archivo)
@@ -1602,9 +1763,10 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
             precio = f"{int(item['precio']):,} COP" if item else "Consultar"
 
             caption = (
-                f"📸 Modelo en color *{color_archivo.upper()}*: *{modelo_raw}*\n"
+                f"📸 *{modelo_raw}*\n"
                 f"💰 Precio: {precio}"
             )
+
             await ctx.bot.send_photo(
                 chat_id=cid,
                 photo=open(path, "rb"),
@@ -1630,14 +1792,8 @@ async def manejar_color_detectado(ctx, cid: str, color: str, inventario: list):
         "color": color,
         "fase": "esperando_modelo_elegido",
         "modelos_enviados": modelos_enviados,
-        "modelos_info": modelos_info  # ← NUEVO
+        "modelos_info": modelos_info
     })
-
-    await ctx.bot.send_message(
-        cid,
-        "🧐 Dime cuál te gustó. Si no es ninguna, envíame una foto del modelo que quieres.",
-        parse_mode="Markdown"
-    )
 
 
 
@@ -1866,6 +2022,21 @@ def extraer_modelo(txt):
 def extraer_dia_hora(txt):
     m = re.search(r"(lunes|martes|miércoles|jueves|viernes|sábado|domingo)?\s*\d{1,2}(\s*(am|pm))?", txt, re.IGNORECASE)
     return m.group() if m else "No especificado"
+import re
+
+# 🎨 Alias de color (bidireccional + plurales)
+color_aliases = {
+    "rosado": "fucsia", "rosa": "fucsia", "fucsias": "fucsia",
+    "celeste": "azul", "azules": "azul",
+    "azul cielo": "aqua", "azul clarito": "aqua", "azul claro": "aqua", "azulito": "aqua",
+    "verdes": "verde", "amarillas": "amarillo", "blancos": "blanco", "negros": "negro",
+    "rojos": "rojo", "naranjas": "naranja", "turquesa": "aqua"
+}
+
+# 🚀 Agregar alias inversos automáticamente
+for base_color in list(color_aliases.values()):
+    color_aliases[base_color] = base_color
+
 # 📼 Asociación de colores y modelos por video específico
 colores_video_modelos = {
     "referencias": {
@@ -1881,44 +2052,37 @@ colores_video_modelos = {
     }
 }
 
-# 🎨 Alias de color (bidireccional)
-color_aliases = {
-    "rosado": "fucsia", "rosa": "fucsia", "fucsias": "fucsia",
-    "celeste": "azul", "azules": "azul",
-    "azul cielo": "aqua", "azul clarito": "aqua", "azul claro": "aqua", "azulito": "aqua",
-    "verdes": "verde", "amarillas": "amarillo", "blancos": "blanco", "negros": "negro",
-    "rojos": "rojo", "naranjas": "naranja", "turquesa": "aqua"
-}
-
-# 🚀 Generar alias inversos automáticamente
-for base_color in list(color_aliases.values()):
-    color_aliases[base_color] = base_color
-
-# 🧠 Detección especial para colores por video
-def detectar_color_video(texto: str) -> str:
-    texto = texto.lower().strip()
-    for palabra, real_color in color_aliases.items():
-        if palabra in texto:
-            return real_color
-    for color in colores_video_modelos.get("referencias", {}):
-        if color in texto:
-            return color
-    return ""
-
-# 🎨 Detección general de colores
+# 🎨 Detección general de colores (con regex)
 def detectar_color(texto: str) -> str:
     texto = texto.lower().strip()
+
     for palabra, real_color in color_aliases.items():
-        if palabra in texto:
+        if re.search(rf"\b{re.escape(palabra)}\b", texto):
             return real_color
+
     colores_base = [
         "negro", "blanco", "rojo", "azul", "amarillo", "verde",
         "rosado", "gris", "morado", "naranja", "café", "beige",
         "neón", "limón", "fucsia", "celeste", "aqua", "turquesa"
     ]
     for c in colores_base:
-        if c in texto:
+        if re.search(rf"\b{re.escape(c)}\b", texto):
             return c
+
+    return ""
+
+# 🧠 Detección de color en contexto de video (también con regex)
+def detectar_color_video(texto: str) -> str:
+    texto = texto.lower().strip()
+
+    for palabra, real_color in color_aliases.items():
+        if re.search(rf"\b{re.escape(palabra)}\b", texto):
+            return real_color
+
+    for color in colores_video_modelos.get("referencias", {}):
+        if re.search(rf"\b{re.escape(color)}\b", texto):
+            return color
+
     return ""
 
 
@@ -2385,7 +2549,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 partes = modelo_raw.split()
 
                 if len(partes) >= 3:
-                    marca  = partes[0]
+                    marca = partes[0]
                     modelo = partes[1]
                     color_archivo = " ".join(partes[2:])
                 else:
@@ -2418,38 +2582,25 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if errores_envio:
                 await ctx.bot.send_message(cid, f"⚠️ No pude enviar {errores_envio} de {len(coincidencias)} imágenes.")
 
-
             # Guardar estado para precio/tallas posteriores
             est["color"] = color
             est["fase"] = "esperando_modelo_elegido"
             est["modelos_enviados"] = modelos_enviados
             estado_usuario[cid] = est
 
-            # 🧠 Si preguntó precio inmediatamente
-            if menciona_precio(txt):
-                if len(modelos_enviados) == 1:
-                    modelo = modelos_enviados[0]
-                    precio = obtener_precio(modelo)
-                    await ctx.bot.send_message(
-                        cid,
-                        f"💰 El modelo *{modelo}* cuesta: {precio if precio else 'Consultar'}."
-                    )
-                else:
-                    await ctx.bot.send_message(
-                        cid,
-                        "🤔 Envié varios modelos. Dime cuál exactamente para darte el precio."
-                    )
-                return
-
-            # Pregunta normal si no pidió precio
-            await ctx.bot.send_message(cid, "🧐 Dime qué referencia te interesa, si no esta aca enviame una foto.")
+            # Mensaje final
+            await ctx.bot.send_message(
+                cid,
+                "🧐 Dime qué referencia te interesa. Si no está acá, envíame una foto 📸.",
+                parse_mode="Markdown"
+            )
             return
 
     except Exception as e:
         logging.error(f"❌ Error en bloque de detección de color: {e}")
         await ctx.bot.send_message(cid, "❌ Ocurrió un problema al procesar el color. Intenta de nuevo.")
         return
- 
+
 
     # ──────────────────────────────────────────────────────
     # 💬 DETECTOR UNIVERSAL — "me pagan el 30"
@@ -4158,20 +4309,8 @@ client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 async def responder_con_openai(mensaje_usuario):
     try:
-        match_presentacion = re.search(
-            r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30})\s*(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
-            mensaje_usuario.lower()
-        )
-        if match_presentacion:
-            nombre = match_presentacion.group(1).strip().title()
-            ciudad = match_presentacion.group(2).strip().title()
-            return (
-                f"👋 ¡Hola *{nombre}*! Bienvenido a X100.\n"
-                f"📍 Para *{ciudad}* el envío es *completamente gratis* 🚚✨"
-            )
-
         respuesta = await client.chat.completions.create(
-            model="gpt-4o",  # ✅ modelo mini actualizado
+            model="gpt-4o",
             messages=[
                 {
                     "role": "system",
@@ -4239,28 +4378,45 @@ async def manejar_catalogo(update, ctx):
 
     return False
 
-# ─────────────────────────────────────────────────────────────
-# 4. Procesar mensaje de WhatsApp
-# ─────────────────────────────────────────────────────────────
 async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     cid   = str(cid)
-    texto = (body or "").lower()   # 1) siempre existe
-    txt   = texto                  # 2) alias que muchos bloques ya usan
-    globals()["texto"] = texto     # 3) si algún bloque viejo menciona `texto`, ya lo tiene
+    texto = (body or "").lower()
+    txt   = texto
+    globals()["texto"] = texto
 
-
-    # 🧠 Inicializa estado si no existe  ←  <<— NUEVA POSICIÓN
+    # 🧠 Inicializa estado si no existe
     if cid not in estado_usuario or not estado_usuario[cid].get("fase"):
         reset_estado(cid)
         estado_usuario[cid] = {
             "fase": "inicio",
-            "esperando_nombre": True        # 🆕 Flag de bienvenida (solo se usa una vez)
+            "esperando_nombre": True,
+            "welcome_enviado": False  # ✅ ← ESTA ES LA LÍNEA CLAVE
         }
 
-    est = estado_usuario[cid]              # ✅ Siempre definido desde aquí
+    est = estado_usuario[cid]
+    # 📍 Detección libre de nombre y ciudad aunque no esté en fase 'inicio'
+    try:
+        texto_limpio = texto.strip().lower()
 
+        match_dual = re.search(
+            r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30}?)(?:\s+y\s+\w+)?\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
+            texto_limpio
+        )
+        if match_dual:
+            nombre_detectado = match_dual.group(1).strip().title()
+            ciudad_detectada = match_dual.group(2).strip().title()
 
-    est = estado_usuario[cid]              # ← existe sí o sí
+            if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
+                est["nombre"] = nombre_detectado
+                est["ciudad"] = ciudad_detectada
+                guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
+                guardar_memoria_usuario(cid, "ciudad", ciudad_detectada)
+                logging.info(f"🌎 Nombre/Ciudad detectados FUERA de fase: {nombre_detectado}, {ciudad_detectada}")
+            else:
+                logging.warning(f"❌ Ciudad detectada fuera de fase pero no válida: {ciudad_detectada}")
+    except Exception as e:
+        logging.error(f"❌ Error en detección libre de nombre/ciudad: {e}")
+
     # ─── FILTRO 1: mensaje vacío ───
     if not body or not body.strip():
         print(f"[IGNORADO] Mensaje vacío de {cid}")
@@ -4348,20 +4504,69 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
         # FAQ 5: ¿Dónde están ubicados?
         if any(p in texto for p in (
-            "donde estan ubicados", "donde queda", "ubicacion", "ubicación",
-            "direccion", "tienda fisica", "donde estan", "donde es la tienda",
+            "donde estan ubicados", "donde estan", "ubicacion", "ubicación",
+            "direccion", "tienda fisica", "donde es la tienda",
             "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
         )):
+
+            def cargar_memoria_ciudad_temporal(cid):
+                ruta_tmp = "/tmp/memoria_ciudades_temp.json"
+                if os.path.exists(ruta_tmp):
+                    try:
+                        with open(ruta_tmp, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        return data.get(cid)
+                    except Exception as e:
+                        logging.warning(f"⚠️ Error leyendo memoria temporal: {e}")
+                return None
+
+            mensajes = [
+                {
+                    "type": "text",
+                    "text": (
+                        "📍 Estamos en *Bucaramanga, Santander*.\n\n"
+                        "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
+                        "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
+                        "🗺️ Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
+                    ),
+                    "parse_mode": "Markdown"
+                }
+            ]
+
+            # ✅ Verificar ciudad en memoria
+            memoria_persistente = cargar_memoria_usuario(cid)
+            ciudad_cliente = (
+                cargar_memoria_ciudad_temporal(cid) or
+                memoria_persistente.get("ciudad") or
+                est.get("ciudad")
+            )
+
+            if ciudad_cliente:
+                mensajes.append({
+                    "type": "text",
+                    "text": (
+                        f"📦 *Recuerda que el envío a {ciudad_cliente} es completamente gratis.* "
+                        "¿Quieres que te los enviemos ya mismo? Te llegarán en unos *2 días hábiles* 🤩"
+                    ),
+                    "parse_mode": "Markdown"
+                })
+            else:
+                mensajes.append({
+                    "type": "text",
+                    "text": (
+                        "🚚 *Recuerda que el envío a tu ciudad es totalmente gratis* "
+                        "y te llega en *2 días hábiles* a la puerta de tu casa. 📦✨"
+                    ),
+                    "parse_mode": "Markdown"
+                })
+
             return {
-                "type": "text",
-                "text": (
-                    "📍 Estamos en *Bucaramanga, Santander*.\n\n"
-                    "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
-                    "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
-                    "Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
-                ),
-                "parse_mode": "Markdown"
+                "type": "multi",
+                "messages": mensajes
             }
+
+
+
 
         # FAQ 6: ¿Son nacionales o importados?
         if any(p in texto for p in (
@@ -4640,15 +4845,49 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     # 👤 Solo aceptar nombre/ciudad si se pidió explícitamente luego del welcome
     if est.get("fase") == "inicio" and est.get("esperando_nombre"):
 
-        match_nombre = re.search(r"(mi nombre es|me llamo|soy)\s+(\w+)", normalize(txt))
-        if match_nombre:
-            est["nombre"] = match_nombre.group(2).capitalize()
+        texto_limpio = texto.strip()
+        logging.info(f"🧠 Analizando texto para nombre/ciudad: '{texto_limpio}'")
 
-        match_ciudad = re.search(r"(de|desde|en)\s+([a-zA-Záéíóúñ\s]+)", normalize(txt))
-        if match_ciudad:
-            est["ciudad"] = match_ciudad.group(2).strip().title()
+        # 1️⃣ Detectar frases como: "Hola soy Juan Pablo y soy de Pereira"
+        match_dual = re.search(
+            r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30}?)(?:\s+y\s+\w+)?\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
+            texto_limpio.lower()
+        )
+        if match_dual:
+            nombre_detectado = match_dual.group(1).strip().title()
+            ciudad_detectada = match_dual.group(2).strip().title()
+            logging.info(f"✅ Detected nombre='{nombre_detectado}' ciudad='{ciudad_detectada}' [match_dual]")
 
-        # ▶️ Si obtuvo al menos nombre o ciudad por regex
+            est["nombre"] = nombre_detectado
+
+            if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
+                est["ciudad"] = ciudad_detectada
+                guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
+                guardar_memoria_usuario(cid, "ciudad", ciudad_detectada)
+                logging.info(f"📍 Ciudad validada con archivo y guardada: {ciudad_detectada}")
+            else:
+                logging.warning(f"❌ Ciudad '{ciudad_detectada}' no está en CIUDADES_DISPONIBLES")
+
+        # 2️⃣ Si no se detectó lo anterior, usar regex tradicionales
+        if "nombre" not in est:
+            match_nombre = re.search(r"(mi nombre es|me llamo|soy)\s+([a-zA-Záéíóúñ\s]+)", normalize(texto))
+            if match_nombre:
+                est["nombre"] = match_nombre.group(2).strip().title()
+                logging.info(f"✅ Nombre detectado por regex tradicional: {est['nombre']}")
+
+        if "ciudad" not in est:
+            match_ciudad = re.search(r"(de|desde|en|ubicado en|soy de|me ubico en|estoy en)\s+([a-zA-Záéíóúñ\s]+)", normalize(texto))
+            if match_ciudad:
+                ciudad_detectada = match_ciudad.group(2).strip().title()
+                if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
+                    est["ciudad"] = ciudad_detectada
+                    guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
+                    guardar_memoria_usuario(cid, "ciudad", ciudad_detectada)
+                    logging.info(f"📍 Ciudad detectada por fallback y guardada: {ciudad_detectada}")
+                else:
+                    logging.warning(f"❌ Ciudad '{ciudad_detectada}' no está en CIUDADES_DISPONIBLES")
+
+        # 3️⃣ Si se detectó algo útil, enviar saludo
         if "nombre" in est or "ciudad" in est:
             est["esperando_nombre"] = False
             estado_usuario[cid] = est
@@ -4656,6 +4895,8 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             nombre = est.get("nombre", "amig@")
             ciudad = est.get("ciudad")
             ciudad_texto = f"Qué bueno que seas de {ciudad} 🏡\n" if ciudad else ""
+
+            logging.info(f"✅ ESTADO FINAL: nombre={nombre}, ciudad={ciudad}")
 
             return {
                 "type": "text",
@@ -4667,65 +4908,15 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
-        # ▶️ Si no detectó por regex, usar IA para intentar extraer
-        try:
-            prompt = (
-                f"Extrae el nombre y ciudad del siguiente mensaje si están presentes:\n"
-                f"'{texto}'\n\n"
-                "Responde en JSON. Ejemplo:\n"
-                "{ \"nombre\": \"Laura\", \"ciudad\": \"Cali\" }.\n"
-                "Si no hay datos, responde con: {}"
-            )
-
-            respuesta = await client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{ "role": "user", "content": prompt }],
-                temperature=0,
-                response_format="json"
-            )
-
-            content = respuesta.choices[0].message.content
-            try:
-                datos = json.loads(content)
-            except json.JSONDecodeError as e:
-                logging.warning(f"⚠️ Error al parsear JSON IA: {e} | content: {content}")
-                datos = {}
-
-            if "nombre" in datos or "ciudad" in datos:
-                est["nombre"] = datos.get("nombre")
-                est["ciudad"] = datos.get("ciudad")
-
-                if est.get("nombre"):
-                    est["nombre"] = str(est["nombre"]).strip().capitalize()
-                if est.get("ciudad"):
-                    est["ciudad"] = str(est["ciudad"]).strip().title()
-
-                est["esperando_nombre"] = False
-                estado_usuario[cid] = est
-
-                nombre = est.get("nombre", "amig@")
-                ciudad = est.get("ciudad")
-                ciudad_texto = f"Qué bueno que seas de {ciudad} 🏡\n" if ciudad else ""
-
-                return {
-                    "type": "text",
-                    "text": (
-                        f"👋 Hola {nombre}! "
-                        f"{ciudad_texto}"
-                        "El envío es gratis 🚚. ¿Qué modelo te gustó o qué estás buscando?"
-                    ),
-                    "parse_mode": "Markdown"
-                }
-
-        except Exception as e:
-            logging.warning(f"⚠️ Error usando IA para extraer nombre/ciudad: {e}")
-
-        # ▶️ Si el usuario ignoró la pregunta, continúa flujo normal
+        # 4️⃣ Si no se detectó nada, seguir flujo normal
         est["esperando_nombre"] = False
         estado_usuario[cid] = est
+        logging.info("⚠️ No se detectó nombre ni ciudad en el mensaje.")
 
 
-    if est.get("fase") == "inicio":
+
+
+    if est.get("fase") == "inicio" and not est.get("welcome_enviado"):
         reset_estado(cid)
 
         # 1. Obtener welcome con audio + textos
@@ -4796,6 +4987,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 })
 
             est["fase"] = "esperando_color"
+            est["welcome_enviado"] = True  # ✅ evita reenvío en el futuro
             estado_usuario[cid] = est
 
             return {"type": "multi", "messages": mensajes}
@@ -4848,45 +5040,44 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         
     # ─── MAIN try/except ───
     try:
-        reply = await responder(dummy_update, ctx)
+        # 🧠 El cliente pidió catálogo (texto tipo "mandeme fotos", "catalogo", etc.)
+        if menciona_catalogo(texto):
+                await manejar_catalogo(dummy_update, ctx)
+                est["fase"] = "inicio"
+                estado_usuario[cid] = est
+                if ctx.resp:
+                        return {"type": "multi", "messages": ctx.resp}
+                return {"type": "text", "text": "👟 Te envié el catálogo arriba 👆🏻"}
 
-        # 🧭 Manejo del catálogo si el usuario lo menciona
-        if await manejar_catalogo(dummy_update, ctx):
-            est = estado_usuario.get(cid, {})         # ✅ asegúrate de obtener est primero
-            est["fase"] = "inicio"
-            estado_usuario[cid] = est
-            if ctx.resp:
-                return {"type": "multi", "messages": ctx.resp}
-            return {"type": "text", "text": "👟 Te envié el catálogo arriba 👆🏻"}
+        reply = await responder(dummy_update, ctx)
 
         # 🟢 Si responder() devuelve un dict (video/audio), lo mandamos directo
         if isinstance(reply, dict):
-            return reply
+                return reply
 
         # 🟢 Si hay mensajes acumulados por ctx
         if ctx.resp:
-            if len(ctx.resp) == 1:
-                return ctx.resp[0]
-            else:
-                return {"type": "multi", "messages": ctx.resp}
+                if len(ctx.resp) == 1:
+                        return ctx.resp[0]
+                else:
+                        return {"type": "multi", "messages": ctx.resp}
 
         # ✅ Confirmar compra si usuario responde con afirmación
         est = estado_usuario.get(cid, {})
         if est.get("fase") == "confirmar_compra":
-            if any(pal in txt for pal in AFIRMATIVAS):
-                estado_usuario[cid]["fase"] = "esperando_direccion"
-                return {"type": "text", "text": "Perfecto 💥 ¿A qué dirección quieres que enviemos el pedido?"}
-            elif any(x in txt for x in ["cancel", "cancelar", "otra", "ver otro", "no gracias"]):
-                estado_usuario.pop(cid, None)
-                return {"type": "text", "text": "❌ Cancelado. Escribe /start para reiniciar o dime si deseas ver otra referencia 📦."}
-            else:
-                return {"type": "text", "text": "¿Confirmas que quieres comprar este modelo? Puedes decir: 'sí', 'de una', 'dale', etc."}
-
+                if any(pal in txt for pal in AFIRMATIVAS):
+                        estado_usuario[cid]["fase"] = "esperando_direccion"
+                        return {"type": "text", "text": "Perfecto 💥 ¿A qué dirección quieres que enviemos el pedido?"}
+                elif any(x in txt for x in ["cancel", "cancelar", "otra", "ver otro", "no gracias"]):
+                        estado_usuario.pop(cid, None)
+                        return {"type": "text", "text": "❌ Cancelado. Escribe /start para reiniciar o dime si deseas ver otra referencia 📦."}
+                else:
+                        return {"type": "text", "text": "¿Confirmas que quieres comprar este modelo? Puedes decir: 'sí', 'de una', 'dale', etc."}
 
         # 🟡 Si está esperando pago o comprobante
         est = estado_usuario.get(cid, {})
         if est.get("fase") in ("esperando_pago", "esperando_comprobante"):
-            return {"type": "text", "text": "💬 Espero tu método de pago o comprobante. 📸"}
+                return {"type": "text", "text": "💬 Espero tu método de pago o comprobante. 📸"}
 
         # 🔁 Caso final: pasar a la IA
         respuesta_ia = await responder_con_openai(body)
@@ -5233,6 +5424,12 @@ async def venom_webhook(req: Request):
 # 5. Arranque del servidor
 # -------------------------------------------------------------------------
 if __name__ == "__main__":
+    descargar_memoria_ciudades()          # ⬇️ Descarga ciudades.json desde Drive
+
+    # ✅ Cargar lista de ciudades desde archivo
+    with open("/var/data/ciudades/ciudades.json", "r", encoding="utf-8") as f:
+        CIUDADES_DISPONIBLES = json.load(f)
+
     descargar_videos_drive()              # ⬇️ Descarga los videos (si no existen)
     descargar_imagenes_catalogo()         # ⬇️ Descarga 1 imagen por modelo del catálogo
     descargar_stickers_drive()
@@ -5240,6 +5437,7 @@ if __name__ == "__main__":
     descargar_audios_bienvenida_drive()
     descargar_imagen_lengueta()
     descargar_metodos_pago_drive()
+
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("lector:api", host="0.0.0.0", port=port)
