@@ -65,6 +65,8 @@ logging.basicConfig(level=logging.INFO,
 api = FastAPI(title="AYA Bot – WhatsApp")
 logging.basicConfig(level=logging.DEBUG)
 
+estado_usuario = {}
+usuarios_saludo_enviado = set()
 
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
 def get_drive_service():
@@ -81,6 +83,7 @@ def get_drive_service():
     )
  
     return build("drive", "v3", credentials=creds)
+
 def registrar_o_actualizar_lead(data: dict) -> bool:
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
@@ -310,129 +313,89 @@ def descargar_metodos_pago_drive():
     except Exception as e:
         logging.error(f"❌ Error descargando 'metodosdepago.jpeg': {e}")
 
-CARPETA_AUDIOS_DRIVE = "1-Htyzy4f8NgjkLJRv5hGZHdTXpRvz5mA"  # Carpeta raíz de 'Audios'
+CARPETA_AUDIOS_DRIVE = "1-Htyzy4f8NgjkLJRv5hGZHdTXpRvz5mA"  # Carpeta raíz de “Audios”
 
-from googleapiclient.http import MediaIoBaseDownload
-
-def descargar_audios_bienvenida_drive():
+def descargar_audios_bienvenida_drive() -> None:
     """
-    Descarga audios desde las subcarpetas 'BIENVENIDA', 'CONFIANZA' y 'CONTRAENTREGA'
-    dentro de la carpeta 'Audios' en Google Drive.
-    Guarda los archivos en:
-    - /var/data/audios/bienvenida/
-    - /var/data/audios/confianza/
-    - /var/data/audios/contraentrega/
+    Descarga audios desde las subcarpetas en Drive:
+        BIENVENIDA, CONFIANZA, CONTRAENTREGA, PRECIO, REALIZAR COMPRA,
+        CAROS, COSIDOS, CAUCHO → a /var/data/audios/<subcarpeta>
+
+    Siempre vuelve a descargar y sobrescribe.
+    Archivos menores a 1 KB se descartan.
     """
     try:
         print(">>> descargar_audios_bienvenida_drive() – iniciando")
         service = get_drive_service()
 
-        # Rutas de destino locales
-        carpeta_bienvenida     = "/var/data/audios/bienvenida"
-        carpeta_confianza      = "/var/data/audios/confianza"
-        carpeta_contraentrega  = "/var/data/audios/contraentrega"
-        os.makedirs(carpeta_bienvenida, exist_ok=True)
-        os.makedirs(carpeta_confianza, exist_ok=True)
-        os.makedirs(carpeta_contraentrega, exist_ok=True)
+        carpetas_locales: Dict[str, str] = {
+            "BIENVENIDA":        "/var/data/audios/bienvenida",
+            "CONFIANZA":         "/var/data/audios/confianza",
+            "CONTRAENTREGA":     "/var/data/audios/contraentrega",
+            "PRECIO":            "/var/data/audios/precio",
+            "REALIZAR COMPRA":   "/var/data/audios/realizar_compra",
+            "CAROS":             "/var/data/audios/caros",
+            "COSIDOS":           "/var/data/audios/cosidos",
+            "CAUCHO":            "/var/data/audios/caucho"
+        }
 
-        # 🧹 Limpiar bienvenida
-        for f in os.listdir(carpeta_bienvenida):
-            archivo = os.path.join(carpeta_bienvenida, f)
-            if os.path.isfile(archivo):
-                os.remove(archivo)
+        # Crear carpetas locales si no existen
+        for ruta in carpetas_locales.values():
+            os.makedirs(ruta, exist_ok=True)
 
-        logging.info("📂 [Audios Bienvenida] Descargando desde subcarpeta 'BIENVENIDA'…")
+        # Limpiar completamente todas las carpetas locales
+        for ruta in carpetas_locales.values():
+            for f in os.listdir(ruta):
+                p = os.path.join(ruta, f)
+                if os.path.isfile(p):
+                    os.remove(p)
 
-        bienvenida = service.files().list(
-            q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'BIENVENIDA' and mimeType='application/vnd.google-apps.folder' and trashed = false",
-            fields="files(id, name)", pageSize=1
-        ).execute().get("files", [])
+        # Recorrer cada subcarpeta de Drive
+        for nombre_drive, ruta_destino in carpetas_locales.items():
+            logging.info(f"📂 Descargando audios de '{nombre_drive}' …")
 
-        if bienvenida:
-            bienvenida_id = bienvenida[0]["id"]
-            audios = service.files().list(
-                q=f"'{bienvenida_id}' in parents and mimeType contains 'audio/' and trashed = false",
-                fields="files(id, name)"
+            sub = service.files().list(
+                q=(
+                    f"'{CARPETA_AUDIOS_DRIVE}' in parents and "
+                    f"name = '{nombre_drive}' and "
+                    f"mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+                ),
+                fields="files(id,name)", pageSize=1
             ).execute().get("files", [])
+
+            if not sub:
+                logging.warning(f"❌ No existe la carpeta '{nombre_drive}' en Drive.")
+                continue
+
+            sub_id = sub[0]["id"]
+
+            audios = service.files().list(
+                q=f"'{sub_id}' in parents and mimeType contains 'audio/' and trashed = false",
+                fields="files(id,name)"
+            ).execute().get("files", [])
+
+            if not audios:
+                logging.warning(f"⚠️ La carpeta '{nombre_drive}' está vacía.")
+                continue
 
             for audio in audios:
-                nombre = audio["name"]
-                destino = os.path.join(carpeta_bienvenida, nombre)
+                destino = os.path.join(ruta_destino, audio["name"])
                 request = service.files().get_media(fileId=audio["id"])
+
                 buffer = io.BytesIO()
-                downloader = MediaIoBaseDownload(buffer, request)
+                dl = MediaIoBaseDownload(buffer, request)
                 done = False
                 while not done:
-                    _, done = downloader.next_chunk()
+                    _, done = dl.next_chunk()
+
+                if buffer.getbuffer().nbytes < 1024:
+                    logging.error(f"❌ Archivo '{audio['name']}' descargado vacío — omitido.")
+                    continue
+
                 with open(destino, "wb") as f:
                     f.write(buffer.getvalue())
+
                 logging.info(f"✅ Guardado: {destino}")
-        else:
-            logging.warning("❌ No se encontró la subcarpeta 'BIENVENIDA'.")
-
-        # ─── CONFIANZA ───
-        logging.info("📂 [Audio Confianza] Buscando en carpeta 'CONFIANZA'…")
-
-        confianza = service.files().list(
-            q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'CONFIANZA' and mimeType='application/vnd.google-apps.folder' and trashed = false",
-            fields="files(id, name)", pageSize=1
-        ).execute().get("files", [])
-
-        if confianza:
-            confianza_id = confianza[0]["id"]
-            archivo = service.files().list(
-                q=f"'{confianza_id}' in parents and name = 'Desconfianza.mp3' and mimeType contains 'audio/' and trashed = false",
-                fields="files(id, name)"
-            ).execute().get("files", [])
-
-            if archivo:
-                nombre = archivo[0]["name"]
-                destino = os.path.join(carpeta_confianza, nombre)
-                request = service.files().get_media(fileId=archivo[0]["id"])
-                buffer = io.BytesIO()
-                downloader = MediaIoBaseDownload(buffer, request)
-                done = False
-                while not done:
-                    _, done = downloader.next_chunk()
-                with open(destino, "wb") as f:
-                    f.write(buffer.getvalue())
-                logging.info(f"✅ Guardado: {destino}")
-            else:
-                logging.warning("❌ No se encontró 'Desconfianza.mp3' en CONFIANZA.")
-        else:
-            logging.warning("❌ No se encontró la carpeta 'CONFIANZA'.")
-
-        # ─── CONTRAENTREGA ───
-        logging.info("📂 [Audio Contraentrega] Buscando en carpeta 'CONTRAENTREGA'…")
-
-        contraentrega = service.files().list(
-            q=f"'{CARPETA_AUDIOS_DRIVE}' in parents and name = 'CONTRAENTREGA' and mimeType='application/vnd.google-apps.folder' and trashed = false",
-            fields="files(id, name)", pageSize=1
-        ).execute().get("files", [])
-
-        if contraentrega:
-            carpeta_id = contraentrega[0]["id"]
-            archivo = service.files().list(
-                q=f"'{carpeta_id}' in parents and name = 'CONTRAENTREGA.mp3' and mimeType contains 'audio/' and trashed = false",
-                fields="files(id, name)"
-            ).execute().get("files", [])
-
-            if archivo:
-                nombre = archivo[0]["name"]
-                destino = os.path.join(carpeta_contraentrega, nombre)
-                request = service.files().get_media(fileId=archivo[0]["id"])
-                buffer = io.BytesIO()
-                downloader = MediaIoBaseDownload(buffer, request)
-                done = False
-                while not done:
-                    _, done = downloader.next_chunk()
-                with open(destino, "wb") as f:
-                    f.write(buffer.getvalue())
-                logging.info(f"✅ Guardado: {destino}")
-            else:
-                logging.warning("❌ No se encontró 'CONTRAENTREGA.mp3' en CONTRAENTREGA.")
-        else:
-            logging.warning("❌ No se encontró la carpeta 'CONTRAENTREGA'.")
 
         print(">>> descargar_audios_bienvenida_drive() – finalizado")
 
@@ -440,16 +403,13 @@ def descargar_audios_bienvenida_drive():
         print(">>> EXCEPCIÓN en descargar_audios_bienvenida_drive:", e)
         logging.error(f"❌ Error al descargar audios: {e}")
 
-
-
-
-# ─── Descarga del video de confianza desde Drive ─────────────────────────────
+# ─── Descarga de todos los videos de confianza desde Drive ─────────────────────────────
 CARPETA_VIDEO_CONFIANZA_DRIVE = "1uX0FXruTXLr2c5SHAc6thlIUMucN1hAA"  # Carpeta 'Video de confianza'
 
 def descargar_video_confianza():
     """
-    Descarga el archivo .mp4 desde la carpeta 'Video de confianza' en Google Drive.
-    Guarda el archivo en /var/data/videos/video_confianza.mp4 si aún no existe.
+    Descarga todos los archivos .mp4 desde la carpeta 'Video de confianza' en Google Drive.
+    Guarda los archivos en /var/data/videos/ sin sobrescribir si ya existen.
     """
     try:
         print(">>> descargar_video_confianza() – iniciando")
@@ -459,79 +419,77 @@ def descargar_video_confianza():
         logging.info("📂 [Video Confianza] Iniciando descarga desde Drive…")
         logging.info(f"🆔 Carpeta Drive: {CARPETA_VIDEO_CONFIANZA_DRIVE}")
 
-        # Buscar archivo .mp4 en la carpeta
+        # Buscar todos los archivos .mp4 en la carpeta
         archivos = service.files().list(
             q=f"'{CARPETA_VIDEO_CONFIANZA_DRIVE}' in parents and mimeType='video/mp4' and trashed = false",
             fields="files(id, name)",
-            pageSize=1
+            pageSize=20
         ).execute().get("files", [])
 
         if not archivos:
             logging.warning("⚠️ No se encontró ningún video .mp4 en la carpeta de confianza.")
             return
 
-        archivo = archivos[0]
-        nombre_archivo = "video_confianza.mp4"
-        ruta_destino = os.path.join("/var/data/videos", nombre_archivo)
+        for archivo in archivos:
+            nombre_archivo = archivo["name"]
+            ruta_destino = os.path.join("/var/data/videos", nombre_archivo)
 
-        if os.path.exists(ruta_destino):
-            logging.info(f"📦 Ya existe: {nombre_archivo} — se omite descarga.")
-            return
+            if os.path.exists(ruta_destino):
+                logging.info(f"📦 Ya existe: {nombre_archivo} — se omite descarga.")
+                continue
 
-        logging.info(f"⬇️ Descargando video: {nombre_archivo}")
-        request = service.files().get_media(fileId=archivo["id"])
-        buffer = io.BytesIO()
-        downloader = MediaIoBaseDownload(buffer, request)
+            logging.info(f"⬇️ Descargando video: {nombre_archivo}")
+            request = service.files().get_media(fileId=archivo["id"])
+            buffer = io.BytesIO()
+            downloader = MediaIoBaseDownload(buffer, request)
 
-        done = False
-        while not done:
-            _, done = downloader.next_chunk()
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
 
-        with open(ruta_destino, "wb") as f:
-            f.write(buffer.getvalue())
+            with open(ruta_destino, "wb") as f:
+                f.write(buffer.getvalue())
 
-        logging.info(f"✅ Video guardado: {ruta_destino}")
+            logging.info(f"✅ Video guardado: {ruta_destino}")
+
         print(">>> descargar_video_confianza() – finalizado")
 
     except Exception as e:
         print(">>> EXCEPCIÓN en descargar_video_confianza:", e)
-        logging.error(f"❌ Error descargando video de confianza: {e}")
+        logging.error(f"❌ Error descargando videos de confianza: {e}")
 
 
-CARPETA_MEMORIA_CIUDADES = "1cwq8Nfk603JtP0zpXbNh5qjU7bFwnb8n"
+# ─── Carpeta general de Drive donde está el modelos.json ─────────────────────
+CARPETA_DRIVE_GENERAL = "1cwq8Nfk603JtP0zpXbNh5qjU7bFwnb8n"  # Carpeta 'Memoria General'
 
 def descargar_memoria_ciudades():
     """
-    Descarga el archivo ciudades.json desde la carpeta 'Memoria ciudades' en Drive.
-    Guarda el archivo en /var/data/ciudades/ciudades.json si aún no existe.
+    Descarga el archivo modelos.json desde la carpeta general en Drive.
+    Siempre reemplaza el archivo local en /var/data/modelos/modelos.json
     """
     try:
-        print(">>> descargar_memoria_ciudades() – iniciando")
+        print(">>> descargar_memoria_modelos() – iniciando")
         service = get_drive_service()
-        os.makedirs("/var/data/ciudades", exist_ok=True)
+        os.makedirs("/var/data/modelos", exist_ok=True)
 
-        logging.info("📂 [Memoria Ciudades] Iniciando descarga desde Drive…")
-        logging.info(f"🆔 Carpeta Drive: {CARPETA_MEMORIA_CIUDADES}")
+        logging.info("📂 [Memoria Modelos] Iniciando descarga desde Drive…")
+        logging.info(f"🆔 Carpeta Drive: {CARPETA_DRIVE_GENERAL}")
 
-        # Buscar archivo ciudades.json en la carpeta
         archivos = service.files().list(
-            q=f"'{CARPETA_MEMORIA_CIUDADES}' in parents and name = 'ciudades.json' and trashed = false",
+            q=f"'{CARPETA_DRIVE_GENERAL}' in parents and name = 'modelos.json' and trashed = false",
             fields="files(id, name)",
             pageSize=1
         ).execute().get("files", [])
 
         if not archivos:
-            logging.warning("⚠️ No se encontró 'ciudades.json' en la carpeta Memoria ciudades.")
+            logging.warning("⚠️ No se encontró 'modelos.json' en la carpeta.")
             return
 
         archivo = archivos[0]
-        ruta_destino = "/var/data/ciudades/ciudades.json"
+        ruta_destino = "/var/data/modelos/modelos.json"
 
-        if os.path.exists(ruta_destino):
-            logging.info("📦 Ya existe 'ciudades.json' — se omite descarga.")
-            return
-
-        logging.info(f"⬇️ Descargando: {archivo['name']}")
+        # Siempre descargar y reemplazar
+        logging.info(f"⬇️ Descargando y sobrescribiendo: {archivo['name']}")
         request = service.files().get_media(fileId=archivo["id"])
         buffer = io.BytesIO()
         downloader = MediaIoBaseDownload(buffer, request)
@@ -544,11 +502,12 @@ def descargar_memoria_ciudades():
             f.write(buffer.getvalue())
 
         logging.info(f"✅ Archivo guardado: {ruta_destino}")
-        print(">>> descargar_memoria_ciudades() – finalizado")
+        print(">>> descargar_memoria_modelos() – finalizado")
 
     except Exception as e:
-        print(">>> EXCEPCIÓN en descargar_memoria_ciudades:", e)
-        logging.error(f"❌ Error descargando 'ciudades.json': {e}")
+        print(">>> EXCEPCIÓN en descargar_memoria_modelos:", e)
+        logging.error(f"❌ Error descargando 'modelos.json': {e}")
+
 
 def descargar_stickers_drive():
     """
@@ -1163,32 +1122,53 @@ SMTP_SERVER           = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT             = int(os.environ.get("SMTP_PORT", 587))
 EMAIL_REMITENTE       = os.environ.get("EMAIL_REMITENTE")
 EMAIL_PASSWORD        = os.environ.get("EMAIL_PASSWORD")
+import unicodedata
+import re
 
-async def enviar_welcome_venom(cid: str):
+def normalizar(texto: str) -> str:
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8")
+    return texto.upper()
+
+def clasificar_saludo(texto: str) -> str:
+    texto = normalizar(texto)
+
+    # 🛒 Detectar intención de compra
+    if any(p in texto for p in [
+        "REALIZAR UNA COMPRA", "COMO REALIZO UNA COMPRA", "HACER UNA COMPRA", 
+        "ORDENAR", "QUIERO COMPRAR", "QUIERO UNO", "LO QUIERO"
+    ]):
+        return "comprar"
+
+    # 💰 Detectar si pregunta por precio (solo si es una pregunta)
+    if "?" in texto and any(p in texto for p in ["PRECIO", "CUANTO VALE", "VALE", "VALEN", "CUESTA", "COSTO", "COST"]):
+        return "precio"
+
+    return "general"
+
+async def enviar_welcome_venom(cid: str, tipo: str = "general"):
     try:
-        audio_path = "/var/data/audios/bienvenida/bienvenida1.mp3"
+        if tipo == "precio":
+            audio_path = "/var/data/audios/precio/precio.mp3"
+        elif tipo == "comprar":
+            audio_path = "/var/data/audios/realizar_compra/compra.mp3"
+        else:
+            audio_path = "/var/data/audios/bienvenida/bienvenida1.mp3"
 
-        existe = os.path.exists(audio_path)
-        logging.info(f"🧪 Enviando audio: {audio_path} | Existe: {existe}")
-
-        if not existe:
+        if not os.path.exists(audio_path):
             raise FileNotFoundError(f"❌ No se encontró el archivo: {audio_path}")
 
         with open(audio_path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
-            b64_final = f"data:audio/mpeg;base64,{b64}"  # ✅ encabezado MIME agregado
-
-        logging.info(f"🧪 Base64 generado correctamente — longitud: {len(b64)}")
-        logging.info(f"🧪 Base64 preview: {b64[:80]}...")
+            b64_final = f"data:audio/mpeg;base64,{b64}"
 
         return {
             "type": "multi",
             "messages": [
                 {
                     "type": "audio",
-                    "base64": b64_final,  # ✅ ahora con encabezado
-                    "mimetype": "audio/mpeg",  # WhatsApp lo requiere así
-                    "filename": "bienvenida1.mp3",
+                    "base64": b64_final,
+                    "mimetype": "audio/mpeg",
+                    "filename": os.path.basename(audio_path),
                     "text": "🎧 Escucha este audio de bienvenida."
                 },
                 {
@@ -1202,7 +1182,11 @@ async def enviar_welcome_venom(cid: str):
                 },
                 {
                     "type": "text",
-                    "text": "🙋‍♂️ Dime tu nombre y ciudad por favor y en qué te ayudo"
+                    "text": (
+                        "🙋‍♂️ Hola, dime tu *nombre* y desde qué *ciudad* nos escribes 🏙️✍️ "
+                        "para darte una asesoría más personalizada 💬😊"
+                    ),
+                    "parse_mode": "Markdown"
                 }
             ]
         }
@@ -1239,6 +1223,100 @@ def enviar_correo(dest, subj, body):
 
 def enviar_correo_con_adjunto(dest, subj, body, adj):
     logging.info(f"[EMAIL STUB] To: {dest}\nSubject: {subj}\n{body}\n[Adj: {adj}]")
+
+
+from datetime import datetime, timedelta
+
+# Variables de caché
+_carpetas_cache = None
+_ultima_actualizacion = None
+
+def listar_carpetas_drive():
+    """
+    Lista los nombres de carpetas en Google Drive dentro de una carpeta raíz.
+    Solo recarga desde Drive si no hay caché (por ejemplo, al reiniciar el servidor).
+    """
+    global _carpetas_cache
+
+    if _carpetas_cache is not None:
+        return _carpetas_cache  # Devuelve la cache si ya fue cargada
+
+    # Si no hay cache (primer uso tras reinicio), consultar Drive
+    from googleapiclient.discovery import build
+    import os, json
+    from google.oauth2 import service_account
+
+    SCOPES = ['https://www.googleapis.com/auth/drive']
+    creds = service_account.Credentials.from_service_account_info(
+        json.loads(os.getenv("GOOGLE_CREDS_JSON")), scopes=SCOPES
+    )
+
+    service = build('drive', 'v3', credentials=creds)
+    folder_id = '1OXHjSG82RO9KGkNIZIRVusFpFhZlujQE'
+
+    carpetas = []
+    page_token = None
+    while True:
+        response = service.files().list(
+            q=f"'{folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+            spaces='drive',
+            fields='nextPageToken, files(id, name)',
+            pageToken=page_token
+        ).execute()
+
+        for file in response.get('files', []):
+            carpetas.append(file['name'])
+
+        page_token = response.get('nextPageToken', None)
+        if page_token is None:
+            break
+
+    _carpetas_cache = carpetas
+    return carpetas
+
+
+
+
+def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
+    """
+    Detecta modelo y color desde texto OCR comparando con nombres de carpetas.
+    Ejemplo carpeta: DS_305_VERDE LIMON
+    Coincidencia robusta: al menos 2 palabras del color deben coincidir (ignorando ruido).
+    """
+    import re
+    import unicodedata
+
+    # Normaliza y limpia texto OCR
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
+    texto = texto.replace("-", " ").replace("_", " ")
+    texto_limpio = re.sub(r"[^A-Z ]", " ", texto)  # quita símbolos raros como "X"
+    palabras_ocr = set(p for p in texto_limpio.split() if p not in {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"})
+
+    for carpeta in carpetas_drive:
+        nombre = carpeta.upper().replace("_", " ")  # Ej: DS 305 VERDE LIMON
+        partes = nombre.split()
+
+        if len(partes) >= 3 and partes[0] == "DS":
+            modelo = partes[1]
+            color = " ".join(partes[2:])
+            color_tokens = set(p for p in color.split() if p not in {"X", "Y", "DE", "CON", "EL", "LA", "LOS", "LAS", "UN", "UNA"})
+
+            # Validar modelo exacto
+            if f"DS {modelo}" in texto or f"DS{modelo}" in texto:
+                # Coincidencia más exigente de color (mínimo 2 palabras del color)
+                coinciden = palabras_ocr & color_tokens
+                if len(coinciden) >= 2:
+                    return {
+                        "modelo": modelo,
+                        "color": color,
+                        "marca": "DS",
+                        "type": "text",
+                        "text": f"✅ Perfecto, tomaremos *DS {modelo}* color *{color}*.\n📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta interna* de tus tenis actuales 👟."
+                    }
+
+    return None
+
+
 
 def extraer_texto_comprobante(path: str) -> str:
     try:
@@ -1433,11 +1511,22 @@ def detectar_talla(texto_usuario: str, tallas_disponibles: list[str]) -> str | N
 def reset_estado(cid: int):
     estado_usuario[cid] = {
         "fase": "inicio",
-        "marca": None, "modelo": None, "color": None, "talla": None,
-        "nombre": None, "correo": None, "telefono": None,
-        "ciudad": None, "provincia": None, "direccion": None,
-        "referencia": None, "resumen": None, "sale_id": None
+        "marca": None,
+        "modelo": None,
+        "color": None,
+        "talla": None,
+        "nombre": None,
+        "correo": None,
+        "telefono": None,
+        "ciudad": None,
+        "provincia": None,
+        "direccion": None,
+        "referencia": None,
+        "resumen": None,
+        "sale_id": None,
+        "welcome_enviado": cid in usuarios_saludo_enviado  # ← No se borra nunca si ya lo recibió
     }
+
 
 def menu_botones(opts: list[str]):
     return ReplyKeyboardMarkup([[KeyboardButton(o)] for o in opts], resize_keyboard=True)
@@ -2478,30 +2567,36 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "no voy a arriesgar mi dinero"
     ]
 
-     # 🟥 Desconfianza: envía video + audio de confianza
+    # 🟥 Desconfianza: envía videos + audio de confianza
     if any(frase in texto_normalizado for frase in frases_desconfianza):
-        video_path = "/var/data/videos/video_confianza.mp4"
+        carpeta_videos = "/var/data/videos"
         audio_path = "/var/data/audios/confianza/Desconfianza.mp3"
 
         mensajes = [{
             "type": "text",
-            "text": "🤝 Entendemos tu preocupación. Te compartimos este video para que veas que somos una tienda real y seria."
+            "text": "🤝 Entendemos tu preocupación. Te compartimos estos videos para que veas que somos una tienda real y seria."
         }]
 
-        if os.path.exists(video_path):
-            with open(video_path, "rb") as f:
-                mensajes.append({
-                    "type": "video",
-                    "base64": base64.b64encode(f.read()).decode("utf-8"),
-                    "mimetype": "video/mp4",
-                    "filename": "video_confianza.mp4",
-                    "text": "🎥 Mira este video corto de confianza:"
-                })
-        else:
-            mensajes.append({
-                "type": "text",
-                "text": "📹 No pudimos cargar el video en este momento, pero puedes confiar en nosotros. ¡Llevamos años vendiendo con éxito!"
-            })
+        # ✅ Lista exacta de videos válidos
+        videos_confianza = {
+            "video_confianza.mp4",
+            "WhatsApp Video 2025-05-28 at 4.26.50 PM.mp4"
+        }
+
+        for archivo in sorted(os.listdir(carpeta_videos)):
+            if archivo in videos_confianza:
+                ruta_video = os.path.join(carpeta_videos, archivo)
+                try:
+                    with open(ruta_video, "rb") as f:
+                        mensajes.append({
+                            "type": "video",
+                            "base64": base64.b64encode(f.read()).decode("utf-8"),
+                            "mimetype": "video/mp4",
+                            "filename": archivo,
+                            "text": f"🎥 Mira este video de confianza:"
+                        })
+                except Exception as e:
+                    logging.warning(f"⚠️ No se pudo leer el video {archivo}: {e}")
 
         if os.path.exists(audio_path):
             with open(audio_path, "rb") as f:
@@ -2515,6 +2610,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         await reanudar_fase_actual(cid, ctx, est)
         return {"type": "multi", "messages": mensajes}
+
 
     # 🟨 Detección universal de color — funciona en cualquier fase
     try:
@@ -2772,7 +2868,52 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         os.makedirs("temp", exist_ok=True)
         await f.download_to_drive(tmp)
 
-        # ➜ convert to base64 y usar CLIP
+        # 1️⃣ OCR antes de CLIP
+        texto_ocr = extraer_texto_comprobante(tmp)
+
+        # ✅ Cargar carpetas desde Drive (para validación directa)
+        carpetas_en_drive = listar_carpetas_drive()
+
+        resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive)
+
+        if resultado:
+            modelo_solo = normalize(resultado["modelo"])
+            color_detectado = normalize(resultado["color"])
+
+            item = next(
+                (i for i in inv if normalize(i["modelo"]) == modelo_solo and normalize(i["color"]) == color_detectado),
+                None
+            )
+
+            if item:
+                est.update({
+                    "marca": resultado["marca"],
+                    "modelo": resultado["modelo"],
+                    "color": resultado["color"],
+                    "precio_total": item["precio"],
+                    "fase": "esperando_talla"
+                })
+                estado_usuario[cid] = est
+                os.remove(tmp)
+
+                nombre_bonito = f"{resultado['marca']}{resultado['modelo']}"
+                precio = item["precio"]
+
+                await ctx.bot.send_message(
+                    chat_id=cid,
+                    text=(
+                        f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{resultado['color']}* están brutales 😎.\n"
+                        f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
+                        f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                        f"¿Seguimos con la compra?"
+                    ),
+                    parse_mode="Markdown"
+                )
+                return
+
+
+
+        # 2️⃣ CLIP si OCR falló o no hubo coincidencia en inventario
         with open(tmp, "rb") as f_img:
             base64_img = base64.b64encode(f_img.read()).decode("utf-8")
         os.remove(tmp)
@@ -2804,35 +2945,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # 📸 Imagen detectada — responder con modelo, color y PRECIO
-    if est.get("fase", "") in ("", "inicio", "imagen_detectada") and 'path_local' in locals():
-        resultado = identificar_modelo_desde_clip(path_local)
-        if resultado:
-            modelo_detectado, color_detectado = resultado
-            est["modelo"] = modelo_detectado
-            est["color"] = color_detectado
-            est["fase"] = "imagen_detectada"
-
-            precio = next(
-                (i["precio"] for i in inv if
-                 normalize(i["marca"]) == normalize(est.get("marca", "")) and
-                 normalize(i["modelo"]) == normalize(modelo_detectado) and
-                 normalize(i["color"]) == normalize(color_detectado)),
-                None
-            )
-            est["precio_total"] = int(precio) if precio else None
-
-            mensaje = (
-                f"📸 La imagen coincide con *{modelo_detectado}* color *{color_detectado}*.\n"
-                f"✅ ¿Confirmas que es el modelo que deseas?"
-            )
-            if precio:
-                mensaje += f"\n💰 Ese modelo tiene un precio de *${precio}* COP."
-
-            mensaje += "\n\nResponde *sí* para continuar o *no* para elegir otro modelo."
-
-            await ctx.bot.send_message(chat_id=cid, text=mensaje, parse_mode="Markdown")
-            return
 
 
     # 📷 Confirmación si la imagen detectada fue correcta
@@ -4296,7 +4408,16 @@ async def manejar_precio(update, ctx, inventario):
             parse_mode="Markdown"
         )
         return True
-   
+
+# 🔧 Normalizar texto antes de los FAQ
+def normalizar_texto(texto):
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8")
+    texto = texto.upper()
+    texto = re.sub(r"[^\w\s]", "", texto)  # elimina signos de puntuación
+    return texto.strip()
+
+texto_normalizado = normalizar_texto(texto)
+
 # --------------------------------------------------------------------
 
 nest_asyncio.apply()
@@ -4320,12 +4441,12 @@ async def responder_con_openai(mensaje_usuario):
                         "Nuestros productos son 100% colombianos y hechos en Bucaramanga.\n\n"
                         "Tu objetivo principal es:\n"
                         "- Si preguntan por precio di, dime qué referencia exacta buscas.\n"
-                        "- Siempre que puedas, pide la referencia del teni.\n"
+                        "- Siempre que puedas, pregunta que color le gusto.\n"
                         "- Pide que envíe una imagen del zapato que busca 📸.\n"
-                        "Siempre que puedas, invita amablemente al cliente a enviarte el número de referencia o una imagen para agilizar el pedido.\n"
+                        "Siempre que puedas, invita amablemente a enviar  una imagen para agilizar el pedido o que preguntar que color le llamo la atencion.\n"
                         "Si el cliente pregunta por marcas externas, responde cálidamente explicando que solo manejamos X100 y todo es unisex.\n\n"
                         "Cuando no entiendas muy bien la intención, ofrece opciones como:\n"
-                        "- '¿Me puedes enviar la referencia del modelo que te interesa? 📋✨'\n"
+                        "- '¿Dime que color te gusto yo te ayudo✨'\n"
                         "- '¿Quieres enviarme una imagen para ayudarte mejor? 📸'\n\n"
                         "Responde de forma CÁLIDA, POSITIVA, BREVE (máximo 2 líneas), usando emojis amistosos 🎯👟🚀✨.\n"
                         "Actúa como un asesor de ventas que siempre busca ayudar al cliente y cerrar la compra de manera rápida, amigable y eficiente."
@@ -4398,10 +4519,16 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     try:
         texto_limpio = texto.strip().lower()
 
+        # 1️⃣ Primer intento con estructura "soy Juan de Bucaramanga"
         match_dual = re.search(
             r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30}?)(?:\s+y\s+\w+)?\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
             texto_limpio
         )
+
+        # 2️⃣ Segundo intento simple: "Juan de Medellín"
+        if not match_dual:
+            match_dual = re.search(r"([a-záéíóúñ]{2,30})\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})", texto_limpio)
+
         if match_dual:
             nombre_detectado = match_dual.group(1).strip().title()
             ciudad_detectada = match_dual.group(2).strip().title()
@@ -4416,6 +4543,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 logging.warning(f"❌ Ciudad detectada fuera de fase pero no válida: {ciudad_detectada}")
     except Exception as e:
         logging.error(f"❌ Error en detección libre de nombre/ciudad: {e}")
+
 
     # ─── FILTRO 1: mensaje vacío ───
     if not body or not body.strip():
@@ -4439,6 +4567,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         return f"data:{tipo};base64,{b64}"
 
     # ─────────── Preguntas frecuentes (FAQ) ───────────
+
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
 
         # FAQ 1: ¿Cuánto demora el envío?
@@ -4671,6 +4800,105 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     "¡También tenemos opciones para pies grandes! 👟✨"
                 ),
                 "parse_mode": "Markdown"
+            }
+
+    # FAQ: ¿Por qué tan caros?
+    if any(p in texto_normalizado for p in (
+        "POR QUE TAN CAROS", "PORQUE TAN CARO", "PORQUE TAN COSTOSO", "ES MUY CARO", "MUY COSTOSO"
+    )):
+        try:
+            ruta_audio = "/var/data/audios/caros/CAROS.mp3"
+            if not os.path.exists(ruta_audio):
+                raise FileNotFoundError("❌ No se encontró el audio CAROS.mp3")
+
+            with open(ruta_audio, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+
+            return {
+                "type": "audio",
+                "base64": b64,
+                "mimetype": "audio/mpeg",
+                "filename": "CAROS.mp3",
+                "text": "🎧 Aquí te explicamos por qué valen lo que valen:"
+            }
+
+        except Exception as e:
+            logging.error(f"❌ Error enviando audio CAROS: {e}")
+            return {
+                "type": "text",
+                "text": "⚠️ No pude enviar el audio en este momento."
+            }
+
+    # FAQ: ¿Son cosidos?
+    if any(p in texto_normalizado for p in (
+        "SON COSIDOS", "VIENEN COSIDOS", "ESTAN COSIDOS", "COSIDO", "COSIDOS"
+    )):
+        try:
+            ruta_audio = "/var/data/audios/cosidos/COSIDOS.mp3"
+            if not os.path.exists(ruta_audio):
+                raise FileNotFoundError("❌ No se encontró el audio COSIDOS.mp3")
+
+            with open(ruta_audio, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+
+            return {
+                "type": "audio",
+                "base64": b64,
+                "mimetype": "audio/mpeg",
+                "filename": "COSIDOS.mp3",
+                "text": "🧵 Aquí tienes la explicación sobre si son cosidos:"
+            }
+
+        except Exception as e:
+            logging.error(f"❌ Error enviando audio COSIDOS: {e}")
+            return {
+                "type": "text",
+                "text": "⚠️ No pude enviar el audio en este momento."
+            }
+    # FAQ: Redes sociales
+    if any(p in texto_normalizado for p in (
+        "REDES SOCIALES", "INSTAGRAM", "FACEBOOK", "TIKTOK", "PAGINA WEB", "PÁGINA WEB",
+        "TIENEN INSTAGRAM", "TIENEN FACEBOOK", "TIENEN TIKTOK", "COMO LOS ENCUENTRO EN REDES",
+        "SUS REDES", "SIGUEN EN REDES", "WEB"
+    )):
+        return {
+            "type": "text",
+            "text": (
+                "📲 ¡Claro! Aquí están todas nuestras redes y página oficial:\n\n"
+                "👟 *Instagram:* [@x100_col](https://www.instagram.com/x100_col)\n"
+                "📘 *Facebook:* [@x100col](https://www.facebook.com/x100col)\n"
+                "🎵 *TikTok:* [@x100_col](https://www.tiktok.com/@x100_col?_t=ZS-8wiexPh9ah6&_r=1)\n"
+                "🌐 *Página web:* [x100-col.com](https://www.x100-col.com/tienda/)\n\n"
+                "Síguenos para conocer nuevos modelos, promociones exclusivas y más 🔥💯"
+            ),
+            "parse_mode": "Markdown"
+        }
+
+    # FAQ: ¿La suela es de caucho?
+    if any(p in texto_normalizado for p in (
+        "SUELA DE CAUCHO", "ES DE CAUCHO", "LA SUELA ES DE", "LA SUELA DE QUE ES", "MATERIAL DE LA SUELA"
+    )):
+        try:
+            ruta_audio = "/var/data/audios/caucho/CAUCHO.mp3"
+            if not os.path.exists(ruta_audio):
+                raise FileNotFoundError("❌ No se encontró el audio CAUCHO.mp3")
+
+            with open(ruta_audio, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+
+            return {
+                "type": "audio",
+                "base64": b64,
+                "mimetype": "audio/mpeg",
+                "filename": "CAUCHO.mp3",
+                "text": "👟 Te explicamos de qué material es la suela:"
+            }
+
+        except Exception as e:
+            logging.error(f"❌ Error enviando audio CAUCHO: {e}")
+            return {
+                "type": "text",
+                "text": "⚠️ No pude enviar el audio en este momento."
             }
 
 
@@ -4913,34 +5141,80 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         estado_usuario[cid] = est
         logging.info("⚠️ No se detectó nombre ni ciudad en el mensaje.")
 
-
-
-
-    if est.get("fase") == "inicio" and not est.get("welcome_enviado"):
+    # ──────────────────────────────
+    # 🔁 CONTROL DE FLUJO INICIAL
+    # ──────────────────────────────
+    # 1️⃣ COMANDO /start válido para todos los usuarios
+    if texto.strip() == "/start":
         reset_estado(cid)
+        estado_usuario[cid] = {
+            "fase": "inicio",
+            "esperando_nombre": True,
+            "welcome_enviado": False
+        }
+        if cid in usuarios_saludo_enviado:
+            usuarios_saludo_enviado.remove(cid)  # Permite que vuelva a recibir el welcome
+        return {
+            "type": "text",
+            "text": "🔄 Has reiniciado el flujo. El welcome se enviará en el próximo mensaje."
+        }
 
-        # 1. Obtener welcome con audio + textos
-        bienvenida = await enviar_welcome_venom(cid)
+
+    # 2️⃣ Imagen como primer mensaje (salta welcome pero saluda antes)
+    if dummy_msg.photo and est.get("fase") == "inicio" and not est.get("welcome_enviado"):
+        est["fase"] = "imagen_detectada"
+
+        try:
+            respuesta_imagen = await manejar_imagen_inicial(cid, dummy_msg.photo, est)
+
+            saludo = {
+                "type": "text",
+                "text": "👋 Hola! Claro, déjame mostrarte lo que encontré con esta imagen 📸"
+            }
+
+            if respuesta_imagen:
+                est["welcome_enviado"] = True
+                usuarios_saludo_enviado.add(cid)    # ← Importante
+                estado_usuario[cid] = est
+
+                if respuesta_imagen.get("type") == "multi":
+                    return {
+                        "type": "multi",
+                        "messages": [saludo] + respuesta_imagen.get("messages", [])
+                    }
+                else:
+                    return {
+                        "type": "multi",
+                        "messages": [saludo, respuesta_imagen]
+                    }
+
+        except Exception as e:
+            logging.error(f"❌ Error procesando imagen inicial: {e}")
+            est["welcome_enviado"] = True
+            usuarios_saludo_enviado.add(cid)    # ← Importante
+            estado_usuario[cid] = est
+            return {
+                "type": "text",
+                "text": "⚠️ No pude analizar la imagen. ¿Puedes enviarla de nuevo enfocando solo el zapato?"
+            }
+
+    # 3️⃣ Enviar welcome si no se ha enviado aún y no es media
+    if est.get("fase") == "inicio" and not est.get("welcome_enviado") and not is_media_inicial:
+        est["welcome_enviado"] = True
+        usuarios_saludo_enviado.add(cid)    # ← Importante
+        estado_usuario[cid] = est
+
+        tipo_saludo = clasificar_saludo(txt)          # ← usa el primer mensaje del cliente
+        bienvenida  = await enviar_welcome_venom(cid, tipo_saludo)
+
         bienvenida_msgs = bienvenida.get("messages", []) if bienvenida.get("type") == "multi" else [bienvenida]
-
-        # Separar audio del resto
         audio_msg = next((m for m in bienvenida_msgs if m.get("type") == "audio"), None)
         otros_msgs = [m for m in bienvenida_msgs if m.get("type") != "audio"]
 
         try:
-            # 2. Cargar videos desde disco en orden fijo
             carpeta = "/var/data/videos"
-            orden_deseado = [
-                "Referencias.mp4",
-                "Referencias2.mp4",
-                "Descuentos.mp4",
-                "Infantil.mp4"
-            ]
-
-            archivos = [
-                f for f in orden_deseado
-                if os.path.exists(os.path.join(carpeta, f))
-            ]
+            orden_deseado = ["Referencias.mp4", "Referencias2.mp4", "Descuentos.mp4", "Infantil.mp4"]
+            archivos = [f for f in orden_deseado if os.path.exists(os.path.join(carpeta, f))]
 
             nombres_con_emojis = {
                 "Referencias2.mp4": "👟 Referencias 🔝 261 🔥 277 🔥 303 🔥 295 🔥 299 🔥",
@@ -4954,15 +5228,14 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 path = os.path.join(carpeta, nombre)
                 with open(path, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode()
-                    texto = nombres_con_emojis.get(
-                        nombre,
-                        f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}"
-                    )
-                    videos.append({
-                        "type": "video",
-                        "base64": f"data:video/mp4;base64,{b64}",
-                        "text": texto
-                    })
+                texto_video = nombres_con_emojis.get(
+                    nombre, f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}"
+                )
+                videos.append({
+                    "type": "video",
+                    "base64": f"data:video/mp4;base64,{b64}",
+                    "text": texto_video
+                })
 
             if videos:
                 videos.insert(0, {
@@ -4987,7 +5260,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 })
 
             est["fase"] = "esperando_color"
-            est["welcome_enviado"] = True  # ✅ evita reenvío en el futuro
             estado_usuario[cid] = est
 
             return {"type": "multi", "messages": mensajes}
@@ -4998,6 +5270,16 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "⚠️ Te doy la bienvenida, pero no pude cargar los videos aún. Intenta más tarde."
             }
+
+    # 4️⃣ Filtro: si no se ha enviado el welcome_text, no responder a nada más
+    if not est.get("welcome_enviado") and cid not in usuarios_saludo_enviado:
+        saludos_pasivos = {
+            "hola", "hola!", "holaa", "buenos dias", "buenos días",
+            "buenas tardes", "buenas noches"
+        }
+        if texto.strip() in saludos_pasivos:
+            return {"type": "text", "text": ""}
+        return {"type": "text", "text": ""}
 
 
     # 🔊 Petición de audio
@@ -5266,8 +5548,37 @@ async def venom_webhook(req: Request):
                         "text": "❌ Hubo un error procesando la imagen. Intenta de nuevo con otra foto, por favor."
                     })
 
-            # 🧠 CLIP - identificación de modelo
+            # 🧠 OCR - intentar antes de CLIP
             else:
+                try:
+                    os.makedirs("temp", exist_ok=True)
+                    path_img = f"temp/{cid}_img.jpg"
+                    with open(path_img, "wb") as f:
+                        f.write(img_bytes)
+
+                    texto_ocr = extraer_texto_comprobante(path_img)
+
+                    # ✅ Cargar carpetas desde Drive antes de intentar OCR
+                    carpetas_en_drive = listar_carpetas_drive()
+                    respuesta_ocr = detectar_modelo_color(texto_ocr, carpetas_en_drive)
+
+                    if respuesta_ocr:
+                        est.update({
+                            "modelo": respuesta_ocr["modelo"],
+                            "color": respuesta_ocr["color"],
+                            "marca": respuesta_ocr["marca"],
+                            "fase": "imagen_detectada"
+                        })
+                        estado_usuario[cid] = est
+
+                        os.remove(path_img)  # 🔥 Limpieza de imagen temporal
+
+                        return JSONResponse(respuesta_ocr)
+
+                except Exception as e:
+                    logging.warning(f"[OCR] ⚠️ Fallo intento de detección por texto: {e}")
+
+                # 🧠 CLIP - identificación de modelo
                 try:
                     logging.info("[CLIP] 🚀 Iniciando identificación de modelo")
 
@@ -5281,11 +5592,6 @@ async def venom_webhook(req: Request):
                                 limpios = [v for v in vecs if isinstance(v, list) and len(v) == 512]
                                 if limpios:
                                     embeddings[modelo] = limpios
-
-                    os.makedirs("temp", exist_ok=True)
-                    path_img = f"temp/{cid}_img.jpg"
-                    with open(path_img, "wb") as f:
-                        f.write(img_bytes)
 
                     emb_u = generar_embedding_imagen(img)
                     emb_u = torch.tensor(emb_u, dtype=torch.float32)
@@ -5321,10 +5627,12 @@ async def venom_webhook(req: Request):
                         color = estado_usuario[cid]["color"]
                         marca = estado_usuario[cid]["marca"]
                         precio = next(
-                            (i["precio"] for i in inv if
-                             normalize(i["modelo"]) == normalize(modelo) and
-                             normalize(i["color"]) == normalize(color) and
-                             normalize(i["marca"]) == normalize(marca)),
+                            (
+                                i["precio"] for i in inv
+                                if normalize(i["modelo"]) == normalize(modelo)
+                                and normalize(i["color"]) == normalize(color)
+                                and normalize(i["marca"]) == normalize(marca)
+                            ),
                             None
                         )
                         precio_str = f"{int(precio):,} COP" if precio else "No disponible"
@@ -5334,7 +5642,7 @@ async def venom_webhook(req: Request):
                             "text": (
                                 f"🟢 ¡Qué buena elección! Los *{modelo}* de color *{color}* están brutales 😎.\n"
                                 f"💲 Su precio es: *{precio_str}*, además el *envío es totalmente gratis a todo el país* 🚚.\n"
-                                f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                                f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
                                 "¿Seguimos con la compra?"
                             ),
                             "parse_mode": "Markdown"
@@ -5419,6 +5727,9 @@ async def venom_webhook(req: Request):
             {"type": "text", "text": "⚠️ Error interno procesando el mensaje."},
             status_code=200
         )
+
+
+
 
 # -------------------------------------------------------------------------
 # 5. Arranque del servidor
