@@ -4851,7 +4851,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         "SON COSIDOS", "VIENEN COSIDOS", "ESTAN COSIDOS", "COSIDO", "COSIDOS"
     )):
         try:
-            ruta_audio = "/var/data/audios/cosidos/cosidos.mp3"
+            ruta_audio = "/var/data/audios/cosidos/COSIDAS.mp3"
             if not os.path.exists(ruta_audio):
                 raise FileNotFoundError("❌ No se encontró el audio COSIDAS.mp3")
 
@@ -5143,7 +5143,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     # ──────────────────────────────
     # 🔁 CONTROL DE FLUJO INICIAL
     # ──────────────────────────────
-    ADMIN_CID = "573137842559"  # Tu número de prueba
+    ADMIN_CID = "573246666630"  # Tu número de prueba
     is_media_inicial = dummy_msg.photo or dummy_msg.voice or dummy_msg.audio
 
     # 1️⃣ COMANDO /start solo para admin (resetea todo)
