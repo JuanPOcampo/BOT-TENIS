@@ -1,3 +1,4 @@
+#FALLA PER FUNCION TALLA SIN LENGUETA
 
 # ——— Librerías estándar de Python ———
 import os
@@ -31,6 +32,7 @@ from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
 import gspread
 from google.oauth2 import service_account     # ← alias de antes
+import openai
 
 # ——— Google Cloud & Drive ———
 from google.cloud import vision
@@ -75,7 +77,32 @@ def normalizar(texto: str) -> str:
     texto = re.sub(r"[^\w\s]", "", texto)  # elimina signos de puntuación
     return texto.upper().strip()
 
-# ... sigue con procesar_wa(), venom_webhook, etc.
+def detectar_nombre_ia_4mini(texto: str) -> str:
+    """
+    Usa GPT-4.0 mini (económico) para detectar el nombre de la persona desde un mensaje.
+    """
+    prompt = f"""
+Solo responde con el nombre de la persona mencionado en este mensaje. No incluyas apellidos, ciudades ni palabras extras.
+
+Mensaje: {texto}
+Nombre:
+"""
+
+    try:
+        respuesta = openai.ChatCompletion.create(
+            model="gpt-4-0613",  # Este se enruta como GPT-4 mini si tienes el plan configurado así
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=10
+        )
+        nombre = respuesta["choices"][0]["message"]["content"].strip()
+        return nombre
+
+    except Exception as e:
+        print(f"❌ Error en detectar_nombre_ia_4mini: {e}")
+        return None
+
+
 
 # ─── (Ejemplo) servicio de Drive  ────────────────────────────────────────
 def get_drive_service():
@@ -1064,9 +1091,6 @@ def convertir_palabras_a_numero(texto):
 
     return numero if numero else None
 
-import difflib
-import re
-import unicodedata
 
 def normalize(texto: str) -> str:
     texto = texto.lower().strip()
@@ -1289,42 +1313,45 @@ def listar_carpetas_drive():
     _ultima_actualizacion = ahora
 
     return carpetas
-
-
 def detectar_modelo_color(texto: str, carpetas_drive: list) -> dict:
-    """
-    Detecta modelo y color desde texto OCR comparando con nombres de carpetas.
-    Ejemplo carpeta: DS_305_VERDE LIMON
-    """
     import re
     import unicodedata
 
-    # Normaliza texto
-    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("utf-8").upper()
-    texto = texto.replace("-", " ").replace("_", " ")
+    def norm(cad) -> str:
+        cad = str(cad)  # 🔧 Asegura que siempre sea string
+        cad = unicodedata.normalize("NFKD", cad).encode("ascii", "ignore").decode("utf-8").upper()
+        cad = re.sub(r"[-_/&]", " ", cad)
+        cad = re.sub(r"\s+[X]\s+", " ", cad)
+        cad = re.sub(r"\s+", " ", cad).strip()
+        return cad
+
+    texto_norm = norm(texto)
+    inventario = obtener_inventario()  # ✅ Usa tu función actual para obtener inventario
 
     for carpeta in carpetas_drive:
-        nombre = carpeta.upper().replace("_", " ")  # Ej: DS 305 VERDE LIMON
+        nombre = norm(carpeta)
         partes = nombre.split()
 
         if len(partes) >= 3 and partes[0] == "DS":
             modelo = partes[1]
-            color = " ".join(partes[2:])
+            color_tokens = partes[2:]
 
-            # Requiere que el modelo esté presente exacto
-            if f"DS {modelo}" in texto or f"DS{modelo}" in texto:
-                # Color con coincidencia suave
-                color_encontrado = any(pal in texto for pal in color.split())
-                if color_encontrado:
-                    return {
-                        "modelo": modelo,
-                        "color": color,
-                        "marca": "DS",
-                        "type": "text",
-                        "text": f"✅ Perfecto, tomaremos *DS {modelo}* color *{color}*.\n📸 Para confirmar la talla exacta, envíame una foto de la *lengüeta interna* de tus tenis actuales 👟."
-                    }
+            if f"DS {modelo}" in texto_norm or f"DS{modelo}" in texto_norm:
+                if all(re.search(rf"\b{re.escape(tok)}\b", texto_norm) for tok in color_tokens):
+                    color = " ".join(color_tokens)
+
+                    for item in inventario:
+                        if norm(item.get("modelo", "")) == norm(modelo) and norm(item.get("color", "")) == norm(color):
+                            return {
+                                "modelo": str(modelo),
+                                "color": str(color.title()),
+                                "marca": "DS",
+                                "precio": item.get("precio", 0)
+                            }
 
     return None
+
+
 
 
 
@@ -2123,14 +2150,25 @@ def extraer_dia_hora(txt):
     return m.group() if m else "No especificado"
 import re
 
-# 🎨 Alias de color (bidireccional + plurales)
 color_aliases = {
+    # Sinónimos
     "rosado": "fucsia", "rosa": "fucsia", "fucsias": "fucsia",
-    "celeste": "azul", "azules": "azul",
-    "azul cielo": "aqua", "azul clarito": "aqua", "azul claro": "aqua", "azulito": "aqua",
-    "verdes": "verde", "amarillas": "amarillo", "blancos": "blanco", "negros": "negro",
-    "rojos": "rojo", "naranjas": "naranja", "turquesa": "aqua"
+    "celeste": "azul", "azulito": "aqua", "azul claro": "aqua", "azul clarito": "aqua", "azul cielo": "aqua",
+    "verde limon": "verde", "verde limón": "verde",
+
+    # Plurales
+    "verdes": "verde", "azules": "azul", "amarillas": "amarillo", "amarillos": "amarillo",
+    "rojos": "rojo", "rosados": "fucsia", "fucsias": "fucsia",
+    "naranjas": "naranja", "blancos": "blanco", "negros": "negro", "grises": "gris",
+    "morados": "morado", "cafés": "café", "beiges": "beige",
+
+    # Colores base mapeados a sí mismos (asegura alias inverso)
+    "negro": "negro", "blanco": "blanco", "rojo": "rojo", "azul": "azul", "amarillo": "amarillo",
+    "verde": "verde", "gris": "gris", "morado": "morado", "naranja": "naranja",
+    "café": "café", "beige": "beige", "neón": "neón", "limón": "limón",
+    "fucsia": "fucsia", "aqua": "aqua", "turquesa": "aqua"
 }
+
 
 # 🚀 Agregar alias inversos automáticamente
 for base_color in list(color_aliases.values()):
@@ -2202,81 +2240,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     print("🧠 FASE:", est.get("fase"))
     print("🧠 TEXTO:", txt_raw, "|", repr(txt_raw))
     print("🧠 ESTADO:", est)
-
-    # 👋 Detectar saludo inicial y responder con bienvenida + videos
-    if any(p in txt for p in ("hola", "buenas", "buenos días", "buenas tardes", "buenas noches")):
-        logging.info(f"👋 Saludo detectado: {txt_raw} — CID: {cid}")
-
-        # 1. Mensaje de bienvenida
-        await update.message.reply_text(
-            WELCOME_TEXT,
-            reply_markup=menu_botones([
-                "Hacer pedido", "Enviar imagen", "Ver catálogo",
-                "Rastrear pedido", "Realizar cambio"
-            ])
-        )
-
-        # 2. Envío automático de todos los videos disponibles (excepto confianza)
-        ruta_videos = "/var/data/videos"
-        try:
-            if not os.path.exists(ruta_videos):
-                logging.warning(f"⚠️ Carpeta de videos no encontrada: {ruta_videos}")
-                await ctx.bot.send_message(cid, "⚠️ Aún no tengo videos cargados.")
-                return
-
-            archivos = sorted([
-                f for f in os.listdir(ruta_videos)
-                if f.lower().endswith(".mp4") and "confianza" not in f.lower()
-            ])
-
-            logging.info(f"🎬 Videos encontrados (sin confianza): {archivos}")
-            print("📂 DEBUG: Archivos encontrados para enviar:", archivos)
-
-            if not archivos:
-                logging.warning("⚠️ Lista de videos vacía aunque la carpeta existe.")
-                await ctx.bot.send_message(cid, "⚠️ Aún no tengo videos cargados.")
-                return
-
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="🎬 Mira nuestras referencias en video. ¡Dime cuál te gusta y en que talla lo deseas!"
-            )
-            logging.info("🎯 Procediendo a enviar videos...")
-
-            for nombre in archivos:
-                try:
-                    path = os.path.join(ruta_videos, nombre)
-                    size = os.path.getsize(path)
-                    logging.info(f"🎥 Enviando: {nombre} — {size / 1024:.2f} KB")
-                    print(f"📤 DEBUG: Enviando {nombre} a {cid}")
-
-                    with open(path, "rb") as video_file:
-                        await ctx.bot.send_video(
-                            chat_id=cid,
-                            video=video_file,
-                            caption=f"🎥 {nombre.replace('.mp4', '').replace('_', ' ').title()}",
-                            parse_mode="Markdown"
-                        )
-
-                except Exception as e:
-                    logging.error(f"❌ Error enviando video '{nombre}': {e}")
-                    await ctx.bot.send_message(cid, f"⚠️ No pude enviar el video {nombre}")
-
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="🧐 ¿Dime que referencia te interesan, si no esta aca enviame la foto?"
-            )
-
-            # Solo cambiar la fase sin borrar el estado anterior
-            est["fase"] = "esperando_modelo_elegido"
-            estado_usuario[cid] = est
-            return
-
-        except Exception as e:
-            logging.error(f"❌ Error al enviar videos tras saludo: {e}")
-            await ctx.bot.send_message(cid, "❌ Hubo un error al cargar los videos.")
-  
-            return
 
     # 💬 Usuario pregunta por precios de modelos mostrados (uno o varios)
     if est.get("modelos_enviados") and any(p in texto for p in (
@@ -2360,9 +2323,6 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "parse_mode": "Markdown"
             }
 
-
-
-
     # 💰 Usuario pregunta por precio de modelo ya mostrado (sin repetir imagen)
     if est.get("modelo") and est.get("color"):
         if any(palabra in texto for palabra in (
@@ -2414,17 +2374,21 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             est["modelo"] = modelos[0]
             est["talla"] = m.group(1)
 
-        # 1️⃣ Referencia numérica (ej. 395)
+        # 1️⃣ Referencia numérica exacta (ej. 395)
         if not est.get("modelo") and (m := re.search(r"\b(\d{3})\b", texto)):
-            ref = m.group(1)
-            est["modelo"] = next((m for m in modelos if ref in m), None)
+                ref = m.group(1)
+                est["modelo"] = next(
+                    (m for m in modelos if re.search(rf"\b{ref}\b", normalize(m))),
+                    None
+                )
 
         # 2️⃣ Coincidencia textual
         if not est.get("modelo"):
-            for m in modelos:
-                if normalize(m) in texto_normalizado:
-                    est["modelo"] = m
-                    break
+                for m in modelos:
+                        if normalize(m) in texto_normalizado:
+                                est["modelo"] = m
+                                break
+
 
         # 3️⃣ Afirmación genérica (si solo hay 1 imagen)
         afirmaciones = {
@@ -2459,7 +2423,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         # 🛑 Si aún no sabemos qué modelo eligió
         if "modelo" not in est:
-            await ctx.bot.send_message(cid, "❓ Dime cuál te gustó de las que te mandé.")
+            await ctx.bot.send_message(cid, "❓ Dime el numero de la referencia exacto pa que te lo mandemos hoy mismo📦.")
             return
 
 
@@ -2549,32 +2513,37 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "parse_mode": "Markdown"
         }
 
-    # ─────────────────────────────────────────────
-    # 📦 RESPUESTA UNIVERSAL SI EL CLIENTE EXPRESA DESCONFIANZA
-    # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# 📦 RESPUESTA UNIVERSAL SI EL CLIENTE EXPRESA DESCONFIANZA
+# ─────────────────────────────────────────────
     texto_normalizado = normalize(txt)
 
+    # Palabras clave que siempre deben activar la respuesta
+    palabras_clave_fijas = [
+        "robar", "roban", "robo", "estafa", "estafan", "estafaron", "estafas",
+        "fraude", "tumbo", "tumbaron"
+    ]
+
+    # Frases comunes de desconfianza
     frases_desconfianza = [
-        "no confio", "desconfio", "me han robado", "PERO YO COMO SE QUE NO ME VAN A ROBAR", "ya me robaron", "y si me roban",
+        "no confio", "desconfio", "me han robado", "ya me robaron", "y si me roban",
         "me estafaron", "ya me estafaron", "me hicieron el robo", "como se que no me van a robar",
         "no quiero pagar anticipado", "no quiero dar plata antes", "no quiero enviar dinero sin ver",
         "me da desconfianza", "me da miedo pagar", "no me da confianza", "me han tumbado",
-        "me hicieron fraude", "tengo miedo de pagar", "no tengo seguridad", "Como se que no me roban",
-        "quiero pagar al recibir", "pago al recibir", "solo contraentrega", "pago cuando llegue",
-        "cuando me lleguen pago", "Como se que no me van a robar", "pago cuando me llegue", "me tumbaron una vez",
-        "me jodieron", "ya me tumbaron", "no vuelvo a caer", "yo como se que no me roban", "eso me paso antes",
-        "no me sale el mensaje", "no me abre el link", "me han robado antes", "me da cosa pagar",
+        "me hicieron fraude", "tengo miedo de pagar", "no tengo seguridad", "quiero pagar al recibir",
+        "pago al recibir", "solo contraentrega", "pago cuando llegue", "pago cuando me llegue",
+        "me tumbaron una vez", "me jodieron", "ya me tumbaron", "no vuelvo a caer",
+        "yo como se que no me roban", "eso me paso antes", "me han robado antes", "me da cosa pagar",
         "no puedo pagar sin saber", "no mando dinero asi", "no conozco su tienda", "no estoy seguro",
-        "como se que es real", "como se que es confiable", "como saber si es real", "esto es confiable?",
-        "no tengo pruebas", "es seguro esto?", "no me siento comodo pagando", "mejor contraentrega",
-        "yo solo pago al recibir", "yo no pago antes", "a mi me han estafado", "me estafaron antes",
-        "me robaron antes", "y si no me llega", "y si no llega", "y si me estafan", "me robaron antes",
-        "ya me tumbaron plata", "me hicieron perder plata", "me quitaron la plata",
-        "me da miedo que me estafen", "esto no parece seguro", "no se ve seguro", "y si es mentira",
-        "y si es estafa", "robo", "yo no pago sin ver", "yo no mando plata asi", "robado",
-        "esto parece raro", "y si no cumplen", "y si no es verdad", "parece una estafa", "se ve raro",
+        "como se que es real", "como se que es confiable", "como saber si es real", "esto es confiable",
+        "no tengo pruebas", "es seguro esto", "no me siento comodo pagando", "mejor contraentrega",
+        "yo solo pago al recibir", "yo no pago antes", "a mi me han estafado", "y si no me llega",
+        "y si no llega", "y si me estafan", "ya me tumbaron plata", "me hicieron perder plata",
+        "me quitaron la plata", "me da miedo que me estafen", "esto no parece seguro",
+        "no se ve seguro", "y si es mentira", "y si es estafa", "esto parece raro", "se ve raro",
         "esto huele a estafa", "muy sospechoso", "no quiero perder plata", "no me arriesgo",
-        "no voy a arriesgar mi dinero"
+        "no voy a arriesgar mi dinero", "no envio plata por adelantado", "yo no envio plata",
+        "yo no mando plata", "yo no pago por adelantado", "envio plata y me roban"
     ]
 
     # 🟥 Desconfianza: envía videos + audio de confianza
@@ -2880,82 +2849,81 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         # 1️⃣ OCR antes de CLIP
         texto_ocr = extraer_texto_comprobante(tmp)
+        print("📄 Texto OCR extraído:", texto_ocr)
+        logging.debug(f"📄 Texto OCR extraído: {texto_ocr}")
 
-        # ✅ Cargar carpetas desde Drive (para validación directa)
+        # ✅ Buscar modelo/color en carpetas Drive
         carpetas_en_drive = listar_carpetas_drive()
-
         resultado = detectar_modelo_color(texto_ocr, carpetas_en_drive)
 
+        print("🎯 Resultado detectar_modelo_color:", resultado)
+        logging.debug(f"🎯 Resultado detectar_modelo_color: {resultado}")
+
         if resultado:
-            modelo_solo = normalize(resultado["modelo"])
-            color_detectado = normalize(resultado["color"])
+            modelo_solo     = normalize(str(resultado["modelo"]))      # «str» evita ints
+            color_detectado = normalize(str(resultado["color"]))
+            print(f"🔍 Buscando item con modelo: {modelo_solo} | color: {color_detectado}")
+            logging.debug(f"🔍 Buscando item con modelo: {modelo_solo} | color: {color_detectado}")
 
             item = next(
-                (i for i in inv if normalize(i["modelo"]) == modelo_solo and normalize(i["color"]) == color_detectado),
+                (i for i in inv
+                 if normalize(str(i["modelo"])) == modelo_solo
+                 and normalize(str(i["color"]))  == color_detectado),
                 None
             )
 
+            print("📦 Item encontrado:", item)
+            logging.debug(f"📦 Item encontrado: {item}")
+
             if item:
                 est.update({
-                    "marca": resultado["marca"],
-                    "modelo": resultado["modelo"],
-                    "color": resultado["color"],
+                    "marca":        resultado["marca"],
+                    "modelo":       resultado["modelo"],
+                    "color":        resultado["color"],
                     "precio_total": item["precio"],
-                    "fase": "esperando_talla"
+                    "fase":         "imagen_detectada"  # ✅ corregido aquí
                 })
                 estado_usuario[cid] = est
-                os.remove(tmp)
 
-                nombre_bonito = f"{resultado['marca']}{resultado['modelo']}"
-                precio = item["precio"]
+                nombre_bonito = f"{est['marca']} {est['modelo']}"
+                precio        = est["precio_total"]
 
-                await ctx.bot.send_message(
-                    chat_id=cid,
-                    text=(
-                        f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{resultado['color']}* están brutales 😎.\n"
+                # 👉 Venom espera un JSON con type/text
+                return {
+                    "type": "text",
+                    "text": (
+                        f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{est['color']}* están brutales 😎.\n"
                         f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
                         f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
-                        f"¿Seguimos con la compra?"
+                        "¿Seguimos con la compra?"
                     ),
-                    parse_mode="Markdown"
-                )
-                return
+                    "parse_mode": "Markdown"
+                }
 
 
-
-
-        # 2️⃣ CLIP si OCR falló o no hubo coincidencia en inventario
+        # 2️⃣ CLIP si OCR falló o no hubo coincidencia válida
         with open(tmp, "rb") as f_img:
             base64_img = base64.b64encode(f_img.read()).decode("utf-8")
         os.remove(tmp)
 
-        mensaje = await identificar_modelo_desde_imagen(base64_img)
+        mensaje_clip = await identificar_modelo_desde_imagen(base64_img)
+        logging.debug(f"📸 Resultado CLIP: {mensaje_clip}")
 
-        if "coincide con *" in mensaje.lower():
-            modelo_detectado = re.findall(r"\*(.*?)\*", mensaje)
-            if modelo_detectado:
-                p = modelo_detectado[0].split("_")
-                est.update({
-                    "marca": p[0] if len(p) > 0 else "Desconocida",
-                    "modelo": p[1] if len(p) > 1 else "Desconocido",
-                    "color": p[2] if len(p) > 2 else "Desconocido",
-                    "fase": "imagen_detectada",
-                })
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text=mensaje + "\n¿Continuamos? (SI/NO)",
-                reply_markup=menu_botones(["SI", "NO"]),
-                parse_mode="Markdown"
-            )
-        else:
-            reset_estado(cid)
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="😕 No reconocí el modelo. Puedes intentar con otra imagen o escribir /start.",
-                parse_mode="Markdown"
-            )
-        return
+        if "coincide con *" in mensaje_clip.lower():
+            return {
+                "type": "text",
+                "text": mensaje_clip + "\n¿Continuamos? (SI/NO)"
+            }
 
+        # ❌ Ni OCR ni CLIP reconocieron
+        reset_estado(cid)
+        return {
+            "type": "text",
+            "text": (
+                "😕 No reconocí el modelo. "
+                "Puedes intentar con otra imagen o escribir /start."
+            )
+        }
 
 
     # 📷 Confirmación si la imagen detectada fue correcta
@@ -3210,150 +3178,141 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=cid, text=resumen_msg, parse_mode="Markdown")
         return
 
-    # 👟 Elegir talla escrita (y pedir lengüeta)
+    # 👟 Manejo unificado de la fase esperando_talla
     if est.get("fase") == "esperando_talla":
+
+        # 🛑 Si ya se confirmó la talla antes, no volver a procesar
+        if est.get("talla_confirmada"):
+            return
+
         tallas_disponibles = obtener_tallas_por_color(inv, est.get("modelo", ""), est.get("color", ""))
         if isinstance(tallas_disponibles, (int, float, str)):
             tallas_disponibles = [str(tallas_disponibles)]
 
-        # Normalización y coincidencia difusa
-        tallas_normalizadas = {normalize(t): t for t in tallas_disponibles}
-        entrada_normalizada = normalize(txt)
+        txt_norm   = normalize(txt).lower()
+        entrada_num = re.findall(r"\d+\.?\d*", txt_norm)
 
-        coincidencias = difflib.get_close_matches(entrada_normalizada, tallas_normalizadas.keys(), n=1, cutoff=0.6)
+        # ✅ Confirmación de talla pendiente
+        if "talla_pendiente_confirmar" in est and any(
+            p in txt_norm for p in ("si", "sí", "s", "exacto", "eso", "dale", "claro", "confirmo", "correcto")
+        ):
+            est["talla"] = est.pop("talla_pendiente_confirmar")
+            est["talla_confirmada"] = True
 
-        if coincidencias:
-            talla_detectada = tallas_normalizadas[coincidencias[0]]
-            est["talla"] = talla_detectada
-            estado_usuario[cid] = est
-
-            ruta = "/var/data/extra/lengueta_ejemplo.jpg"
-            if os.path.exists(ruta):
-                with open(ruta, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode("utf-8")
-                return {
-                    "type": "multi",
-                    "messages": [
-                        {
-                            "type": "text",
-                            "text": (
-                                f"✅ ¡Claro que tenemos talla {talla_detectada}! "
-                                "📸 Para confirmar la medida exacta, mándame una foto de la *lengüeta* "
-                                "del zapato que usas normalmente 👟."
-                            ),
-                            "parse_mode": "Markdown"
-                        },
-                        {
-                            "type": "photo",
-                            "base64": f"data:image/jpeg;base64,{b64}",
-                            "text": "Así debe verse la lengüeta. Envíame una foto parecida 📸"
-                        }
-                    ]
-                }
-
-            return {
-                "type": "text",
-                "text": (
-                    f"✅ ¡Claro que tenemos talla {talla_detectada}! "
-                    "📸 Por favor mándame una foto de la lengüeta de tu zapato para asegurarnos de la talla correcta 👟."
-                ),
-                "parse_mode": "Markdown"
-            }
-
-        # ❌ No entendió ninguna talla, mostrar disponibles
-        tallas_str = "\n".join(f"- {t}" for t in tallas_disponibles)
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                "Mandame tu lengüeta pa que confirmemos el pedido.\n\n"
-            ),
-            parse_mode="Markdown"
-        )
-        return
-
-    # 👟 Elegir talla (texto directo o confirmación de lengüeta)
-    if est.get("fase") == "esperando_talla":
-        tallas = obtener_tallas_por_color(inv, est["modelo"], est["color"])
-        if isinstance(tallas, (int, float, str)):
-            tallas = [str(tallas)]
-
-        # 🟢 1. Si ya hay una talla detectada (por imagen) y cliente confirma con "sí"
-        if est.get("talla") and any(p in txt for p in ("sí", "si", "s", "dale", "claro", "continuar", "comprar", "vamos")):
-            talla_detectada = est["talla"]
-
-        # 🟡 2. Si escribió la talla manualmente
-        else:
-            talla_detectada = detectar_talla(txt_raw, tallas)
-
-        if talla_detectada:
-            est["talla"] = talla_detectada
-
-            # 🔍 Ver si ya hay memoria del cliente
+            # 🔍 Cargar datos del cliente si existe
             cliente = obtener_datos_cliente(numero)
-
             if cliente:
-                nombre    = cliente.get("nombre", "cliente")
-                correo    = cliente.get("correo", "No registrado")
-                telefono  = cliente.get("telefono", numero)
-                cedula    = cliente.get("cedula", "No registrada")
-                ciudad    = cliente.get("ciudad", "No registrada")
-                provincia = cliente.get("provincia", "No registrada")
-                direccion = cliente.get("direccion", "No registrada")
-
                 est.update({
-                    "nombre": nombre,
-                    "correo": correo,
-                    "telefono": telefono,
-                    "cedula": cedula,
-                    "ciudad": ciudad,
-                    "provincia": provincia,
-                    "direccion": direccion
+                    "nombre":    cliente.get("nombre",    "cliente"),
+                    "correo":    cliente.get("correo",    "No registrado"),
+                    "telefono":  cliente.get("telefono",  numero),
+                    "cedula":    cliente.get("cedula",    "No registrada"),
+                    "ciudad":    cliente.get("ciudad",    "No registrada"),
+                    "provincia": cliente.get("provincia", "No registrada"),
+                    "direccion": cliente.get("direccion", "No registrada")
                 })
 
+
+                # 🧾 Precio y resumen
                 precio = next(
                     (i["precio"] for i in inv
-                     if normalize(i["marca"]) == normalize(est["marca"])
+                     if normalize(i["marca"])  == normalize(est["marca"])
                      and normalize(i["modelo"]) == normalize(est["modelo"])
-                     and normalize(i["color"]) == normalize(est["color"])),
+                     and normalize(i["color"])  == normalize(est["color"])),
                     None
                 )
                 est["precio_total"] = int(precio) if precio else 0
-                est["sale_id"] = generate_sale_id()
+                est["sale_id"]      = generate_sale_id()
+                est["fase"]         = "confirmar_datos_guardados"
+                estado_usuario[cid] = est
 
                 resumen = (
                     f"✅ Pedido: {est['sale_id']}\n"
-                    f"👤Nombre: {nombre}\n"
-                    f"📧Correo: {correo}\n"
-                    f"📱Celular: {telefono}\n"
-                    f"🪪Cédula: {cedula}\n"
-                    f"📍Dirección: {direccion}, {ciudad}, {provincia}\n"
+                    f"👤Nombre: {est['nombre']}\n"
+                    f"📧Correo: {est['correo']}\n"
+                    f"📱Celular: {est['telefono']}\n"
+                    f"🪪Cédula: {est['cedula']}\n"
+                    f"📍Dirección: {est['direccion']}, {est['ciudad']}, {est['provincia']}\n"
                     f"👟Producto: {est['modelo']} color {est['color']} talla {est['talla']}\n"
                     f"💲Valor a pagar: {est['precio_total']:,} COP\n\n"
                     "¿Estos datos siguen siendo correctos o deseas cambiar algo?"
                 )
-
-                est["fase"] = "confirmar_datos_guardados"
-                estado_usuario[cid] = est
-                await ctx.bot.send_message(chat_id=cid, text=resumen, parse_mode="Markdown")
+                await ctx.bot.send_message(cid, resumen, parse_mode="Markdown")
                 return
 
-            # 🧾 No hay cliente guardado → continuar normal
+            # ‼️ Sin datos previos → pedir nombre
             est["fase"] = "esperando_nombre"
             estado_usuario[cid] = est
-            await ctx.bot.send_message(
-                chat_id=cid,
-                text="¿Tu nombre completo para el pedido?",
-                parse_mode="Markdown"
-            )
+            await ctx.bot.send_message(cid, "¿Tu nombre completo para el pedido?", parse_mode="Markdown")
             return
 
-        # 🚫 No se detectó ninguna talla → mostrar tallas y pedir imagen
+        # 🚀 Cliente escribe la talla directamente (cm, USA o COL)
+        if entrada_num:
+            talla_escrita   = entrada_num[0]
+            talla_convert   = extraer_cm_y_convertir_talla(txt)
+            if talla_convert:
+                est["talla"] = str(talla_convert)
+                est["talla_confirmada"] = True
+                estado_usuario[cid] = est
+                return {
+                    "type": "text",
+                    "text": (
+                        f"📏 Detecté que tu talla es *{talla_convert}* en nuestra horma. "
+                        "¿Seguimos con esa talla?"
+                    ),
+                    "parse_mode": "Markdown"
+                }
+
+            # 🚧 No pude convertir → pedir aclaración o confirmar sin lengüeta
+            if "cm" in txt_norm:
+                confirm = f"¿Te refieres a *{talla_escrita} cm*?"
+            elif "usa" in txt_norm or float(talla_escrita) <= 14:
+                confirm = f"¿Te refieres a *talla USA {talla_escrita}*?"
+            elif 35 <= int(float(talla_escrita)) <= 48:
+                confirm = (
+                    f"👟 ¿Seguro que eres *talla {talla_escrita} colombiana*?\n\n"
+                    "📸 Nosotros normalmente pedimos la foto de la *lengüeta* para enviarte la talla ideal.\n"
+                    "Pero si no puedes enviarla, *seguimos con esta talla bajo tu responsabilidad*.\n\n"
+                    "🚨 En caso de devolución, los costos de envío correrán por tu cuenta. ¿Confirmamos?"
+                )
+            else:
+                confirm = f"¿La talla *{talla_escrita}* es en qué sistema? (cm, USA o COL)"
+
+            est["talla_pendiente_confirmar"] = talla_escrita
+            estado_usuario[cid] = est
+            return {
+                "type": "text",
+                "text": confirm,
+                "parse_mode": "Markdown"
+            }
+
+
+        # 🗨️ Cliente no puede mandar lengüeta
+        if any(p in txt_norm for p in (
+            "no tengo zapato", "no puedo", "no tengo", "no estoy en casa",
+            "sin lengüeta", "no tengo zapato a la mano"
+        )):
+            return {
+                "type": "text",
+                "text": (
+                    "😅 Entiendo, si no puedes mandar la lengüeta en este momento no hay problema.\n\n"
+                    "👉 Puedes decirme:\n"
+                    "• Tu *talla estimada* en centímetros (ej: 27 cm)\n"
+                    "• Tu *talla USA* (ej: 10.5)\n"
+                    "• Tu *talla colombiana* (ej: 42 o 43)\n\n"
+                    "Y seguimos con el pedido. Solo recuerda que si la talla no coincide, el cambio tiene costo de envío 🚚"
+                ),
+                "parse_mode": "Markdown"
+            }
+
+        # ❌ No entendió → mostrar tallas disponibles
+        tallas_str = "\n".join(f"- {t}" for t in tallas_disponibles)
         await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                f"Tenemos las siguientes tallas disponibles para el modelo *{est['modelo']}* color *{est['color']}*:\n\n"
-                f"👉 Tallas disponibles: {', '.join(tallas)}\n\n"
-                "📸 Para darte tu *talla ideal*, mándame una foto de la *lengüeta de tu zapato* 👟 y la detectamos automáticamente."
+            cid,
+            (
+                "Estas son las tallas disponibles:\n"
+                f"{tallas_str}\n\n"
+                "Escríbeme la que más se te acerque o mándame una foto de la lengüeta si puedes 👟"
             ),
             parse_mode="Markdown"
         )
@@ -3362,10 +3321,14 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 👤 Confirmar o editar datos guardados
     if est.get("fase") == "confirmar_datos_guardados":
         if est.get("confirmacion_pendiente"):
-            if any(p in txt.lower() for p in (
-                "si", "sí", "correcto", "ok", "listo", "vale", "dale",
-                "todo bien", "todo correcto", "está bien", "esta bien"
-            )):
+            respuestas_positivas = [
+                "si", "sí", "correcto", "correctos", "ok", "listo", "vale", "dale",
+                "todo bien", "todo correcto", "está bien", "esta bien", "todo está bien",
+                "estan correctos", "es correcto", "son correctos", "está todo bien", "bien", "perfecto"
+            ]
+
+            txt_norm = normalize(txt)
+            if any(txt_norm == p or p in txt_norm for p in respuestas_positivas):
                 est["confirmacion_pendiente"] = False
                 est["fase"] = "esperando_pago"
 
@@ -3686,35 +3649,61 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # 💳 MÉTODO DE PAGO – ELECCIÓN
     # ────────────────────────────────────────────────
     if est.get("fase") == "esperando_pago":
-        opciones = {
-            "transferencia": [
-                "transferencia", "trasferencia", "transf", "trans", "pago inmediato", "qr",
-                "nequi", "davivienda", "daviplata", "bancolombia", "pse"
-            ],
-            "contraentrega": [
-                "contraentrega", "contra entrega", "contra", "contrapago"
-            ],
-            "addi": [
-                "addi", "pagar con addi", "credito", "crédito", "financiacion", "financiación"
-            ],
-            "tarjeta": [
-                "tarjeta", "tarjeta de credito", "tarjeta de crédito", "pago con tarjeta", "visa", "mastercard"
-            ]
-        }
-        txt_normalizado = normalize(txt_raw)
-        metodo_detectado = None
-        for metodo, alias in opciones.items():
-            if difflib.get_close_matches(txt_normalizado, alias, n=1, cutoff=0.6):
-                metodo_detectado = metodo
-                break
 
+        # Palabras clave por método (prioridad alta → baja)
+        txt_norm = normalize(txt_raw)
+        metodo_detectado = None
+
+        # 🚫 Cliente se retracta o está confundido → volver a menú
+        if any(word in txt_norm for word in [
+            "no quiero", "cambiar", "otro metodo", "otra opcion"
+        ]):
+            await ctx.bot.send_message(
+                chat_id=cid,
+                text=(
+                    "😊 Tenemos *4 formas de pago* 💰\n\n"
+                    "1. 💵 *Pago anticipado* (Nequi, Daviplata, Bancolombia):\n"
+                    "   Pagas el valor completo antes del envío y tu compra queda asegurada 🚀.\n\n"
+                    "2. ✈️ *Pago contra entrega* (abono $30 000).\n\n"
+                    "3. 💳 *Tarjeta de crédito*.\n\n"
+                    "4. 💙 *Addi* (crédito a cuotas).\n\n"
+                    "🤩 ¿Cuál prefieres? Escribe *Pago anticipado*, *Contraentrega*, *Tarjeta* o *Addi*."
+                ),
+                parse_mode="Markdown"
+            )
+            return  # sigue en 'esperando_pago'
+
+        # 🔍 Detección directa sin difflib (todo en minúscula para que coincida con txt_norm)
+        if any(w in txt_norm for w in [
+            "nequi", "daviplata", "bancolombia", "transferencia",
+            "anticipado", "qr", "pse"
+        ]):
+            metodo_detectado = "transferencia"
+        elif any(w in txt_norm for w in [
+            "contraentrega", "contra entrega", "contrapago"
+        ]):
+            metodo_detectado = "contraentrega"
+        elif any(w in txt_norm for w in [
+            "tarjeta", "credito", "credito", "visa", "mastercard"
+        ]):
+            metodo_detectado = "tarjeta"
+        elif any(w in txt_norm for w in [
+            "addi", "financiacion", "financiacion", "cuotas"
+        ]):
+            metodo_detectado = "addi"
+
+        # ❌ No se detectó ningún método válido
         if not metodo_detectado:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="💳 Dime porfa cómo deseas pagar: *pago anticipado*, *transferencia*, *nequi*, *daviplata*, *bancolombia*, *tarjeta*, *contraentrega* o *Addi* 😊",
+                text=(
+                    "💳 No logré identificar tu método de pago.\n"
+                    "Escribe: *Pago anticipado*, *Contraentrega*, *Tarjeta* o *Addi* 😊"
+                ),
                 parse_mode="Markdown"
             )
             return
+
 
         resumen = est["resumen"]
         precio_original = est["precio_total"]
@@ -4318,7 +4307,6 @@ async def manejar_precio(update, ctx, inventario):
     txt = normalize(mensaje)
     logging.debug(f"[manejar_precio] Mensaje recibido: {mensaje}")
 
-    # ✅ PROTECCIÓN — Solo ejecutarse si no está en fases de video
     est = estado_usuario.get(cid, {})
     fase_actual = est.get("fase", "")
 
@@ -4330,7 +4318,6 @@ async def manejar_precio(update, ctx, inventario):
         logging.info(f"[manejar_precio] Ignorado: usuario en fase '{fase_actual}'")
         return False
 
-    # Detectar referencia de 3 o 4 dígitos
     m_ref = re.search(r"(?:referencia|modelo)?\s*(\d{3,4})", txt)
     if not m_ref:
         logging.debug("[manejar_precio] No se detectó referencia en el mensaje.")
@@ -4339,76 +4326,13 @@ async def manejar_precio(update, ctx, inventario):
     referencia = m_ref.group(1)
     logging.debug(f"[manejar_precio] Referencia detectada: {referencia}")
 
-    # Buscar productos que coincidan
     productos = [
         item for item in inventario
         if referencia in normalize(item.get("modelo", "")) and disponible(item)
     ]
     logging.debug(f"[manejar_precio] Productos encontrados con stock: {len(productos)}")
 
-    if productos:
-        from collections import defaultdict
-        agrupados = defaultdict(set)
-
-        for item in productos:
-            try:
-                precio_raw = str(item.get("precio", "0")).replace(".", "").replace("COP", "").strip()
-                precio_formateado = f"{int(precio_raw):,}COP"
-            except Exception as e:
-                logging.error(f"[manejar_precio] Error formateando precio: {e}")
-                precio_formateado = "No disponible"
-
-            try:
-                key = (
-                    item.get("modelo", "desconocido"),
-                    item.get("color", "varios colores"),
-                    precio_formateado
-                )
-                agrupados[key].add(str(item.get("talla", "")))
-            except Exception as e:
-                logging.error(f"[manejar_precio] Error agrupando tallas: {e}")
-        
-        respuesta_final = ""
-        primer_producto = productos[0]
-
-        for (modelo, color, precio), tallas in agrupados.items():
-            try:
-                if not isinstance(tallas, (set, list, tuple)):
-                    tallas = [str(tallas)]
-
-                tallas_ordenadas = sorted(tallas, key=lambda t: int(t) if t.isdigit() else t)
-                tallas_str = ", ".join(tallas_ordenadas)
-
-                respuesta_final += (
-                    f"👟 *{modelo}* ({color})\n"
-                    f"💲 Precio: *{precio}*\n"
-                    f"Tallas disponibles: {tallas_str}\n\n"
-                )
-            except Exception as e:
-                logging.error(f"[manejar_precio] Error formateando tallas: {e}")
-
-        # ✅ Guardar estado de forma segura
-        est["fase"] = "confirmar_compra"
-        est["modelo_confirmado"] = primer_producto["modelo"]
-        est["color_confirmado"] = primer_producto["color"]
-        est["marca"] = primer_producto.get("marca", "sin marca")
-        estado_usuario[cid] = est
-
-        logging.debug(f"[manejar_precio] Guardado modelo: {primer_producto['modelo']}, color: {primer_producto['color']}")
-
-        await ctx.bot.send_message(
-            chat_id=cid,
-            text=(
-                f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
-                f"{respuesta_final}"
-                "¿Seguimos con la compra?\n\n"
-            ),
-            parse_mode="Markdown"
-        )
-        return True
-
-    else:
-        logging.debug("[manejar_precio] No se encontraron productos con esa referencia.")
+    if not productos:
         await ctx.bot.send_message(
             chat_id=cid,
             text=(
@@ -4419,6 +4343,57 @@ async def manejar_precio(update, ctx, inventario):
             parse_mode="Markdown"
         )
         return True
+
+    from collections import defaultdict
+
+    agrupados_adulto = defaultdict(set)
+    agrupados_kids = defaultdict(set)
+
+    for item in productos:
+        modelo = item.get("modelo", "desconocido")
+        color = item.get("color", "varios colores")
+        precio = item.get("precio", 0)
+        precio_raw = str(precio).replace(".", "").replace("COP", "").strip()
+        precio_formateado = f"{int(precio_raw):,}COP"
+
+        grupo = agrupados_kids if "KIDS" in modelo.upper() else agrupados_adulto
+        grupo[precio_formateado].add(color.upper())
+
+    def formatear_respuesta(grupo, titulo):
+        if not grupo:
+            return ""
+
+        respuesta = f"👟 *{titulo}*\n"
+        for precio, colores in grupo.items():
+            colores_str = ", ".join(sorted(colores))
+            respuesta += (
+                f"🎨 *Colores:* {colores_str}\n"
+                f"💲 *Precio:* {precio}\n\n"
+            )
+        return respuesta
+
+    respuesta_final = ""
+    respuesta_final += formatear_respuesta(agrupados_adulto, f"Referencia {referencia} - Adulto")
+    respuesta_final += formatear_respuesta(agrupados_kids, f"Referencia {referencia} - KIDS")
+
+    primer_producto = productos[0]
+    est["fase"] = "confirmar_compra"
+    est["modelo_confirmado"] = primer_producto["modelo"]
+    est["color_confirmado"] = primer_producto["color"]
+    est["marca"] = primer_producto.get("marca", "sin marca")
+    estado_usuario[cid] = est
+
+    await ctx.bot.send_message(
+        chat_id=cid,
+        text=(
+            f"Veo que estás interesado en nuestra referencia *{referencia}*:\n\n"
+            f"{respuesta_final}"
+            "¿Seguimos con la compra?"
+        ),
+        parse_mode="Markdown"
+    )
+    return True
+
    
 # --------------------------------------------------------------------
 
@@ -4517,28 +4492,86 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         }
 
     est = estado_usuario[cid]
-    # 📍 Detección libre de nombre y ciudad aunque no esté en fase 'inicio'
+    memoria = cargar_memoria_usuario(cid)  # ← Esto resuelve el error
+    logging.info(f"📦 Ciudad recuperada de memoria: {memoria.get('ciudad')}")
+
+    # 📍 Detección libre de nombre y ciudad (solo si aún no están ambos guardados y ya se envió el welcome)
     try:
-        texto_limpio = texto.strip().lower()
+        if not (memoria.get("nombre") and memoria.get("ciudad")) and est.get("welcome_enviado"):
+            texto_limpio = texto.strip().lower()
 
-        match_dual = re.search(
-            r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30}?)(?:\s+y\s+\w+)?\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
-            texto_limpio
-        )
-        if match_dual:
-            nombre_detectado = match_dual.group(1).strip().title()
-            ciudad_detectada = match_dual.group(2).strip().title()
+            # 🧹 Evitar frases confusas como "y soy dePereira"
+            texto_limpio = texto_limpio.replace(" y soy ", " ")
+            texto_limpio = texto_limpio.replace("soy soy", "soy")
+            texto_limpio = texto_limpio.replace("me llamo soy", "me llamo")
 
-            if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
-                est["nombre"] = nombre_detectado
-                est["ciudad"] = ciudad_detectada
-                guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
-                guardar_memoria_usuario(cid, "ciudad", ciudad_detectada)
-                logging.info(f"🌎 Nombre/Ciudad detectados FUERA de fase: {nombre_detectado}, {ciudad_detectada}")
-            else:
-                logging.warning(f"❌ Ciudad detectada fuera de fase pero no válida: {ciudad_detectada}")
+            # 🔄 Detección combinada de nombre + ciudad
+            match_dual = re.search(
+                r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30})\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
+                texto_limpio
+            )
+
+            if match_dual:
+                nombre_detectado = match_dual.group(1).strip().title()
+                ciudad_detectada = match_dual.group(2).strip().title()
+
+                if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
+                    memoria["nombre"] = nombre_detectado
+                    memoria["ciudad"] = ciudad_detectada
+                    guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
+                    guardar_memoria_usuario(cid, "ciudad", ciudad_detectada)
+                    guardar_memoria_usuario(cid, "nombre", nombre_detectado)
+                    logging.info(f"🌎 Nombre/Ciudad detectados post-welcome: {nombre_detectado}, {ciudad_detectada}")
+
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text=(
+                            f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad_detectada} el 🚚 envío es completamente gratis, "
+                            "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
+                        )
+                    )
+                    return
+
+                else:
+                    logging.warning(f"❌ Ciudad detectada pero no válida: {ciudad_detectada}")
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text="😕 Detecté tu nombre, pero no pude identificar bien la ciudad. ¿Podrías escribirla de nuevo?"
+                    )
+                    return
+
+            # 👤 Si no detectó ciudad, intentar detectar solo el nombre
+            if not memoria.get("nombre"):
+                nombre_detectado = None
+
+                match_nombre = re.search(r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30})", texto_limpio)
+                if match_nombre:
+                    nombre_detectado = match_nombre.group(1).strip().title()
+                    logging.info(f"📛 Nombre detectado con regex: {nombre_detectado}")
+
+                if not nombre_detectado:
+                    nombre_detectado = detectar_nombre_ia_4mini(texto)
+                    logging.info(f"📛 Nombre detectado con IA (mini): {nombre_detectado}")
+
+                if nombre_detectado:
+                    memoria["nombre"] = nombre_detectado
+                    guardar_memoria_usuario(cid, "nombre", nombre_detectado)
+                    logging.info(f"✅ Nombre '{nombre_detectado}' guardado para {cid}")
+
+                    ciudad = memoria.get("ciudad", "tu ciudad")
+                    await ctx.bot.send_message(
+                        chat_id=cid,
+                        text=(
+                            f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad} el 🚚 envío es completamente gratis, "
+                            "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
+                        )
+                    )
+                    return
+
     except Exception as e:
-        logging.error(f"❌ Error en detección libre de nombre/ciudad: {e}")
+        logging.error(f"❌ Error en detección post-welcome de nombre/ciudad: {e}")
+
+
 
     # ─── FILTRO 1: mensaje vacío ───
     if not body or not body.strip():
@@ -4565,23 +4598,27 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
 
-        # FAQ 1: ¿Cuánto demora el envío?
+        # 📦 Pregunta sobre tiempo de entrega
         if any(p in texto for p in (
-                "cuanto demora", "cuanto tarda", "cuanto se demora",
-                "en cuanto llega", "me llega rapido", "llegan rapido",
-                "cuántos días", "cuanto se demoran", "días en llegar",
-                "si lo pido hoy", "si hago el pedido hoy", "si los pido hoy", "cuando me llegan"
+            "cuanto demora", "cuanto tarda", "cuanto se demora", "cuanto se tarda", "cuanto tarda en llegar",
+            "cuanto demora en llegar", "cuanto se demora en llegar", "cuanto se tarda en llegar",
+            "en cuanto llega", "en cuantos dias llega", "cuantos dias tarda", "cuantos dias demora",
+            "cuantos dias se demora", "cuantos dias se tarda", "cuantos dias se tarda en llegar",
+            "cuántos días", "dias en llegar", "cuanto llega",
+            "me llega rapido", "llegan rapido", "cuando me llega", "cuando me llegan",
+            "si lo pido hoy", "si hago el pedido hoy", "si los pido hoy"
         )):
             return {
                 "type": "text",
                 "text": (
                     "🚚 El tiempo de entrega depende de la ciudad de destino, "
-                    "pero generalmente tarda *2 hábiles* en llegar.\n\n"
+                    "pero generalmente tarda *2 días hábiles* en llegar.\n\n"
                     "Si lo necesitas para *mañana mismo*, podemos enviarlo al terminal de transporte. "
                     "En ese caso aplica *pago anticipado* (no contra entrega)."
                 ),
                 "parse_mode": "Markdown"
             }
+
 
 
         # FAQ 2: ¿Pago contra entrega?
@@ -4768,7 +4805,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
 
         # FAQ 11: ¿Las tallas son normales?
         if any(p in texto for p in (
-            "las tallas son normales", "horma normal", "talla normal",
+            "las tallas son normales", "horma", "talla normal",
             "horma grande", "horma pequeña", "tallas grandes", "tallas pequeñas",
             "las tallas son grandes", "las tallas son pequeñas", "como son las tallas"
         )):
@@ -4784,7 +4821,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         # FAQ 12: ¿Talla más grande?
         if any(p in texto for p in (
             "talla mas grande", "talla más grande", "cual es la talla mas grande",
-            "horma", "mayor talla", "talla maxima", "talla máxima"
+             "mayor talla", "talla maxima", "talla máxima"
         )):
             return {
                 "type": "text",
@@ -5143,7 +5180,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     # ──────────────────────────────
     # 🔁 CONTROL DE FLUJO INICIAL
     # ──────────────────────────────
-    ADMIN_CID = "573246666630"  # Tu número de prueba
+    ADMIN_CID = "573137842559"  # Tu número de prueba
     is_media_inicial = dummy_msg.photo or dummy_msg.voice or dummy_msg.audio
 
     # 1️⃣ COMANDO /start solo para admin (resetea todo)
@@ -5558,23 +5595,40 @@ async def venom_webhook(req: Request):
                         f.write(img_bytes)
 
                     texto_ocr = extraer_texto_comprobante(path_img)
+                    print("📄 Texto OCR extraído:", texto_ocr)
+                    logging.debug(f"📄 Texto OCR extraído: {texto_ocr}")
 
-                    # ✅ Cargar carpetas desde Drive antes de intentar OCR
+                    # ✅ Buscar modelo/color en carpetas Drive
                     carpetas_en_drive = listar_carpetas_drive()
                     respuesta_ocr = detectar_modelo_color(texto_ocr, carpetas_en_drive)
+                    print("🎯 Resultado detectar_modelo_color:", respuesta_ocr)
+                    logging.debug(f"🎯 Resultado detectar_modelo_color: {respuesta_ocr}")
 
                     if respuesta_ocr:
                         est.update({
                             "modelo": respuesta_ocr["modelo"],
                             "color": respuesta_ocr["color"],
                             "marca": respuesta_ocr["marca"],
-                            "fase": "imagen_detectada"
+                            "fase": "imagen_detectada"  # ✅ Corrección aquí
                         })
                         estado_usuario[cid] = est
 
                         os.remove(path_img)  # 🔥 Limpieza de imagen temporal
 
-                        return JSONResponse(respuesta_ocr)
+                        nombre_bonito = f"{respuesta_ocr['marca']} {respuesta_ocr['modelo']}"
+                        precio        = respuesta_ocr["precio"]
+                        color         = respuesta_ocr["color"]
+
+                        return {
+                            "type": "text",
+                            "text": (
+                                f"🟢 ¡Qué buena elección! Los *{nombre_bonito}* de color *{color}* están brutales 😎.\n"
+                                f"💲 Su precio es: {precio:,} COP, además el envío es totalmente gratis a todo el país 🚚.\n"
+                                f"🎁 Hoy tienes *5 % de descuento* si pagas ahora.\n\n"
+                                "¿Seguimos con la compra?"
+                            ),
+                            "parse_mode": "Markdown"
+                        }
 
                 except Exception as e:
                     logging.warning(f"[OCR] ⚠️ Fallo intento de detección por texto: {e}")
@@ -5638,7 +5692,7 @@ async def venom_webhook(req: Request):
                         )
                         precio_str = f"{int(precio):,} COP" if precio else "No disponible"
 
-                        return JSONResponse({
+                        return {
                             "type": "text",
                             "text": (
                                 f"🟢 ¡Qué buena elección! Los *{modelo}* de color *{color}* están brutales 😎.\n"
@@ -5647,23 +5701,23 @@ async def venom_webhook(req: Request):
                                 "¿Seguimos con la compra?"
                             ),
                             "parse_mode": "Markdown"
-                        })
+                        }
                     else:
                         reset_estado(cid)
-                        return JSONResponse({
+                        return {
                             "type": "text",
                             "text": (
                                 "❌ No logré identificar bien el modelo de la imagen.\n"
                                 "¿Podrías enviarme otra foto un poco más clara?"
                             )
-                        })
+                        }
 
                 except Exception:
                     logging.exception("[CLIP] Error en identificación:")
-                    return JSONResponse({
+                    return {
                         "type": "text",
                         "text": "⚠️ Ocurrió un error analizando la imagen."
-                    })
+                    }
 
         # 💬 TEXTO
         elif mtype == "chat":
