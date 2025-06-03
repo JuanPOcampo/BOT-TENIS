@@ -33,7 +33,7 @@ from openai import AsyncOpenAI
 import gspread
 from google.oauth2 import service_account     # ← alias de antes
 import openai
-
+from rapidfuzz import process
 # ——— Google Cloud & Drive ———
 from google.cloud import vision
 from google.oauth2.service_account import Credentials   # forma única
@@ -77,9 +77,14 @@ def normalizar(texto: str) -> str:
     texto = re.sub(r"[^\w\s]", "", texto)  # elimina signos de puntuación
     return texto.upper().strip()
 
-def detectar_nombre_ia_4mini(texto: str) -> str:
+import os
+from openai import AsyncOpenAI
+
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+async def detectar_nombre_ia_4mini(texto: str) -> str | None:
     """
-    Usa GPT-4.0 mini (económico) para detectar el nombre de la persona desde un mensaje.
+    Usa GPT-4o para detectar el nombre de la persona desde un mensaje.
     """
     prompt = f"""
 Solo responde con el nombre de la persona mencionado en este mensaje. No incluyas apellidos, ciudades ni palabras extras.
@@ -89,14 +94,13 @@ Nombre:
 """
 
     try:
-        respuesta = openai.ChatCompletion.create(
-            model="gpt-4-0613",  # Este se enruta como GPT-4 mini si tienes el plan configurado así
+        respuesta = await client.chat.completions.create(
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=10
         )
-        nombre = respuesta["choices"][0]["message"]["content"].strip()
-        return nombre
+        return respuesta.choices[0].message.content.strip()
 
     except Exception as e:
         print(f"❌ Error en detectar_nombre_ia_4mini: {e}")
@@ -119,6 +123,86 @@ def get_drive_service():
     )
  
     return build("drive", "v3", credentials=creds)
+
+# ─── Imports ───
+import os
+import json
+import base64
+import logging
+from rapidfuzz import process
+
+# ─── Alias para preguntas frecuentes (FAQ) ───
+FAQ_ALIAS = {
+        "redes": [
+        "redes sociales", "instagram", "facebook", "tiktok", "pagina web", "web",
+        "tienen instagram", "tienen facebook", "tienen tiktok",
+        "como los encuentro en redes", "sus redes", "siguen en redes"
+    ],
+    "caros": [
+        "por que tan caros", "porque tan caro", "porque tan costoso",
+        "es muy caro", "muy costoso"
+    ],
+    "cosidos": [
+        "son cosidos", "vienen cosidos", "estan cosidos", "cosido", "cosidps", "cosudas", "cosudo"
+    ],
+    "caucho": [
+        "caucho", "goma", "suela de caucho", "es de caucho", "la suela es de",
+        "la suela de qué es", "la suela de que es", "material de la suela"
+    ],
+    "tiempo_entrega": [
+        "cuanto demora", "cuanto tarda", "cuanto se demora", "cuando llega", "en cuantos dias",
+        "si lo pido hoy", "me llega rapido", "cuanto se tarda", "tarda en llegar"
+    ],
+    "contraentrega": [
+        "pago contra entrega", "pago contraentrega", "puedo pagar al recibir", "contra entrega",
+        "pagan al recibir", "tienen contra entrega"
+    ],
+    "garantia": [
+        "tienen garantia", "garantia", "garantía", "garantia de fabrica", "hay garantia"
+    ],
+    "ubicacion": [
+        "donde estan", "ubicacion", "tienda fisica", "en que ciudad", "direccion", "ubicados en donde"
+    ],
+    "nacionales": [
+        "son nacionales", "son importados", "es nacional o importado", "hecho en colombia",
+        "fabricacion colombiana", "son de aqui", "es de colombia"
+    ],
+    "originales": [
+        "son originales", "es original", "originales", "es copia", "son copia",
+        "son replica", "réplica", "imitacion"
+    ],
+    "calidad": [
+        "que calidad son", "de que calidad son", "son buena calidad", "son de buena calidad",
+        "son de mala calidad", "que calidad manejan", "que calidad tienen", "calidad de las zapatillas"
+    ],
+    "descuento_2pares": [
+        "si compro 2 pares", "dos pares descuento", "descuento por dos pares",
+        "descuento si compro dos", "hay descuento por dos", "promocion dos pares"
+    ],
+    "mayoristas": [
+        "precio mayorista", "precios para mayoristas", "mayorista", "quiero vender",
+        "puedo venderlos", "descuento para revender", "revender", "mayoreo", "venta al por mayor"
+    ],
+    "tallas_normales": [
+        "las tallas son normales", "horma", "talla normal", "horma grande", "horma pequeña",
+        "tallas grandes", "tallas pequeñas", "las tallas son grandes", "como son las tallas"
+    ],
+    "talla_grande": [
+        "talla mas grande", "talla más grande", "cual es la talla mas grande",
+        "mayor talla", "talla maxima", "talla máxima"
+    ]
+}
+def detectar_match_faq(texto_usuario: str, diccionario_faqs: dict, umbral: int = 90) -> str:
+    texto = texto_usuario.lower().strip()
+    print(f"🧪 Texto recibido para FAQ: '{texto}'")
+
+    for clave, alias_list in diccionario_faqs.items():
+        match = process.extractOne(texto, alias_list, score_cutoff=umbral)
+        if match:
+            print(f"📌 Coincidencia detectada: '{match[0]}' como FAQ → {clave}")
+            return clave
+
+    return None
 
 def registrar_o_actualizar_lead(data: dict) -> bool:
     import gspread
@@ -2546,15 +2630,26 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "yo no mando plata", "yo no pago por adelantado", "envio plata y me roban"
     ]
 
-    # 🟥 Desconfianza: envía videos + audio de confianza
+    # 🟥 Desconfianza: envía audio + videos de confianza
     if any(frase in texto_normalizado for frase in frases_desconfianza):
         carpeta_videos = "/var/data/videos"
         audio_path = "/var/data/audios/confianza/Desconfianza.mp3"
 
-        mensajes = [{
-            "type": "text",
-            "text": "🤝 Entendemos tu preocupación. Te compartimos estos videos para que veas que somos una tienda real y seria."
-        }]
+        mensajes = []
+
+        # 🎧 Primero: audio
+        if os.path.exists(audio_path):
+            try:
+                with open(audio_path, "rb") as f:
+                    mensajes.append({
+                        "type": "audio",
+                        "base64": base64.b64encode(f.read()).decode("utf-8"),
+                        "mimetype": "audio/mpeg",
+                        "filename": "Desconfianza.mp3",
+                        "text": "🎧 Escucha este audio breve también:"
+                    })
+            except Exception as e:
+                logging.warning(f"⚠️ No se pudo leer el audio de confianza: {e}")
 
         # ✅ Lista exacta de videos válidos
         videos_confianza = {
@@ -2562,6 +2657,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "WhatsApp Video 2025-05-28 at 4.26.50 PM.mp4"
         }
 
+        # 🎥 Luego: videos
         for archivo in sorted(os.listdir(carpeta_videos)):
             if archivo in videos_confianza:
                 ruta_video = os.path.join(carpeta_videos, archivo)
@@ -2572,20 +2668,10 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                             "base64": base64.b64encode(f.read()).decode("utf-8"),
                             "mimetype": "video/mp4",
                             "filename": archivo,
-                            "text": f"🎥 Mira este video de confianza:"
+                            "text": "🎥 Mira este video de confianza:"
                         })
                 except Exception as e:
                     logging.warning(f"⚠️ No se pudo leer el video {archivo}: {e}")
-
-        if os.path.exists(audio_path):
-            with open(audio_path, "rb") as f:
-                mensajes.append({
-                    "type": "audio",
-                    "base64": base64.b64encode(f.read()).decode("utf-8"),
-                    "mimetype": "audio/mpeg",
-                    "filename": "Desconfianza.mp3",
-                    "text": "🎧 Escucha este audio breve también:"
-                })
 
         await reanudar_fase_actual(cid, ctx, est)
         return {"type": "multi", "messages": mensajes}
@@ -2926,32 +3012,36 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         }
 
 
-    # 📷 Confirmación si la imagen detectada fue correcta
+    # 📷 Fase: imagen_detectada — cliente pide talla → responder directo con lengüeta
     if est.get("fase") == "imagen_detectada":
+        marca = est.get("marca", "DS").upper()
+        modelo = est.get("modelo", "").upper()
+        color_archivo = est.get("color", "").upper()
 
-        # 🆕 Pregunta directa por disponibilidad de talla
-        consulta_talla = re.search(
-            r"(?:tienen|tiene|hay|maneja(?:n)?)\s+talla\s+(\d{1,2})",
-            txt
-        )
-        if consulta_talla:
-            talla_pedida = consulta_talla.group(1)
+        # 🔍 Buscar talla directamente sin preguntar
+        match_talla = re.search(r"(?:tienen|tiene|hay|manejan|disponible)?\s*(?:talla)?\s+(\d{1,2})", texto_normalizado)
+        if match_talla:
+            talla = match_talla.group(1).strip()
+            est["talla"] = talla
             est["fase"] = "esperando_talla"
             estado_usuario[cid] = est
 
-            ruta = "/var/data/extra/lengueta_ejemplo.jpg"
-            if os.path.exists(ruta):
-                with open(ruta, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode("utf-8")
+            mensaje_inicial = (
+                f"✅ Perfecto, tomaremos *{marca} {modelo} {color_archivo}* en talla *{talla}*.\n"
+            )
 
+            ruta_ejemplo = "/var/data/extra/lengueta_ejemplo.jpg"
+            if os.path.exists(ruta_ejemplo):
+                with open(ruta_ejemplo, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
                 return {
                     "type": "multi",
                     "messages": [
                         {
                             "type": "text",
                             "text": (
-                                f"✅ ¡Claro que tenemos talla {talla_pedida}! "
-                                "📸 Para confirmar la medida exacta, mándame una foto de la *lengüeta* "
+                                mensaje_inicial +
+                                "📸 Para confirmar la talla exacta, mándame una foto de la *lengüeta* "
                                 "del zapato que usas normalmente 👟."
                             ),
                             "parse_mode": "Markdown"
@@ -2963,15 +3053,16 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         }
                     ]
                 }
-            else:
-                return {
-                    "type": "text",
-                    "text": (
-                        f"✅ ¡Claro que tenemos talla {talla_pedida}! "
-                        "📸 Para darte tu talla ideal, mándame una foto de la lengüeta de tu zapato 👟."
-                    ),
-                    "parse_mode": "Markdown"
-                }
+
+            return {
+                "type": "text",
+                "text": (
+                    mensaje_inicial +
+                    "📸 Envíame una foto de la lengüeta de tu zapato para confirmar la medida 👟."
+                ),
+                "parse_mode": "Markdown"
+            }
+
 
         # ✔️ Respuesta afirmativa para avanzar en la compra
         if any(frase in txt for frase in (
@@ -3490,7 +3581,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="Mandame tu correo pa que sigamos con la compra😊.",
+                text="Necesito que envies tu correo para podes seguir con la compra de tu producto😊.",
                 parse_mode="Markdown"
             )
         return
@@ -3508,7 +3599,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="Este no parece un telefono real manda el tuyo porfa.",
+                text="Necesito tu telefono primero para poder seguir con tu venta📱.",
                 parse_mode="Markdown"
             )
         return
@@ -3526,7 +3617,7 @@ async def responder(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await ctx.bot.send_message(
                 chat_id=cid,
-                text="⚠️ Tu cedula real para el pedido porfavor.",
+                text="🪪Necesito tu cedula para seguir con la compra mandala primero antes de cualquier otra duda.",
                 parse_mode="Markdown"
             )
         return
@@ -4492,65 +4583,65 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         }
 
     est = estado_usuario[cid]
-    memoria = cargar_memoria_usuario(cid)  # ← Esto resuelve el error
+    memoria = cargar_memoria_usuario(cid)
     logging.info(f"📦 Ciudad recuperada de memoria: {memoria.get('ciudad')}")
 
     # 📍 Detección libre de nombre y ciudad (solo si aún no están ambos guardados y ya se envió el welcome)
     try:
         if not (memoria.get("nombre") and memoria.get("ciudad")) and est.get("welcome_enviado"):
-            texto_limpio = texto.strip().lower()
+            logging.info(f"🧠 Analizando texto para nombre/ciudad: '{texto}'")
 
-            # 🧹 Evitar frases confusas como "y soy dePereira"
+            texto_limpio = texto.strip().lower()
             texto_limpio = texto_limpio.replace(" y soy ", " ")
             texto_limpio = texto_limpio.replace("soy soy", "soy")
             texto_limpio = texto_limpio.replace("me llamo soy", "me llamo")
 
-            # 🔄 Detección combinada de nombre + ciudad
             match_dual = re.search(
-                r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30})\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
+                r"(?:soy|me llamo)?\s*([a-záéíóúñ\s]{2,30})\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
                 texto_limpio
             )
 
             if match_dual:
                 nombre_detectado = match_dual.group(1).strip().title()
                 ciudad_detectada = match_dual.group(2).strip().title()
+                logging.info(f"🔎 Regex encontró: nombre={nombre_detectado}, ciudad={ciudad_detectada}")
 
-                if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
+                ciudad_match = next(
+                    (c for c in CIUDADES_DISPONIBLES if normalize(ciudad_detectada) == normalize(c)),
+                    None
+                )
+
+                if ciudad_match:
                     memoria["nombre"] = nombre_detectado
-                    memoria["ciudad"] = ciudad_detectada
-                    guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
-                    guardar_memoria_usuario(cid, "ciudad", ciudad_detectada)
+                    memoria["ciudad"] = ciudad_match
+                    guardar_memoria_ciudad_temporal(cid, ciudad_match)
+                    guardar_memoria_usuario(cid, "ciudad", ciudad_match)
                     guardar_memoria_usuario(cid, "nombre", nombre_detectado)
-                    logging.info(f"🌎 Nombre/Ciudad detectados post-welcome: {nombre_detectado}, {ciudad_detectada}")
+                    logging.info(f"🌎 Nombre/Ciudad detectados post-welcome: {nombre_detectado}, {ciudad_match}")
 
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text=(
-                            f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad_detectada} el 🚚 envío es completamente gratis, "
+                    return {
+                        "type": "text",
+                        "text": (
+                            f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad_match} el 🚚 envío es completamente gratis, "
                             "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
                         )
-                    )
-                    return
+                    }
 
                 else:
                     logging.warning(f"❌ Ciudad detectada pero no válida: {ciudad_detectada}")
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text="😕 Detecté tu nombre, pero no pude identificar bien la ciudad. ¿Podrías escribirla de nuevo?"
-                    )
-                    return
+                    return {
+                        "type": "text",
+                        "text": "😕 Detecté tu nombre, pero no pude identificar bien la ciudad. ¿Podrías escribirla de nuevo?"
+                    }
 
             # 👤 Si no detectó ciudad, intentar detectar solo el nombre
             if not memoria.get("nombre"):
-                nombre_detectado = None
-
                 match_nombre = re.search(r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30})", texto_limpio)
                 if match_nombre:
                     nombre_detectado = match_nombre.group(1).strip().title()
                     logging.info(f"📛 Nombre detectado con regex: {nombre_detectado}")
-
-                if not nombre_detectado:
-                    nombre_detectado = detectar_nombre_ia_4mini(texto)
+                else:
+                    nombre_detectado = await detectar_nombre_ia_4mini(texto)
                     logging.info(f"📛 Nombre detectado con IA (mini): {nombre_detectado}")
 
                 if nombre_detectado:
@@ -4559,14 +4650,13 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     logging.info(f"✅ Nombre '{nombre_detectado}' guardado para {cid}")
 
                     ciudad = memoria.get("ciudad", "tu ciudad")
-                    await ctx.bot.send_message(
-                        chat_id=cid,
-                        text=(
+                    return {
+                        "type": "text",
+                        "text": (
                             f"🤩 Genial, {nombre_detectado}, te cuento que para {ciudad} el 🚚 envío es completamente gratis, "
                             "te los 🚀 envío hoy y más o menos en 2 días hábiles te están llegando a la puerta de tu casa 🏡"
                         )
-                    )
-                    return
+                    }
 
     except Exception as e:
         logging.error(f"❌ Error en detección post-welcome de nombre/ciudad: {e}")
@@ -4594,20 +4684,12 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             b64 = base64.b64encode(f.read()).decode("utf-8")
         return f"data:{tipo};base64,{b64}"
 
-    # ─────────── Preguntas frecuentes (FAQ) ───────────
+     # ─────────── Preguntas frecuentes (FAQ por IA) ───────────
 
     if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
+        faq_detectada = detectar_match_faq(texto, FAQ_ALIAS)
 
-        # 📦 Pregunta sobre tiempo de entrega
-        if any(p in texto for p in (
-            "cuanto demora", "cuanto tarda", "cuanto se demora", "cuanto se tarda", "cuanto tarda en llegar",
-            "cuanto demora en llegar", "cuanto se demora en llegar", "cuanto se tarda en llegar",
-            "en cuanto llega", "en cuantos dias llega", "cuantos dias tarda", "cuantos dias demora",
-            "cuantos dias se demora", "cuantos dias se tarda", "cuantos dias se tarda en llegar",
-            "cuántos días", "dias en llegar", "cuanto llega",
-            "me llega rapido", "llegan rapido", "cuando me llega", "cuando me llegan",
-            "si lo pido hoy", "si hago el pedido hoy", "si los pido hoy"
-        )):
+        if faq_detectada == "tiempo_entrega":
             return {
                 "type": "text",
                 "text": (
@@ -4619,13 +4701,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
-
-
-        # FAQ 2: ¿Pago contra entrega?
-        if any(p in texto for p in (
-            "pago contra entrega", "pago contraentrega", "contraentrega", "contra entrega",
-            "pagan al recibir", "puedo pagar al recibir", "tienen contra entrega"
-        )):
+        elif faq_detectada == "contraentrega":
             try:
                 ruta_audio = "/var/data/audios/contraentrega/CONTRAENTREGA.mp3"
                 if not os.path.exists(ruta_audio):
@@ -4649,10 +4725,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                     "text": "⚠️ No pude enviar el audio en este momento."
                 }
 
-        # FAQ 3: ¿Tienen garantía?
-        if any(p in texto for p in (
-            "tienen garantia", "hay garantia", "garantia", "tienen garantia de fabrica"
-        )):
+        elif faq_detectada == "garantia":
             return {
                 "type": "text",
                 "text": (
@@ -4663,42 +4736,21 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
-        # FAQ 5: ¿Dónde están ubicados?
-        if any(p in texto for p in (
-            "donde estan ubicados", "donde estan", "ubicacion", "ubicación",
-            "direccion", "tienda fisica", "donde es la tienda",
-            "estan ubicados", "ubicados en donde", "en que ciudad estan", "en que parte estan"
-        )):
+        elif faq_detectada == "ubicacion":
+            mensajes = [{
+                "type": "text",
+                "text": (
+                    "📍 Estamos en *Bucaramanga, Santander*.\n\n"
+                    "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
+                    "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
+                    "🗺️ Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
+                ),
+                "parse_mode": "Markdown"
+            }]
 
-            def cargar_memoria_ciudad_temporal(cid):
-                ruta_tmp = "/tmp/memoria_ciudades_temp.json"
-                if os.path.exists(ruta_tmp):
-                    try:
-                        with open(ruta_tmp, "r", encoding="utf-8") as f:
-                            data = json.load(f)
-                        return data.get(cid)
-                    except Exception as e:
-                        logging.warning(f"⚠️ Error leyendo memoria temporal: {e}")
-                return None
-
-            mensajes = [
-                {
-                    "type": "text",
-                    "text": (
-                        "📍 Estamos en *Bucaramanga, Santander*.\n\n"
-                        "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
-                        "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
-                        "🗺️ Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
-                    ),
-                    "parse_mode": "Markdown"
-                }
-            ]
-
-            # ✅ Verificar ciudad en memoria
-            memoria_persistente = cargar_memoria_usuario(cid)
             ciudad_cliente = (
                 cargar_memoria_ciudad_temporal(cid) or
-                memoria_persistente.get("ciudad") or
+                cargar_memoria_usuario(cid).get("ciudad") or
                 est.get("ciudad")
             )
 
@@ -4727,14 +4779,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             }
 
 
-
-
-        # FAQ 6: ¿Son nacionales o importados?
-        if any(p in texto for p in (
-            "son nacionales", "son importados", "es nacional o importado",
-            "nacionales o importados", "hecho en colombia", "fabricados en colombia",
-            "son de aqui", "es de colombia", "fabricacion colombiana"
-        )):
+        elif faq_detectada == "nacionales":
             return {
                 "type": "text",
                 "text": (
@@ -4744,11 +4789,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
-        # FAQ 7: ¿Son originales?
-        if any(p in texto for p in (
-            "son originales", "es original", "originales",
-            "es copia", "son copia", "son replica", "réplica", "imitacion"
-        )):
+        elif faq_detectada == "originales":
             return {
                 "type": "text",
                 "text": (
@@ -4757,11 +4798,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
-        # FAQ 8: ¿De qué calidad son?
-        if any(p in texto for p in (
-            "que calidad son", "de que calidad son", "son buena calidad", "son de buena calidad",
-            "son de mala calidad", "que calidad manejan", "que calidad tienen", "calidad de las zapatillas"
-        )):
+        elif faq_detectada == "calidad":
             return {
                 "type": "text",
                 "text": (
@@ -4772,12 +4809,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
-        # FAQ 9: ¿Hay descuento por 2 pares?
-        if any(p in texto for p in (
-            "si compro 2 pares", "dos pares descuento", "descuento por 2 pares",
-            "descuento por dos pares", "me descuentan si compro dos", "descuento si compro dos",
-            "hay descuento por dos", "promocion dos pares", "descuento en 2 pares"
-        )):
+        elif faq_detectada == "descuento_2pares":
             return {
                 "type": "text",
                 "text": (
@@ -4787,12 +4819,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
-        # FAQ 10: ¿Precios para mayoristas?
-        if any(p in texto for p in (
-            "precio mayorista", "precios para mayoristas", "mayorista", "quiero vender",
-            "puedo venderlos", "descuento para revender", "revender", "comprar para vender",
-            "manejan precios para mayoristas", "mayoreo", "venta al por mayor"
-        )):
+        elif faq_detectada == "mayoristas":
             return {
                 "type": "text",
                 "text": (
@@ -4803,12 +4830,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
-        # FAQ 11: ¿Las tallas son normales?
-        if any(p in texto for p in (
-            "las tallas son normales", "horma", "talla normal",
-            "horma grande", "horma pequeña", "tallas grandes", "tallas pequeñas",
-            "las tallas son grandes", "las tallas son pequeñas", "como son las tallas"
-        )):
+        elif faq_detectada == "tallas_normales":
             return {
                 "type": "text",
                 "text": (
@@ -4818,11 +4840,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "parse_mode": "Markdown"
             }
 
-        # FAQ 12: ¿Talla más grande?
-        if any(p in texto for p in (
-            "talla mas grande", "talla más grande", "cual es la talla mas grande",
-             "mayor talla", "talla maxima", "talla máxima"
-        )):
+        elif faq_detectada == "talla_grande":
             return {
                 "type": "text",
                 "text": (
@@ -4833,110 +4851,189 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 ),
                 "parse_mode": "Markdown"
             }
+
     # 🔧 Normalizar texto antes de los FAQ
     texto_normalizado = normalizar(texto)
 
-    # FAQ: Redes sociales
-    if any(p in texto_normalizado for p in (
-        "REDES SOCIALES", "INSTAGRAM", "FACEBOOK", "TIKTOK", "PAGINA WEB",
-        "TIENEN INSTAGRAM", "TIENEN FACEBOOK", "TIENEN TIKTOK", "COMO LOS ENCUENTRO EN REDES",
-        "SUS REDES", "SIGUEN EN REDES", "WEB"
-    )):
-        return {
-            "type": "text",
-            "text": (
-                "📲 ¡Claro! Aquí están todas nuestras redes y página oficial:\n\n"
-                "👟 *Instagram:* [@x100_col](https://www.instagram.com/x100_col)\n"
-                "📘 *Facebook:* [@x100col](https://www.facebook.com/x100col)\n"
-                "🎵 *TikTok:* [@x100_col](https://www.tiktok.com/@x100_col?_t=ZS-8wiexPh9ah6&_r=1)\n"
-                "🌐 *Página web:* [x100-col.com](https://www.x100-col.com/tienda/)\n\n"
-                "Síguenos para conocer nuevos modelos, promociones exclusivas y más 🔥💯"
-            ),
-            "parse_mode": "Markdown"
-        }
+    if est.get("fase") not in ("esperando_pago", "esperando_comprobante"):
+        faq_detectada = detectar_match_faq(texto_normalizado, FAQ_ALIAS)
 
-    # FAQ: ¿Por qué tan caros?
-    if any(p in texto_normalizado for p in (
-        "POR QUE TAN CAROS", "PORQUE TAN CARO", "PORQUE TAN COSTOSO",
-        "ES MUY CARO", "MUY COSTOSO"
-    )):
-        try:
-            ruta_audio = "/var/data/audios/caros/CAROS.mp3"
-            if not os.path.exists(ruta_audio):
-                raise FileNotFoundError("❌ No se encontró el audio CAROS.mp3")
-
-            with open(ruta_audio, "rb") as f:
-                b64 = base64.b64encode(f.read()).decode("utf-8")
-
-            return {
-                "type": "audio",
-                "base64": b64,
-                "mimetype": "audio/mpeg",
-                "filename": "CAROS.mp3",
-                "text": "🎧 Aquí te explicamos por qué valen lo que valen:"
-            }
-
-        except Exception as e:
-            logging.error(f"❌ Error enviando audio CAROS: {e}")
+        if faq_detectada == "tiempo_entrega":
             return {
                 "type": "text",
-                "text": "⚠️ No pude enviar el audio en este momento."
+                "text": (
+                    "🚚 El tiempo de entrega depende de la ciudad de destino, "
+                    "pero generalmente tarda *2 días hábiles* en llegar.\n\n"
+                    "Si lo necesitas para *mañana mismo*, podemos enviarlo al terminal de transporte. "
+                    "En ese caso aplica *pago anticipado* (no contra entrega)."
+                ),
+                "parse_mode": "Markdown"
             }
 
-    # FAQ: ¿Son cosidos?
-    if any(p in texto_normalizado for p in (
-        "SON COSIDOS", "VIENEN COSIDOS", "ESTAN COSIDOS", "COSIDO", "COSIDOS"
-    )):
-        try:
-            ruta_audio = "/var/data/audios/cosidos/COSIDAS.mp3"
-            if not os.path.exists(ruta_audio):
-                raise FileNotFoundError("❌ No se encontró el audio COSIDAS.mp3")
+        elif faq_detectada == "contraentrega":
+            try:
+                ruta_audio = "/var/data/audios/contraentrega/CONTRAENTREGA.mp3"
+                if not os.path.exists(ruta_audio):
+                    raise FileNotFoundError("❌ No se encontró el audio CONTRAENTREGA.mp3")
 
-            with open(ruta_audio, "rb") as f:
-                b64 = base64.b64encode(f.read()).decode("utf-8")
+                with open(ruta_audio, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
 
-            return {
-                "type": "audio",
-                "base64": b64,
-                "mimetype": "audio/mpeg",
-                "filename": "COSIDAS.mp3",
-                "text": "🧵 Aquí tienes la explicación sobre si son cosidos:"
-            }
+                return {
+                    "type": "audio",
+                    "base64": b64,
+                    "mimetype": "audio/mpeg",
+                    "filename": "CONTRAENTREGA.mp3",
+                    "text": "🎧 Aquí tienes la explicación del pago contra entrega:"
+                }
 
-        except Exception as e:
-            logging.error(f"❌ Error enviando audio COSIDAS: {e}")
-            return {
-                "type": "text",
-                "text": "⚠️ No pude enviar el audio en este momento."
-            }
+            except Exception as e:
+                logging.error(f"❌ Error enviando audio CONTRAENTREGA: {e}")
+                return {
+                    "type": "text",
+                    "text": "⚠️ No pude enviar el audio en este momento."
+                }
 
-    # FAQ: ¿La suela es de caucho?
-    if any(p in texto_normalizado for p in (
-        "SUELA DE CAUCHO", "ES DE CAUCHO", "LA SUELA ES DE",
-        "LA SUELA DE QUE ES", "MATERIAL DE LA SUELA"
-    )):
-        try:
-            ruta_audio = "/var/data/audios/caucho/caucho.mp3"
-            if not os.path.exists(ruta_audio):
-                raise FileNotFoundError("❌ No se encontró el audio caucho.mp3")
-
-            with open(ruta_audio, "rb") as f:
-                b64 = base64.b64encode(f.read()).decode("utf-8")
-
-            return {
-                "type": "audio",
-                "base64": b64,
-                "mimetype": "audio/mpeg",
-                "filename": "caucho.mp3",
-                "text": "👟 Te explicamos de qué material es la suela:"
-            }
-
-        except Exception as e:
-            logging.error(f"❌ Error enviando audio CAUCHO: {e}")
+        elif faq_detectada == "garantia":
             return {
                 "type": "text",
-                "text": "⚠️ No pude enviar el audio en este momento."
+                "text": (
+                    "🛡️ Todos nuestros productos tienen *garantía de 60 días* "
+                    "por defectos de fábrica o problemas de pegado.\n\n"
+                    "Cualquier inconveniente, estamos para ayudarte."
+                ),
+                "parse_mode": "Markdown"
             }
+
+        elif faq_detectada == "ubicacion":
+            mensajes = [{
+                "type": "text",
+                "text": (
+                    "📍 Estamos en *Bucaramanga, Santander*.\n\n"
+                    "🏡 *Barrio San Miguel, Calle 52 #16-74*\n\n"
+                    "🚚 ¡Enviamos a todo Colombia con Servientrega!\n\n"
+                    "🗺️ Ubicación Google Maps: https://maps.google.com/?q=7.109500,-73.121597"
+                ),
+                "parse_mode": "Markdown"
+            }]
+
+            ciudad_cliente = (
+                cargar_memoria_ciudad_temporal(cid) or
+                cargar_memoria_usuario(cid).get("ciudad") or
+                est.get("ciudad")
+            )
+
+            if ciudad_cliente:
+                mensajes.append({
+                    "type": "text",
+                    "text": (
+                        f"📦 *Recuerda que el envío a {ciudad_cliente} es completamente gratis.* "
+                        "¿Quieres que te los enviemos ya mismo? Te llegarán en unos *2 días hábiles* 🤩"
+                    ),
+                    "parse_mode": "Markdown"
+                })
+            else:
+                mensajes.append({
+                    "type": "text",
+                    "text": (
+                        "🚚 *Recuerda que el envío a tu ciudad es totalmente gratis* "
+                        "y te llega en *2 días hábiles* a la puerta de tu casa. 📦✨"
+                    ),
+                    "parse_mode": "Markdown"
+                })
+
+            return {
+                "type": "multi",
+                "messages": mensajes
+            }
+
+        elif faq_detectada == "redes":
+            return {
+                "type": "text",
+                "text": (
+                    "📲 ¡Claro! Aquí están todas nuestras redes y página oficial:\n\n"
+                    "👟 *Instagram:* [@x100_col](https://www.instagram.com/x100_col)\n"
+                    "📘 *Facebook:* [@x100col](https://www.facebook.com/x100col)\n"
+                    "🎵 *TikTok:* [@x100_col](https://www.tiktok.com/@x100_col?_t=ZS-8wiexPh9ah6&_r=1)\n"
+                    "🌐 *Página web:* [x100-col.com](https://www.x100-col.com/tienda/)\n\n"
+                    "Síguenos para conocer nuevos modelos, promociones exclusivas y más 🔥💯"
+                ),
+                "parse_mode": "Markdown"
+            }
+
+        elif faq_detectada == "caros":
+            try:
+                ruta_audio = "/var/data/audios/caros/CAROS.mp3"
+                if not os.path.exists(ruta_audio):
+                    raise FileNotFoundError("❌ No se encontró el audio CAROS.mp3")
+
+                with open(ruta_audio, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                return {
+                    "type": "audio",
+                    "base64": b64,
+                    "mimetype": "audio/mpeg",
+                    "filename": "CAROS.mp3",
+                    "text": "🎧 Aquí te explicamos por qué valen lo que valen:"
+                }
+
+            except Exception as e:
+                logging.error(f"❌ Error enviando audio CAROS: {e}")
+                return {
+                    "type": "text",
+                    "text": "⚠️ No pude enviar el audio en este momento."
+                }
+
+        elif faq_detectada == "cosidos":
+            try:
+                ruta_audio = "/var/data/audios/cosidos/COSIDAS.mp3"
+                if not os.path.exists(ruta_audio):
+                    raise FileNotFoundError("❌ No se encontró el audio COSIDAS.mp3")
+
+                with open(ruta_audio, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                return {
+                    "type": "audio",
+                    "base64": b64,
+                    "mimetype": "audio/mpeg",
+                    "filename": "COSIDAS.mp3",
+                    "text": "🧵 Aquí tienes la explicación sobre si son cosidos:"
+                }
+
+            except Exception as e:
+                logging.error(f"❌ Error enviando audio COSIDAS: {e}")
+                return {
+                    "type": "text",
+                    "text": "⚠️ No pude enviar el audio en este momento."
+                }
+
+        elif faq_detectada == "caucho":
+            try:
+                ruta_audio = "/var/data/audios/caucho/caucho.mp3"
+                if not os.path.exists(ruta_audio):
+                    raise FileNotFoundError("❌ No se encontró el audio caucho.mp3")
+
+                with open(ruta_audio, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+
+                return {
+                    "type": "audio",
+                    "base64": b64,
+                    "mimetype": "audio/mpeg",
+                    "filename": "caucho.mp3",
+                    "text": "👟 Te explicamos de qué material es la suela:"
+                }
+
+            except Exception as e:
+                logging.error(f"❌ Error enviando audio CAUCHO: {e}")
+                return {
+                    "type": "text",
+                    "text": "⚠️ No pude enviar el audio en este momento."
+                }
+
+
 
     texto = texto.lower()
 
@@ -5009,29 +5106,50 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             ),
             "parse_mode": "Markdown"
         }
-
-    # 4️⃣ 💳 Métodos de pago
+    # 4️⃣ 💳 Métodos de pago (explicación detallada con nombre)
     if any(p in texto for p in (
         "método de pago", "metodos de pago", "formas de pago", "formas para pagar",
-        "como pago", "cómo puedo pagar", "qué medios de pago", "medios de pago", "aceptan nequi",
-        "pago por daviplata", "manejan bancolombia", "que pago manejan", "que pagos manejan"
+        "como pago", "cómo puedo pagar"
     )):
-        ruta_metodo = "/var/data/extra/metodosdepago.jpeg"
-        if os.path.exists(ruta_metodo):
-            with open(ruta_metodo, "rb") as f:
+        nombre = memoria.get("nombre", "cliente").strip().title()
+
+        return {
+            "type": "text",
+            "text": (
+                f"{nombre}, Estos son nuestros metodos de pago. 😊\n\n"
+                "Tenemos *4 formas de pago* 💰:\n\n"
+                "1.⁠ ⁠💵 *Pago anticipado* con el *5% de descuento*\n"
+                "2.⁠ ⁠✈️ *Pago contra entrega parcial*: haces un abono de $30.000 y el restante lo pagas "
+                "a la transportadora al recibir el calzado.\n"
+                "3.⁠ ⁠💳 *Tarjeta de crédito*\n"
+                "4.⁠ ⁠💙 *Crédito a cuotas* por medio de *Addi*\n\n"
+                "¿Por cuál medio deseas hacer el pago❓"
+            ),
+            "parse_mode": "Markdown"
+        }
+
+    # 4️⃣ 💳 Medios de pago (imagen)
+    if any(p in texto for p in (
+        "qué medios de pago", "medios de pago", "aceptan nequi",
+        "pago por daviplata", "manejan bancolombia", "que pago manejan", "que pagos manejan",
+        "puedo pagar con", "se puede pagar con", "nequi", "daviplata", "bancolombia", "contraentrega"
+    )):
+        ruta_medios = "/var/data/extra/metodosdepago.jpeg"
+        if os.path.exists(ruta_medios):
+            with open(ruta_medios, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
                 return {
                     "type": "multi",
                     "messages": [
                         {
                             "type": "text",
-                            "text": "💳 Estos son los *métodos de pago* que manejamos actualmente:",
+                            "text": "💳 Estos son los *medios de pago* que manejamos actualmente:",
                             "parse_mode": "Markdown"
                         },
                         {
                             "type": "photo",
                             "base64": f"data:image/jpeg;base64,{b64}",
-                            "text": "📷 Métodos de pago disponibles"
+                            "text": "📷 Medios de pago disponibles"
                         }
                     ]
                 }
@@ -5040,6 +5158,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
                 "type": "text",
                 "text": "💳 Aceptamos *Nequi, Daviplata, Bancolombia* y también *contraentrega*."
             }
+
 
 
     # Lista de palabras afirmativas comunes
@@ -5105,77 +5224,6 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
         message=dummy_msg,
         effective_chat=SimpleNamespace(id=cid)
     )
-
-    # 👤 Solo aceptar nombre/ciudad si se pidió explícitamente luego del welcome
-    if est.get("fase") == "inicio" and est.get("esperando_nombre"):
-
-        texto_limpio = texto.strip()
-        logging.info(f"🧠 Analizando texto para nombre/ciudad: '{texto_limpio}'")
-
-        # 1️⃣ Detectar frases como: "Hola soy Juan Pablo y soy de Pereira"
-        match_dual = re.search(
-            r"(?:soy|me llamo)\s+([a-záéíóúñ\s]{2,30}?)(?:\s+y\s+\w+)?\s+(?:de|desde)\s+([a-záéíóúñ\s]{3,30})",
-            texto_limpio.lower()
-        )
-        if match_dual:
-            nombre_detectado = match_dual.group(1).strip().title()
-            ciudad_detectada = match_dual.group(2).strip().title()
-            logging.info(f"✅ Detected nombre='{nombre_detectado}' ciudad='{ciudad_detectada}' [match_dual]")
-
-            est["nombre"] = nombre_detectado
-
-            if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
-                est["ciudad"] = ciudad_detectada
-                guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
-                guardar_memoria_usuario(cid, "ciudad", ciudad_detectada)
-                logging.info(f"📍 Ciudad validada con archivo y guardada: {ciudad_detectada}")
-            else:
-                logging.warning(f"❌ Ciudad '{ciudad_detectada}' no está en CIUDADES_DISPONIBLES")
-
-        # 2️⃣ Si no se detectó lo anterior, usar regex tradicionales
-        if "nombre" not in est:
-            match_nombre = re.search(r"(mi nombre es|me llamo|soy)\s+([a-zA-Záéíóúñ\s]+)", normalize(texto))
-            if match_nombre:
-                est["nombre"] = match_nombre.group(2).strip().title()
-                logging.info(f"✅ Nombre detectado por regex tradicional: {est['nombre']}")
-
-        if "ciudad" not in est:
-            match_ciudad = re.search(r"(de|desde|en|ubicado en|soy de|me ubico en|estoy en)\s+([a-zA-Záéíóúñ\s]+)", normalize(texto))
-            if match_ciudad:
-                ciudad_detectada = match_ciudad.group(2).strip().title()
-                if any(normalize(ciudad_detectada) == normalize(c) for c in CIUDADES_DISPONIBLES):
-                    est["ciudad"] = ciudad_detectada
-                    guardar_memoria_ciudad_temporal(cid, ciudad_detectada)
-                    guardar_memoria_usuario(cid, "ciudad", ciudad_detectada)
-                    logging.info(f"📍 Ciudad detectada por fallback y guardada: {ciudad_detectada}")
-                else:
-                    logging.warning(f"❌ Ciudad '{ciudad_detectada}' no está en CIUDADES_DISPONIBLES")
-
-        # 3️⃣ Si se detectó algo útil, enviar saludo
-        if "nombre" in est or "ciudad" in est:
-            est["esperando_nombre"] = False
-            estado_usuario[cid] = est
-
-            nombre = est.get("nombre", "amig@")
-            ciudad = est.get("ciudad")
-            ciudad_texto = f"Qué bueno que seas de {ciudad} 🏡\n" if ciudad else ""
-
-            logging.info(f"✅ ESTADO FINAL: nombre={nombre}, ciudad={ciudad}")
-
-            return {
-                "type": "text",
-                "text": (
-                    f"👋 Hola {nombre}! "
-                    f"{ciudad_texto}"
-                    "El envío es gratis 🚚. ¿Qué modelo te gustó o qué estás buscando?"
-                ),
-                "parse_mode": "Markdown"
-            }
-
-        # 4️⃣ Si no se detectó nada, seguir flujo normal
-        est["esperando_nombre"] = False
-        estado_usuario[cid] = est
-        logging.info("⚠️ No se detectó nombre ni ciudad en el mensaje.")
 
     # ──────────────────────────────
     # 🔁 CONTROL DE FLUJO INICIAL
