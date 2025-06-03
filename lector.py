@@ -5228,11 +5228,12 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
     # ──────────────────────────────
     # 🔁 CONTROL DE FLUJO INICIAL
     # ──────────────────────────────
-    ADMIN_CID = "573137842559"  # Tu número de prueba
+    ADMIN_CID = ["573137842559", "573246666630"]
+
     is_media_inicial = dummy_msg.photo or dummy_msg.voice or dummy_msg.audio
 
     # 1️⃣ COMANDO /start solo para admin (resetea todo)
-    if texto.strip() == "/start" and cid == ADMIN_CID:
+    if texto.strip() == "/start" and cid in ADMIN_CID:
         reset_estado(cid)
         estado_usuario[cid] = {
             "fase": "inicio",
@@ -5245,6 +5246,7 @@ async def procesar_wa(cid: str, body: str, msg_id: str = "") -> dict:
             "type": "text",
             "text": "🔄 Has reiniciado el flujo. El welcome se enviará en el próximo mensaje."
         }
+
 
     # 2️⃣ Imagen como primer mensaje (salta welcome pero saluda antes)
     if dummy_msg.photo and est.get("fase") == "inicio" and not est.get("welcome_enviado"):
